@@ -66,7 +66,7 @@ native-catalog architecture:
 
 | Concern | Current owner or authority | Boundary to preserve |
 | --- | --- | --- |
-| Home moOde playback | Sonuvi Server mediates MPD/moOde transport and queue state | Web and bearer-mobile callers use opaque queue handles; MPD paths and Track Keys stay server-side |
+| Home moOde playback | Sonuvi Server mediates MPD/moOde transport and queue state | Bearer-mobile callers use sanitized opaque queue handles; classic web/operator routes have separate legacy contracts |
 | Qobuz Connect | PiBuZ owns the remote receiver/session and queue; Sonuvi exposes a guarded normalized view | Controls require fresh confirmed ownership and read-after-write verification; release is the handoff before Home mutations |
 | UPnP | Sonuvi owns the logical queue/session while the selected renderer owns transport execution | Renderer MPD queues and signed resource URLs are implementation details; explicit takeover and revision/session-generation checks are required |
 | Native iPhone/iPad playback | The current app can play authorized server/local media on the device while using existing Server `MobileTrack` identities and mobile contracts | The device-owned canonical catalog, provider aggregation, and server-independent identity/sync model are approved target architecture, not current implementation |
@@ -75,6 +75,30 @@ native-catalog architecture:
 Authentication is also split by boundary: browser/admin and legacy integration
 routes commonly use Track Key, while `/v1/mobile/*` uses a scoped bearer
 session. These credentials are not interchangeable.
+
+## Transport and effect boundaries
+
+```text
+Web/admin or native client -> Sonuvi Server
+  -> MPD TCP / mpc network commands: Home queue and transport
+  -> moOde HTTP: normalized state / audioinfo.php and supported operations
+  -> SSH: bounded host administration, file/procfs reads and service actions
+  -> UPnP SOAP: renderer transport under Sonuvi session/queue guards
+  -> PiBuZ adapter: Qobuz receiver/remote-queue observation and guarded control
+```
+
+MPD queries in `src/services/mpd.service.mjs` open a TCP socket; not all moOde
+or MPD traffic traverses SSH. `execFile` preserves an argv boundary locally,
+but cannot prove every embedded remote shell string is sanitized. Inspect
+command owners rather than asserting a universal shell-safety guarantee.
+
+See [method-level auth](api-service-overview.md#method-level-boundaries-not-one-prefix-wide-policy),
+[authority transitions](playback-authority-by-mode.md#release-and-handoff-are-explicit-transitions),
+[Audio Info](diagnostics-interface.md#audio-info-entry-points-and-presentation),
+and [display persistence versus push](display-enhancement-peppy-player-flow.md#save-vs-push-distinction).
+Installed moOde reader/watchdog and related overrides are real integration
+artifacts; “no core fork” must not be read as “no host modifications.” The
+[operations runbooks](deployment-and-ops.md) retain their recovery provenance.
 
 ## The current structural shape
 
@@ -238,9 +262,6 @@ Use:
 - [deployment-and-ops.md](deployment-and-ops.md)
 - [local-environment.md](local-environment.md)
 
-## Timestamp
-
-Last updated: 2026-10-20 18:54 America/Chicago
 
 ## Relationship to other pages
 
@@ -265,3 +286,5 @@ The current wiki already supports stronger architectural claims about:
 - queue/playback separation
 - integration boundaries
 - runtime/host reality.
+
+*Last reviewed: 2026-10-28 America/Chicago*

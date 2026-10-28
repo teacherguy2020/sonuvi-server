@@ -24,12 +24,19 @@ This is a large part of the app’s control plane.
 
 ## Auth / protection model
 
-A major repeated pattern in this endpoint family is:
-- privileged operations require a track key
-- the track key is sent as:
-  - `x-track-key`
+Many administrative handlers require `x-track-key`, but authentication is
+**method-specific**, not guaranteed by the `/config` prefix.
+`GET /config/runtime` is an unguarded legacy browser bootstrap and returns
+configuration, including the full stored config. `POST /config/runtime` and
+`POST /config/runtime/check-env` require the Track Key. Treat bootstrap and
+configuration reads as part of the trusted deployment boundary, not as proof
+that secrets are safe behind universal route middleware.
 
-That means many of these routes are not just app convenience endpoints. They are maintenance and control endpoints guarded by a shared auth pattern.
+Native clients use the mobile bearer contracts and must not bootstrap by
+fetching this admin configuration. See the [method-level authentication map](api-service-overview.md#method-level-boundaries-not-one-prefix-wide-policy).
+The environment-check route is **`POST /config/runtime/check-env`**;
+`/config/runtime/check` is not an alias. This connectivity/path check is not a
+universal playback or audio-quality health verdict.
 
 ## Route family overview
 
@@ -232,3 +239,5 @@ Future deeper API work should clarify:
 At the moment, this page gives the wiki a real API-centered map of the config/runtime control plane.
 
 That is a big improvement over having these endpoints documented only piecemeal through surface pages.
+
+*Last reviewed: 2026-10-28 America/Chicago*

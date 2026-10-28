@@ -40,12 +40,26 @@ architecture without presenting that future as implemented.
 | Native-device Vibe preview | `POST /v1/mobile/vibe/preview` with canonical `trackId` | Reuses the dry-run Vibe engine and returns only exact-catalog canonical recommendations; does not mutate Home or external playback authority |
 | Audio diagnostics | `GET /v1/mobile/audio-info` | Safe `audio-info.v1` rows/provenance; configured output, decoded PCM, and measured ALSA hardware output are distinct |
 | Local bytes | `GET /v1/mobile/local-source/manifest` | Maps canonical IDs to relative local availability (`relativePath`/`contentPath` where present); stale/disconnected bytes are cache misses, not identity changes |
-| Native history | `POST /v1/mobile/playback/events` | Body requires canonical `trackId`, valid `sessionId`, and `state` in `start`, `playing`, `progress`, `pause`, `stop`, `ended`; progress fields are optional |
+| Native history | `POST /v1/mobile/playback/events` | Requires Server-resolvable `trackId` and valid `sessionId`; explicit supported `state` recommended (defaults to `progress`); optional `elapsedSec`, `durationSec`, `startedAtMs` |
 | Recent history | `GET /v1/mobile/history/recent` | Server-owned recent-history projection; native code does not scrobble directly |
 
 Native playback events are resolved by the Server and recorded with source
 `ios-device` and session identity `mobile:<sessionId>`. The Server decides
 qualification, deduplication, local history, and Last.fm submission.
+
+### Playback-event timestamp and qualification
+
+The input timestamp is **`startedAtMs`**, Unix epoch milliseconds, not
+`startedAt`. A finite positive timestamp is bounded to the preceding seven
+days through request time; omission/invalid value uses request time. The
+recorded native handoff and Server handler agree on this field. This verifies
+the published contract, not the currently shipped iOS serializer.
+
+Catalog, Server-resolved radio and podcast identities are supported; arbitrary
+client paths or UPnP selection references are not accepted as media identity.
+An accepted event is not automatically a qualified play. See the canonical
+[playback-event schema](../wiki-source/centralized-playback-history-and-scrobbling.md)
+for defaults, identity resolution, thresholds and deduplication.
 
 ### P0 Home controls and Queue Wizard seed
 
@@ -213,9 +227,11 @@ sessions, and logical queues.
 
 ## Playback-authority rules
 
-1. **Home moOde / Alexa:** Sonuvi's Server/MPD queue and moOde transport are
-   authoritative. Alexa is a request origin for Echo playback, not a second
-   Home queue. Before a Home mutation from Qobuz, release Qobuz first.
+1. **Home moOde / Alexa:** Home moOde and Alexa local/theater requests use
+   Server-mediated MPD queue/transport. Echo-targeted requests instead deliver
+   audio through Echo AudioPlayer with Server/skill coordination; request
+   origin, queue coordination and physical output are distinct. Before a
+   Home mutation from Qobuz, release Qobuz first.
 2. **Qobuz Connect:** PiBuZ owns the remote receiver/session and remote queue.
    `available` or `connected` is not enough; only fresh confirmed-active
    ownership permits guarded control. Qobuz playback is excluded from MPD
@@ -259,3 +275,5 @@ from `now-playing-ios/AGENTS.md`, `docs/architecture.md`, and
   Last.fm credentials or duplicate scrobbles.
 
 *Prepared: 2026-10-21 05:40 America/Chicago*
+
+*Contract clarification reviewed: 2026-10-28 America/Chicago*

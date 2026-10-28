@@ -119,27 +119,41 @@ The current wiki already makes several request-pattern facts clear:
   - `x-track-key`
 - header-based auth matters enough to be called out explicitly in the integration docs
 
-### Why this matters
-The API service should be understood as having two broad classes of routes:
-- routes that are mostly informational or routine
-- routes that are operationally sensitive and require track-key-backed authorization
+### Method-level boundaries, not one prefix-wide policy
 
-That security distinction is one of the key things future API pages should keep explicit.
+A route's sensitivity does not establish its enforcement. The current Server
+contains trusted-LAN legacy endpoints as well as explicitly authenticated APIs.
+UI feature gates, a private hostname, and possession of an opaque track ID are
+not substitutes for a route's actual authorization check.
+
+| Method / path | Implemented credential boundary | Intended caller / limitation |
+| --- | --- | --- |
+| `GET /config/runtime` | No `requireTrackKey` in this handler | Legacy browser bootstrap returns configuration; do not describe the whole `/config/*` prefix as authenticated |
+| `POST /config/runtime` and `POST /config/runtime/check-env` | Track Key | Web/operator configuration and environment checks |
+| `POST /config/diagnostics/playback` | Track Key plus source-ownership guards | Classic web/operator control |
+| `POST /rating`, selected `/podcasts/*` writes | No Track-Key check in those legacy handlers | Not evidence of a uniform protected-write boundary; review exact method before exposing it |
+| `POST /v1/mobile/now-playing/control`, `POST /v1/mobile/playback/events`, `GET /v1/mobile/audio-info` | Mobile bearer with `mobile-api` scope | Native operations; no client Track Key or raw MPD path |
+| `POST /v1/mobile/session` / `/session/refresh` | Enrollment code / refresh credential respectively | Bootstrap/renewal exceptions to ordinary bearer requests |
+| Pairing challenge / approval | Track Key for an authorized web display, or existing bearer for an authorized native display; approval also needs display token and verification code | Separate from the unpaired device's challenge/public-key proof and poll token |
+| Ticket-authorized media/radio GET | Short-lived scoped media/radio ticket | Player delivery request; ticket is not a catalog identity or general bearer session |
+
+See [runtime methods](api-config-and-runtime-endpoints.md),
+[the pairing protocol](mobile-carplay-phase1.md#local-device-pairing), and
+[identifier versus credential terms](glossary.md#identifiers-and-credentials).
+This is a source-level description, not a fresh verification of network exposure
+or a claim that every legacy endpoint has been hardened.
 
 ## Authentication domains and the Server/iOS boundary
 
-Current route families use more than one credential domain:
+Native callers use supported mobile bearer contracts; enrollment, renewal,
+pairing and media-ticket delivery have the specific boundaries above. The
+Server resolves opaque mobile IDs and owns target guards, history qualification
+and provider credentials. Native clients report intent and observations; they
+do not receive admin Track Keys, raw MPD paths or provider secrets.
 
-| Domain | Typical routes | Client boundary |
-| --- | --- | --- |
-| Track Key | `/config/*`, `/upnp/*`, browser/admin integration routes | Web/operator tooling; never sent by the native app |
-| Mobile bearer | `/v1/mobile/*` | Native iPhone/iPad/CarPlay contracts; tokens carry the `mobile-api` scope |
-| Short-lived media/radio tickets | `/v1/mobile/media/...`, `/v1/mobile/radio/stream/...` | Only the authorized player request; not a replacement for the bearer session |
-
-The Server resolves opaque mobile IDs and owns playback-target guards,
-history qualification, and provider credentials. Native clients report intent
-and playback observations; they do not receive raw paths, MPD identifiers,
-Track Keys, Qobuz credentials, or Last.fm credentials.
+Current Home control, deterministic repeat/Consume, native Vibe preview and
+queue paging are documented in the [October Server/iOS handoff](../ios/server-to-ios-contract-handoff-2026-10.md).
+Audio provenance and entry points are in [Audio Info](diagnostics-interface.md#audio-info-entry-points-and-presentation).
 
 ## Current route-family map
 
@@ -287,6 +301,4 @@ That matters because the project is not only:
 
 It is also an API-driven app-host service whose route families are one of the main ways the system actually works.
 
-## Timestamp
-
-Last updated: 2026-10-20 18:54 America/Chicago
+*Last reviewed: 2026-10-28 America/Chicago*

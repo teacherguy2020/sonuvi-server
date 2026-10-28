@@ -24,6 +24,30 @@ A better current interpretation is:
 
 So this page should act as the umbrella for media-library behavior rather than forcing the reader to infer that branch from scattered child pages.
 
+## Catalog, identity and byte ownership
+
+| Source / concern | Current identity and catalog owner | Byte access / playback boundary |
+| --- | --- | --- |
+| Server-indexed local music | Server mobile catalog resolves opaque track/album IDs from indexed metadata; MPD file identity remains internal to native contracts | Server may read mounted media and deliver authorized bytes; it is not merely a metadata facade |
+| Home MPD playback | MPD queue and transport, mediated by Server routes | Home output is not the native-device queue |
+| This iPhone/iPad | Device owns native queue/playback state; current shared media contracts use Server-resolved identities | Local file/cache availability or a Server media ticket supplies bytes, not a second identity namespace |
+| Radio / podcasts | Server station/episode resolvers provide supported opaque identities | Native observation can use these identities without submitting raw paths |
+| Server UPnP | Provider/device/object references and Sonuvi logical queue/session | Renderer executes transport; resource URL is not a durable queue identity |
+| Qobuz Connect | PiBuZ receiver/session and remote queue | Guarded Connect control is separate from UPnP MediaServer provider authentication |
+| Optional About/art enrichment | Provider matches against accepted track/album context | Enrichment/cache does not own playback, canonical catalog identity or history |
+
+`GET /v1/mobile/local-source/manifest` maps accepted track IDs to relative byte
+availability; stale/disconnected files are cache misses, not new tracks. A
+short-lived media ticket authorizes delivery and is not an identity. See
+[the native local-source contract](mobile-now-playing.md#local-audio-sourcecache)
+and [identifier vocabulary](glossary.md#identifiers-and-credentials).
+
+**Planned, not implemented by these Server routes:** a device-owned canonical
+catalog with provider aggregation, identity merging and server-independent
+synchronization/playback. Current native playback capability does not prove
+completion of that architecture. The [October handoff](../ios/server-to-ios-contract-handoff-2026-10.md#approved-future-boundary)
+records the boundary; native UPnP is distinct from Server-mediated UPnP.
+
 ## Relevant source files
 
 This page is branch-oriented rather than file-complete, but these areas are especially relevant when grounding media-library behavior:
@@ -122,6 +146,4 @@ At the moment, this page establishes Media Library as a real top-level branch in
 
 That matters because the underlying content already existed, but the branch identity was still weaker than the DeepWiki model.
 
-## Timestamp
-
-Last updated: 2026-04-06 06:24 America/Chicago
+*Last reviewed: 2026-10-28 America/Chicago*

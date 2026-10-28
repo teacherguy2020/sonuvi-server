@@ -210,6 +210,30 @@ Playing Track Key as their display authorization/CSRF-equivalent; an already-
 authenticated native device uses its existing bearer session instead. No
 cookie session is introduced.
 
+#### Pairing actors and credential flow
+
+The **authorized display** and **requesting unpaired device** are different
+roles. An already-paired iPhone/iPad may act as the authorized display using
+its existing bearer session; it does not need the web/admin Track Key.
+
+```text
+Authorized display                 Server                  New native device
+(web Track Key OR existing bearer)
+  create challenge ----------------->
+  <-------------------- QR payload
+  show QR ----------------------------------------------------> scan
+                                      <---- challenge + signed public-key proof
+  list requests + display token ---->
+  approve + display token + code --->
+                                      <---- completion poll + private poll token
+                                      ----> access/refresh credentials
+```
+
+The QR is not an access credential and contains neither Track Key nor bearer,
+display, or poll token. The new device cannot approve itself just by possessing
+the QR. Use the exact endpoint/credential table below rather than a diagram
+that labels the new app's first request “Admin Track Key.”
+
 #### Protocol
 
 1. An authorized web display (Track Key) or already-paired native display
@@ -373,13 +397,17 @@ POST /v1/mobile/playback/events
 Authorization: Bearer <session-token>
 Content-Type: application/json
 
-{"trackId":"trk_...","sessionId":"device-session","state":"progress","elapsedSec":78,"durationSec":214}
+{"trackId":"trk_...","sessionId":"device-session","state":"progress","elapsedSec":78,"durationSec":214,"startedAtMs":1793180000000}
 ```
 
-The server resolves the ID and feeds the existing listening-history store; the
-client cannot submit a server file path. Local bytes and remote bytes therefore
-share the same metadata, controls, queue identity, history, and future
-scrobble path.
+The Server resolves supported catalog/radio/podcast identity and feeds shared
+history; the client cannot substitute a filesystem path. `startedAtMs` is Unix
+epoch milliseconds; `startedAt` is not an alias. Omitted state defaults to
+`progress`, although explicit reporting is recommended. See the full
+[event schema and qualification rules](centralized-playback-history-and-scrobbling.md).
+Local and remote bytes do not create different identity namespaces; Server
+history/Last.fm ownership is implemented, not merely a future scrobble path.
+Device playback order remains device-owned, not the Home MPD queue.
 
 ### Native radio streaming
 
@@ -517,6 +545,4 @@ Siri/Alexa physical acceptance, and CarPlay vehicle validation remain separate
 follow-ups. The CarPlay Audio entitlement itself is
 approved and configured in the signed native target.
 
-## Timestamp
-
-Last updated: 2026-10-20 18:54 America/Chicago
+*Last reviewed: 2026-10-28 America/Chicago*

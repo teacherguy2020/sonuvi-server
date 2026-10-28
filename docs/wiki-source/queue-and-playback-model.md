@@ -173,7 +173,8 @@ After the action, now-playing/controller/display surfaces reflect the updated pl
 
 | Target or queue | Queue owner | Transport owner | Mutation boundary |
 | --- | --- | --- | --- |
-| Home moOde / Alexa | Sonuvi Server's MPD-backed queue | moOde/MPD, with Alexa as a request origin when Echo-targeted | Bearer mobile queue routes or the existing Track-Key web routes; Alexa is not a second Home queue |
+| Home moOde (including Alexa local/theater requests) | Server-mediated MPD queue | moOde/MPD | Supported Home contracts; Alexa is the request origin, not a second queue |
+| Echo-targeted Alexa | Server/skill queue coordination and remembered-track state | Echo AudioPlayer consumes the skill-provided stream | Do not equate the coordination queue with the physical audio output or apply local/theater display rules |
 | Qobuz Connect | PiBuZ remote queue | PiBuZ/Qobuz Connect receiver | Read through the versioned mobile snapshot; guarded controls use fresh ownership, current-track/queue CAS fields, and read-after-write verification |
 | UPnP | Sonuvi process-local logical queue | Selected UPnP renderer/session | Queue revision and renderer/session generation are required; renderer MPD queue and resource URLs are not client contracts |
 | This iPhone/iPad | Native device queue for current playback surfaces | Native player for authorized local/server media | Device queue actions stay device-local; Server history events and existing opaque `MobileTrack` identities remain shared contracts |
@@ -182,6 +183,23 @@ After the action, now-playing/controller/display surfaces reflect the updated pl
 This matrix separates queue ownership from playback authority. A controller
 can display a queue without owning the renderer, and an integration such as
 Alexa can originate a request without becoming the queue authority.
+
+### Transition and native-device boundaries
+
+A queue snapshot is not permission to take over its output. Follow the
+[release/handoff table](playback-authority-by-mode.md#release-and-handoff-are-explicit-transitions)
+before crossing MPD, Qobuz or Server UPnP ownership.
+For **This iPhone/iPad**, the device owns playback order/state; Server catalog
+IDs and authorized media bytes do not make the Home MPD queue authoritative.
+Native UPnP also differs from the Server's logical UPnP queue/session.
+The future device-owned canonical catalog is not implemented by these Server
+contracts; see [catalog and byte ownership](media-library.md#catalog-identity-and-byte-ownership).
+
+`GET /v1/mobile/history/recent` supplies a last-played seed for an empty display
+queue, not current now-playing truth or permission to overwrite an existing
+queue. Native Vibe preview returns recommendations without mutating Home;
+Queue Wizard jobs are for intentional Server queue work. See the
+[October native handoff](../ios/server-to-ios-contract-handoff-2026-10.md).
 
 ## Current known playback/queue route families
 
@@ -340,9 +358,6 @@ The next highest-value companion pages are:
 
 Those would turn this conceptual model into a much stronger engineering map.
 
-## Timestamp
-
-Last updated: 2026-10-20 18:54 America/Chicago
 
 ## Current status
 
@@ -354,3 +369,5 @@ At the moment, this page gives the wiki the foundational distinction it was miss
 - display/presentation overlap
 
 That is enough to make the rest of the Phase 2 work more coherent.
+
+*Last reviewed: 2026-10-28 America/Chicago*

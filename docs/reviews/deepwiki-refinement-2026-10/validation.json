@@ -1,0 +1,34 @@
+{
+  "canonical_source_files_modified": 19,
+  "generated_canonical_and_audit_pages_checked": 19,
+  "local_fragment_links_checked": 29,
+  "fragment_errors": [],
+  "site_generation_idempotent": true,
+  "accepted_artifacts_byte_identical": 152,
+  "retrieved_pages_preserved": 77,
+  "tracked_application_code_changes": [],
+  "documentation_tool_changes": [
+    "scripts/build_wiki_site.py"
+  ],
+  "git_diff_check": "pass",
+  "staged_changes": [],
+  "focused_tests": {
+    "passed": 113,
+    "failed": 0
+  },
+  "timestamp_probe": {
+    "passed": 5
+  },
+  "generator_projection_checks": {
+    "passed": 7
+  },
+  "ios_repository_accessed": false,
+  "shipped_native_payload_verified": false,
+  "preserved_worktree_status": {
+    "now-playing": "",
+    "now-playing-deepwiki-audit-2026-10": "?? docs/wiki-source/deepwiki-architecture-review-2026-10.md\n",
+    "now-playing-deepwiki-publication-2026-10": "",
+    "now-playing-deepwiki-reconcile-2026-10": "",
+    "now-playing-deepwiki-comparison-20261028": "?? audit-evidence/\n?? docs/wiki-source/deepwiki-comparison-2026-10.md\n?? docs/wiki-source/deepwiki-documentation-refinement-plan-2026-10.md\n"
+  }
+}

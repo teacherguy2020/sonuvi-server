@@ -1,0 +1,35 @@
+{
+  "page_count": 77,
+  "unique_urls": 77,
+  "body_byte_lengths_and_hashes": "pass",
+  "full_ledger_fields": "pass",
+  "all_source_anchor_patterns_resolved": "pass",
+  "same_repository_link_closure": "pass",
+  "report_links": "pass",
+  "tracked_changes": [],
+  "staged_changes": [],
+  "preserved_report_bytes": "unchanged",
+  "worktrees": {
+    "now-playing": {
+      "head": "4bf8889a767e167f50566ec4e193d4b625c2c1f2",
+      "status": ""
+    },
+    "now-playing-deepwiki-audit-2026-10": {
+      "head": "8c194c2f2ec2f90fe858b79529d8fbce3460f7b4",
+      "status": "?? docs/wiki-source/deepwiki-architecture-review-2026-10.md\n"
+    },
+    "now-playing-deepwiki-publication-2026-10": {
+      "head": "1b2ce6a3c6c501fe360a3e8be651ba04da13c050",
+      "status": ""
+    },
+    "now-playing-deepwiki-reconcile-2026-10": {
+      "head": "f5db417528d0c206fd32ccba890a6ad3f57abed9",
+      "status": ""
+    },
+    "now-playing-deepwiki-comparison-20261028": {
+      "head": "4bf8889a767e167f50566ec4e193d4b625c2c1f2",
+      "status": "?? audit-evidence/\n?? docs/wiki-source/deepwiki-comparison-2026-10.md\n?? docs/wiki-source/deepwiki-documentation-refinement-plan-2026-10.md\n"
+    }
+  },
+  "application_tests": "not run: static audit only"
+}

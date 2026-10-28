@@ -762,8 +762,10 @@ is not complete.
 
 ### 4.6 Existing bearer mobile routes
 
-All routes below require an enabled mobile API and a valid bearer mobile-api
-session.
+The mobile API must be enabled. Ordinary calls below require a valid bearer
+`mobile-api` session; the media-delivery GET instead validates the scoped
+short-lived media ticket issued by the bearer-authorized request. Pairing and
+enrollment have their own [credential boundaries](../wiki-source/mobile-carplay-phase1.md#local-device-pairing).
 
 | Method and path | Request | Current purpose |
 |---|---|---|
@@ -780,10 +782,13 @@ session.
 | GET /v1/mobile/media/:trackId | Query ticket | Serves media after mobile-media ticket validation |
 | GET /v1/mobile/audio-info | None | Sanitized Moode/audio rows and optional playback information |
 | GET /v1/mobile/local-source/manifest | None | Canonical-ID-to-relative-file availability |
-| POST /v1/mobile/playback/events | {trackId,sessionId,state,elapsedSec?,durationSec?,startedAtMs?} | Records native observation with source ios-device |
+| POST /v1/mobile/playback/events | {trackId,sessionId,state?,elapsedSec?,durationSec?,startedAtMs?} | Records native observation with source ios-device |
 | GET /v1/mobile/history/recent | None | Recent native-visible history seed |
 
-Playback events accept start, playing, progress, pause, stop, and ended. This
+Playback events accept start, playing, progress, pause, stop, and ended; omitted
+state defaults to progress. `startedAtMs` is Unix epoch milliseconds, not
+`startedAt`. Use the [canonical ingestion schema](../wiki-source/centralized-playback-history-and-scrobbling.md)
+for identity resolution, timestamp bounds and qualification. This
 is not an UPnP queue/session event contract and expects a canonical/mobile
 track identity, not a UPnP selection reference.
 
@@ -1276,3 +1281,5 @@ web routes or send direct UPnP traffic from the iOS app.
 No moOde/Pibuz configuration, Qobuz authentication, or native iOS source was
 modified. This handoff accompanies the Sonuvi-only bearer mobile UPnP bridge
 implementation and its regression tests.
+
+*Contract clarification reviewed: 2026-10-28 America/Chicago*

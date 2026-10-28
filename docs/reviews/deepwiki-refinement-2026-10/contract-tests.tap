@@ -1,0 +1,155 @@
+✔ Audio Info HTML parser preserves legacy moOde rows (2.428833ms)
+✔ ALSA probe parser reports measured hardware parameters independently of MPD (0.793917ms)
+✔ Audio format parser separates source resolution from container details (1.002708ms)
+✔ Audio format metadata parses container and reported bitrate without assigning bitrate to PCM (1.853292ms)
+✔ normal MPD diagnostics separate configured values from measured ALSA output (1.491834ms)
+✔ lossy source metadata keeps encoded bitrate separate from decoded PCM precision (1.808584ms)
+✔ lossy diagnostics remove encoded bitrate from the legacy decoded row (0.506ms)
+✔ Qobuz Audio Info separates reported formats, configured path, and measured output (0.919542ms)
+✔ Qobuz Audio Info does not claim hardware output when ALSA is closed (0.249459ms)
+✔ Audio Info route adds Qobuz diagnostics without changing its MPD fallback shape (16.745ms)
+✔ Audio Info route reuses the ALSA probe for normal MPD only when diagnostics are requested (0.735125ms)
+✔ Audio Info diagnostics route verifies M4A codec and corrects only its user-facing legacy row (0.502542ms)
+✔ Last.fm qualification uses the documented half-or-four-minute rule (0.792542ms)
+✔ non-MPD scrobbler submits one signed request without exposing credentials to clients (1.329459ms)
+✔ Last.fm failure is returned as state and does not throw (0.14525ms)
+✔ MPD is excluded by the caller contract and missing credentials never submit (0.067041ms)
+✔ local history records an eligible local play once and aggregates rows (18.664417ms)
+✔ local history excludes short/ineligible playback and survives reload (6.743042ms)
+✔ native playback sessions use the client session for shared history idempotency (3.74425ms)
+✔ native playback retains canonical track key and duration across sparse progress events (4.502375ms)
+✔ qualified non-MPD history invokes the asynchronous hook once and persists status updates (13.180625ms)
+✔ MPD history remains mpdscribble-authoritative and does not invoke non-MPD hooks (12.721459ms)
+✔ MPD shadow mode records centralized qualification without submitting Last.fm (15.899084ms)
+[mobile/push] token registered {
+  deviceIdPresent: true,
+  tokenLength: 64,
+  environment: 'development',
+  topic: 'com.brianwis.sonuvi',
+  apnsConfigured: true
+}
+[mobile/playback] start accepted {
+  state: 'start',
+  trackKind: 'catalog',
+  sessionIdPresent: true,
+  deviceIdPresent: true,
+  title: 'First',
+  filePresent: true
+}
+[mobile/playback] APNs bridge queued { trackKind: 'catalog', title: 'First', filePresent: true }
+✔ mobile session enrollment uses its own credential and issues a scoped token (4.202625ms)
+✔ mobile session refresh silently replaces an expired access token (0.33225ms)
+✔ mobile session refresh rejects expired refresh tokens and ordinary routes reject expired access tokens (0.257792ms)
+✔ mobile session refresh migrates a legacy expired access token once (0.326041ms)
+✔ mobile APNs registration is bearer-scoped and stores only the session device identity (1.012542ms)
+✔ mobile catalog returns opaque IDs and never returns the MPD file path (7.937666ms)
+✔ mobile catalog includes verified source audio properties when available (2.136791ms)
+✔ mobile album catalog exposes safe added timestamps from the existing library metadata (0.337917ms)
+✔ mobile media authorization binds the ticket to the requested track (0.510416ms)
+✔ mobile canonical track rating is bearer-scoped and never exposes the source file (0.50275ms)
+✔ mobile canonical track favorite is bearer-scoped and never exposes the source file (0.380792ms)
+✔ local-source manifest maps canonical track IDs without exposing absolute server paths (0.315625ms)
+✔ native playback events resolve the canonical track and feed shared history (0.36225ms)
+✔ native playback events reject unknown canonical IDs instead of creating local identities (0.133625ms)
+[mobile/playback] start accepted {
+  state: 'start',
+  trackKind: 'podcast',
+  sessionIdPresent: true,
+  deviceIdPresent: true,
+  title: 'Episode One',
+  filePresent: true
+}
+[mobile/playback] APNs bridge queued { trackKind: 'podcast', title: 'Episode One', filePresent: true }
+✔ native playback start invokes the APNs bridge with the canonical track (3.615084ms)
+[mobile/playback] start accepted {
+  state: 'start',
+  trackKind: 'radio',
+  sessionIdPresent: true,
+  deviceIdPresent: true,
+  title: 'Example Radio',
+  filePresent: true
+}
+[mobile/playback] APNs bridge skipped { reason: 'stream_track', trackKind: 'radio', title: 'Example Radio' }
+✔ native podcast playback resolves its opaque episode ID for the APNs bridge (1.033208ms)
+✔ native radio playback defers APNs until enriched metadata is available (1.0085ms)
+✔ mobile radio stream authorization keeps the station URL behind a scoped ticket (0.331ms)
+✔ mobile radio station artwork uses the catalog logo name behind an opaque URL (0.21575ms)
+✔ mobile direct radio metadata returns enriched art and a safe Apple Music link (0.291375ms)
+✔ mobile direct radio metadata reuses canonical About when enrichment is partial (0.266625ms)
+✔ mobile animated-art lookup reuses the server cache without exposing admin paths (0.321417ms)
+✔ mobile playlists require a bearer session and preserve opaque ordered entries (0.709667ms)
+✔ mobile home discovery rows require a bearer session, not a Track Key (0.065125ms)
+✔ mobile home exposes local recent history without displaying its shelf (0.625459ms)
+✔ mobile home shelf settings save ordered row sources through the bearer boundary (0.179292ms)
+✔ mobile now-playing returns safe metadata and proxies raw artwork behind bearer auth (0.805458ms)
+✔ mobile now-playing keeps managed UPnP as a track source and exposes animated-art context (0.237709ms)
+✔ mobile now-playing reports MPD repeat, single, random, and consume state (0.298208ms)
+✔ mobile now-playing follows the fresh Alexa current-track authority (0.378542ms)
+✔ mobile audio info requires bearer auth and strips internal source metadata (0.762916ms)
+✔ mobile now-playing replaces a generic radio fallback with the resolved queue station (0.422042ms)
+✔ mobile now-playing prefers canonical matched radio artwork over the queue station logo (2.0375ms)
+✔ mobile now-playing preserves an aliased station when iTunes payload has no station name (0.445042ms)
+✔ mobile now-playing exposes only safe Apple Music radio matches (0.370709ms)
+✔ mobile playlist detail rejects an unknown opaque ID after bearer authentication (0.116334ms)
+✔ mobile now-playing uses canonical metadata for controls and mutations (0.740583ms)
+✔ mobile now-playing controls are disabled no-ops for streams (0.22425ms)
+✔ mobile now-playing controls are disabled for an unsupported local item (0.136417ms)
+✔ mobile podcast playback falls back to the subscription MPD prefix (0.216833ms)
+✔ Home mobile controls require bearer auth and use the typed diagnostics bridge (4.405459ms)
+✔ Home mobile Consume preserves the legacy toggle and supports typed authoritative state (0.524709ms)
+✔ Home mobile seek bounds and Qobuz ownership fail closed without releasing Qobuz (0.430958ms)
+✔ Home mobile repeat mode validates exact modes and preserves authoritative readback (1.733083ms)
+✔ Home mobile UPnP ownership blocks repeat mutations without exposing internal details (0.549875ms)
+✔ mobile Vibe resolves an explicit canonical trackId and preserves Queue Wizard seed options (7.49725ms)
+✔ native Vibe preview is bearer-only, canonical, and non-mutating (0.769209ms)
+✔ native Vibe preview fails safely for unresolved candidates and timeouts (7.209792ms)
+✔ the pre-existing current-track mobile Vibe adapter remains compatible (0.619625ms)
+✔ mobile queue actions expose physical shuffle undo through the existing guarded path (1.355042ms)
+✔ pairing challenge is admin-protected and QR payload contains no long-lived secret (20.614417ms)
+✔ an authenticated native device can host the same pairing flow without a Track Key header (10.222917ms)
+✔ device proof, display approval, and app completion keep tokens on their intended side (8.945333ms)
+✔ first approval wins and later requests cannot complete (7.603958ms)
+✔ display approval requires the existing admin credential and display token (7.099833ms)
+✔ reject and cancel invalidate app completion, while manual enrollment remains available (13.318209ms)
+✔ pairing store expires challenges and rejects replay/use-after-approval (0.294083ms)
+✔ Qobuz release controller uses only the fixed moOde disconnect operation (1.368084ms)
+✔ Qobuz release controller coalesces concurrent requests (0.228333ms)
+✔ Qobuz release controller recognizes explicit PiBuZ process-stop confirmation (0.086709ms)
+✔ Qobuz release controller accepts explicit proof from an ambiguous SSH exit (0.097083ms)
+✔ Qobuz release controller does not confirm until the restarted receiver is ready (0.258458ms)
+✔ Home queue badge requires verified 24-bit audio at 48 kHz or higher (5.295958ms)
+✔ normalizes verified source-file audio properties and omits unavailable values (1.706ms)
+✔ normalizes codec-aware source semantics without treating lossy decoder precision as source depth (0.386917ms)
+✔ probes a source file once and reuses the stat-keyed cache (180.478583ms)
+✔ source probe fails closed for inaccessible files and ffprobe failures (1.559416ms)
+✔ DIDL metadata is generated from the trusted normalized item (0.59725ms)
+✔ single-track session selects without mutation and gates every transport command (4.971667ms)
+✔ startup confirms the expected renderer URI before sending Play (0.698167ms)
+✔ startup polls through delayed URI and transport readiness (0.413833ms)
+✔ startup readiness timeout falls back to the existing Play flow (0.43ms)
+✔ incomplete transport probes do not block playback after the URI is confirmed (0.310792ms)
+✔ ambiguous Play response does not issue a duplicate command when the renderer is active (0.343083ms)
+✔ ambiguous Play response is not retried when the renderer reports STOPPED (0.672459ms)
+✔ startup timing diagnostics record first transport change and position without media URLs (0.3125ms)
+✔ late startup observations from an old session are ignored (0.380583ms)
+✔ next-track preparation is confirmed and committed without a second load/play sequence (1.001209ms)
+✔ approved renderer inspection enforces the configured renderer host (0.086ms)
+✔ natural renderer stop preserves the last active position for completion detection (0.227167ms)
+✔ selection rejects active MPD or Qobuz ownership before any transport action (0.134125ms)
+✔ selection rejects an active renderer and load rejects a changed MPD queue (0.209459ms)
+✔ unexpected renderer URI loses ownership and stale session commands fail closed (0.176875ms)
+✔ explicit takeover stops active MPD before establishing a Sonuvi session (0.328417ms)
+✔ explicit takeover also releases paused MPD without manual user stop (0.168417ms)
+✔ explicit takeover from idle MPD does not issue an unnecessary MPD stop (0.185458ms)
+✔ explicit takeover can release an active approved renderer but never Qobuz Connect (0.23125ms)
+✔ takeover reports a typed stop failure without starting Sonuvi playback (0.179583ms)
+✔ takeover requires explicit confirmation and reports a typed start failure after release (0.2235ms)
+✔ takeover start-failure cleanup does not stop a new renderer owner (0.283584ms)
+ℹ tests 113
+ℹ suites 0
+ℹ pass 113
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 253.02225

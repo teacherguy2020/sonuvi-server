@@ -1,0 +1,54 @@
+{
+  "old": "dee06724c3549b9ab87fc70412ce1043572befab",
+  "new": "4bf8889a767e167f50566ec4e193d4b625c2c1f2",
+  "files": {
+    "controller-tablet.html": {
+      "old_blob": "9846a15cb2b4d29b51e2c7c18662ff9fe15e90088de31e6aaa4d07cba78eb29d",
+      "new_blob": "ac13868ab749837327ad04c57deb6775d18a5cc5ee214806287481745e88db2d",
+      "identical": false
+    },
+    "src/lib/audio-info.mjs": {
+      "old_blob": "40c2805a4e33e794b0a4e8a9be3a90e0d958da725075ffaa647e952c7674146b",
+      "new_blob": "40c2805a4e33e794b0a4e8a9be3a90e0d958da725075ffaa647e952c7674146b",
+      "identical": true
+    },
+    "src/lib/source-audio.mjs": {
+      "old_blob": "d1115a50e415fed749f110d5e3387f1f15f03253aa4376fda4fb7fe5771ad1ca",
+      "new_blob": "d1115a50e415fed749f110d5e3387f1f15f03253aa4376fda4fb7fe5771ad1ca",
+      "identical": true
+    },
+    "src/routes/config.moode-audio-info.routes.mjs": {
+      "old_blob": "232c60a0c2dcd593b0d3b83816a594aacdfee6fe38045e4643ff2cf94263d679",
+      "new_blob": "232c60a0c2dcd593b0d3b83816a594aacdfee6fe38045e4643ff2cf94263d679",
+      "identical": true
+    },
+    "scripts/source-audio.js": {
+      "old_blob": "dbf74f97e81db452c6162d74729a7e2e42a233b9bca026384671e7ae5f2cb76e",
+      "new_blob": "dbf74f97e81db452c6162d74729a7e2e42a233b9bca026384671e7ae5f2cb76e",
+      "identical": true
+    },
+    "src/routes/mobile.routes.mjs": {
+      "old_blob": "7409b814646b56f24dbcae4a524948a7e6afe754ff4920d2a504f9b002d9d86a",
+      "new_blob": "d50771ca33959a2cdc268e97d35cf12915300db8d5320297e3f900d2fc5a22e4",
+      "identical": false
+    }
+  },
+  "new_audio_html_files": [],
+  "handler_comparisons": {
+    "web_audio_handler": {
+      "identical": true,
+      "old_sha256": "2944b6812477549d82ad09cb59248e52bcf400c57bbbe91977e826801dba806d",
+      "new_sha256": "2944b6812477549d82ad09cb59248e52bcf400c57bbbe91977e826801dba806d"
+    },
+    "mobile_audio_handler": {
+      "identical": true,
+      "old_sha256": "9b5b0a508b142ec0e159e13ae522f8502b9e586a9680b08984f56406d6d065c7",
+      "new_sha256": "9b5b0a508b142ec0e159e13ae522f8502b9e586a9680b08984f56406d6d065c7"
+    }
+  },
+  "native_presentation": {
+    "source": "Brian clarification in current conversation, 2026-10-28",
+    "confirmed": "Dedicated screen change is in Sonuvi iOS",
+    "ios_repository_accessed": false
+  }
+}

@@ -11,6 +11,58 @@ This page is intentionally implementation-aware, because `diagnostics.html` is c
 - viewing live embedded UI surfaces side-by-side
 - navigating operational/debug workflows through a browser UI
 
+## Audio Info entry points and presentation
+
+Audio Info is one capability with **different client presentations**, not one
+universal drawer:
+
+- **Sonuvi iOS:** open Audio Info from the native Audio Info entry associated
+  with Home audio details. The current product presentation is a dedicated
+  screen/page, replacing the earlier native modal/drawer (confirmed by Brian
+  on 2026-10-28). Navigate to that screen; do not restore drawer instructions.
+  Exact native navigation implementation lives in the separate iOS repository
+  and was not inspected for this Server documentation refinement.
+- **Server tablet web controller:** `controller-tablet.html` still has an
+  **Audio info** action (`tabletAudioInfoBtn`) opening `audioInfoModal`.
+  That web modal exists in both indexed Server revisions, `dee06724` and
+  `4bf8889a`; it must not be mistaken for the replaced native drawer.
+- **Operator diagnostics:** use the authenticated API/request console for the
+  endpoint below. Diagnostics is an inspection surface, not a replacement
+  native Audio Info screen. There is no dedicated Server `audio-info.html`
+  page in the reviewed main revision.
+
+The native screen provides a separate navigation destination rather than a
+transient overlay; that presentation change does not create a new playback
+owner or change which measurements the Server can establish.
+
+| Caller | Data endpoint | Boundary |
+| --- | --- | --- |
+| Web tablet/operator | `GET /config/moode/audio-info?view=rows&diagnostics=1` | Track-Key-protected reader; legacy rows plus optional diagnostics |
+| Native iOS Audio Info screen | `GET /v1/mobile/audio-info` | Bearer adapter invokes the protected reader internally and returns sanitized rows/audio/diagnostics |
+| Server → moOde | `audioinfo.php` plus bounded read-only ALSA procfs probe; local source probe when available | Internal implementation, not URLs or credentials for a native client |
+
+The mobile adapter strips/reduces source-path rows, forwards safe evidence
+roles and timestamps, and sanitizes the versioned diagnostics object. See
+[the native DTO](mobile-now-playing.md#native-home-summary-shelf).
+Native UI navigation is not an API route migration.
+
+### What Audio Info can establish
+
+| Evidence role | Interpretation |
+| --- | --- |
+| Source format / `sourceFile` | Encoded media identity/codec/rate/bitrate; locally probed or provider-reported provenance matters |
+| Decoded PCM / `decodedAudio` | Decoder-reported sample representation; calculated PCM throughput is not encoded bitrate |
+| Configured output | Intended moOde/MPD chain, not a measured Qobuz path |
+| Measured hardware output | Current ALSA endpoint parameters when exposed; not proof of every upstream conversion |
+| Processing / volume | Configured/reported behavior with explicit provenance, not assumed hardware measurement |
+| Freshness / conversion | Capture and hardware timestamps bound observation age; intermediate conversion remains unknown |
+
+These distinctions remain essential on the dedicated screen. ALSA format
+agreement alone does **not** establish end-to-end bit-perfect playback. The
+full [Audio Info diagnostics contract](#audio-info-diagnostics-contract) below
+is the source of truth; preserve unavailable/unknown states rather than
+filling them with configured values.
+
 ## Why this page matters
 
 `diagnostics.html` appears to be one of the strongest operator-facing truth surfaces in the project.
@@ -341,4 +393,4 @@ while Qobuz owns playback; the server route also rejects those MPD commands
 with a source-aware unavailable response. No Qobuz remote-control API is
 implied by the metadata integration.
 
-*Last reviewed: 2026-10-20 18:54 America/Chicago*
+*Last reviewed: 2026-10-28 America/Chicago*

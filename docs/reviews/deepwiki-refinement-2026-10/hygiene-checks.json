@@ -1,0 +1,38 @@
+{
+  "staged_file_count": 82,
+  "credential_patterns_checked": [
+    "private_key",
+    "github_token",
+    "aws_key",
+    "credential_url",
+    "literal_bearer"
+  ],
+  "credential_pattern_findings": [],
+  "absolute_filesystem_link_findings": [],
+  "installation_path_files": [
+    "audit-evidence/indexed-delta.patch",
+    "audit-evidence/reconciliation.patch",
+    "docs/ios/upnp-qobuz-integration-handoff.md",
+    "docs/reviews/deepwiki-refinement-2026-10/final-verification.py",
+    "docs/reviews/deepwiki-refinement-2026-10/generation-final.txt",
+    "docs/reviews/deepwiki-refinement-2026-10/generation-initial.txt",
+    "docs/reviews/deepwiki-refinement-2026-10/preservation.json",
+    "docs/reviews/deepwiki-refinement-2026-10/review.md",
+    "docs/wiki-site/deepwiki-comparison-2026-10.html",
+    "docs/wiki-site/mobile-now-playing.html",
+    "docs/wiki-source/deepwiki-comparison-2026-10.md",
+    "docs/wiki-source/mobile-now-playing.md",
+    "scripts/publish_github_wiki.py"
+  ],
+  "installation_path_assessment": "Existing handoff/native examples, unchanged historical evidence and review/archive provenance; publisher redaction independently tested. No new filesystem-dependent application behavior.",
+  "unfiltered_diff_check": "Historical patch-context whitespace only",
+  "historical_patch_exceptions": [
+    "audit-evidence/indexed-delta.patch",
+    "audit-evidence/reconciliation.patch"
+  ],
+  "all_other_staged_whitespace_checks": "pass",
+  "accepted_artifacts_hash_verified": 152,
+  "application_source_changed": false,
+  "ios_repository_accessed": false,
+  "scan_scope": "Literal credential patterns, filesystem links and reviewed installation paths; not a guarantee against every possible secret representation."
+}

@@ -32,6 +32,52 @@ This page is not meant to replace deeper branch pages. It is meant to stabilize 
 - **art caching system** — the subsystem for caching artwork or presentation assets.
 - **kiosk mode** — a display-oriented operating mode focused on a dedicated presentation surface.
 
+## Identifiers and credentials
+
+| Term | Meaning / non-equivalence |
+| --- | --- |
+| `TRACK_KEY` / admin Track Key | Shared credential used by particular legacy/admin handlers; not a song identifier or universal route policy |
+| Mobile bearer session | Scoped authorization for supported native API operations; not the refresh credential or web Track Key |
+| Refresh credential / media ticket | Renewal credential and short-lived byte-delivery authorization respectively; neither defines catalog identity |
+| Mobile `trackId` / `MobileTrack` | Server-resolved opaque catalog identity; current mapping can include edition/folder disambiguation |
+| History `trackKey` | Stored media identity field; despite the historical name, not the admin shared secret |
+| MPD song ID / queue item | Queue-occurrence handle, not a globally durable catalog identity |
+| UPnP selection reference | Server-issued handle to a trusted provider item; resource URL and renderer session are different objects |
+| Queue revision / session generation | Concurrency/ownership guards; refresh after conflict, do not replay stale intent |
+| Qobuz queue fingerprint / current-track guard | Compare-and-swap evidence for guarded remote control, not a credential |
+| Local-source manifest | Mapping from accepted identity to available relative bytes; not a new device catalog |
+
+See [authentication enforcement](api-service-overview.md#method-level-boundaries-not-one-prefix-wide-policy),
+[catalog ownership](media-library.md#catalog-identity-and-byte-ownership), and
+[history schema](centralized-playback-history-and-scrobbling.md).
+
+## Playback and observation vocabulary
+
+- **Playback authority:** the current domain permitted to control output;
+  distinct from the controller that originated a request or a UI showing it.
+- **Release/handoff:** explicit transition between owners with confirmation;
+  availability, metadata or a successful poll alone is not ownership proof.
+- **Server-mediated UPnP:** Sonuvi owns logical queue/session and delegates
+  transport to a renderer; native UPnP can be a different controller/owner.
+- **Listen on Device:** browser stream/output coordination, not automatically
+  the native iOS playback-event pipeline.
+- **Mills display surrogate:** temporary digital metadata work for a physical
+  record session, with MPD state snapshot/restoration; not independent MPD audio.
+- **Vibe job versus preview:** Server queue-building work versus native
+  recommendation preview that does not mutate Home playback.
+- **Radio holdback / optimistic UI:** bounded metadata-stability and UI
+  reconciliation techniques; neither changes the real playback authority.
+- **Audio provenance / freshness:** where an audio value came from and when
+  it was observed; configured chain, decoded PCM and measured ALSA are not
+  interchangeable. See [Audio Info evidence roles](diagnostics-interface.md#what-audio-info-can-establish).
+- **Atomic replacement:** readers can see a completed replacement instead of
+  partial output; this does not by itself prove power-loss durability/fsync.
+
+These definitions reuse useful concepts from the external glossary but are
+checked against Sonuvi source. Meter producers PUT samples to Server;
+Peppy browser renderers GET samples. Installed moOde overrides exist even
+though Sonuvi is not a wholesale fork of moOde.
+
 ## Interfaces and surfaces
 
 - **display pages** — documented display-oriented pages/surfaces used for showing project output.
@@ -83,6 +129,4 @@ Good follow-up glossary targets:
 - a later mapping-oriented glossary layer for file/service ownership if that becomes useful
 - deeper integration vocabulary once MPD/moOde/request-flow ownership is mapped more precisely
 
-## Timestamp
-
-Last updated: 2026-04-06 06:47 America/Chicago
+*Last reviewed: 2026-10-28 America/Chicago*

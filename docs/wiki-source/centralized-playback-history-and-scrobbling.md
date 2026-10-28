@@ -5,15 +5,19 @@
 Sonuvi receives playback observations from multiple sources and records
 qualified plays in one local history:
 
-    moOde / MPD ---------+
-    iOS / CarPlay -------+--> playback event pipeline --> local history
-    Listen on Device ----+                              --> Last.fm
-    Alexa / future ------+
+```text
+Implemented inputs: MPD observations + bearer native playback events
+                         -> Server identity resolution and qualification
+                         -> local history -> asynchronous Last.fm hook
+Other source reporters: not implied by a display or playback feature existing
+```
 
 The event source is metadata on each play, not a separate statistics system.
-The canonical track identity remains the Sonuvi catalog/Track Key identity.
-Clients report playback activity; the backend decides qualification and
-deduplication.
+Resolved catalog/source identity is distinct from the admin `TRACK_KEY`
+credential; see [identifiers and credentials](glossary.md#identifiers-and-credentials).
+Clients report activity; the Server decides qualification and deduplication.
+Optional About enrichment is independent of this pipeline and does not fetch
+history records on its behalf.
 
 ## Current source behavior
 
@@ -38,18 +42,42 @@ state.
 
 ### iOS / CarPlay
 
-The bearer-authenticated `POST /v1/mobile/playback/events` route resolves the
-opaque mobile track ID against the current Server catalog. Its body requires
-`trackId`, a valid `sessionId`, and one of `start`, `playing`, `progress`,
-`pause`, `stop`, or `ended`; `elapsedSec`, `durationSec`, and `startedAt` are
-optional progress fields. The Server records the resolved catalog identity
-with source `ios-device`, session identity `mobile:<sessionId>`, and the
-shared qualification rules. The client never supplies a filesystem identity
-for recording and never contacts Last.fm.
+The bearer-authenticated `POST /v1/mobile/playback/events` route accepts the
+following implemented input contract (`src/routes/mobile.routes.mjs`):
 
-Repeated progress, pause, resume, and ended events use the same
-mobile:<sessionId> identity. A qualifying session creates at most one local
-history event and one non-MPD scrobble attempt.
+| Field | Required / default | Meaning |
+| --- | --- | --- |
+| `trackId` | Required | Server-resolvable catalog ID, or supported opaque radio/podcast identity; never a client filesystem path or UPnP selection reference |
+| `sessionId` | Required | At most 160 characters from letters, digits, `.`, `_`, `:`, `-`; stable across observations for one play, new for a distinct play |
+| `state` | Recommended explicitly; omitted/empty defaults to `progress` | `start`, `playing`, `progress`, `pause`, `stop`, `ended` (normalized to lowercase) |
+| `elapsedSec` | Optional; default zero | Nonnegative elapsed seconds, used for qualification |
+| `durationSec` | Optional; catalog/source duration fallback | Duration seconds; unknown duration uses the longer qualification wait |
+| `startedAtMs` | Optional; request-time default | Unix epoch **milliseconds**; finite positive input is clamped to the preceding seven days through current request time |
+
+```json
+{"trackId":"trk_opaque_example","sessionId":"device-play-001","state":"progress","elapsedSec":78,"durationSec":214,"startedAtMs":1793180000000}
+```
+
+Replace the illustrative ID/time with the actual Server-provided identity and
+play start. **`startedAt` is not an alias.** The handler ignores that unknown
+field and defaults the start time if `startedAtMs` is absent. Sending an ISO
+string or epoch seconds under the wrong name is not a supported timestamp
+contract. The [recorded iOS handoff](../ios/upnp-qobuz-integration-handoff.md#46-existing-bearer-mobile-routes)
+already uses `startedAtMs`; do not infer the shipped client's serializer from
+this Server-only verification.
+
+The Server first resolves catalog identity, then supported `radio-...` and
+`podcast-...` IDs through Server-owned station/episode data. Unresolved IDs
+receive 404. The client cannot substitute its own `file` value. Observations
+are stored as source `ios-device` and session identity `mobile:<sessionId>`;
+clients never contact Last.fm directly.
+
+An accepted `start` or `ended` event is not automatically a qualified play.
+The shared duration/elapsed thresholds below still apply. Repeated progress,
+pause/resume and ended observations retain the same session identity, yielding
+at most one persisted local play and one hook attempt for that session.
+The timestamp feeds history/Last.fm timing, while qualification uses elapsed
+and duration; changing the timestamp alone does not qualify a play.
 
 ### Listen on Device and other sources
 
@@ -120,7 +148,7 @@ Current production behavior:
 The first MPD migration step is controlled by `LASTFM_MPD_MODE`, which
 defaults to `shadow`. In shadow mode, qualifying MPD sessions use the shared
 history qualification and deduplication path, resolve a canonical mobile
-Track Key when available, and record `lastfmScrobbleState`
+track ID when available, and record `lastfmScrobbleState`
 `mpd-shadow-qualified`. Sonuvi does not submit those MPD sessions to Last.fm;
 mpdscribble remains the sole MPD scrobbler.
 
@@ -142,10 +170,11 @@ renderer exposes an MPD-compatible transport.
 
 ## Canonical identity and unresolved events
 
-Mobile events must resolve their opaque track ID against the server catalog.
-Unknown IDs are rejected rather than creating a client-invented identity.
-MPD events retain their authoritative MPD file identity and do not invent a
-second Track Key when no canonical key is available.
+Mobile events must resolve their identity against the Server catalog or the
+supported Server-owned radio/podcast resolvers. Unknown IDs are rejected
+rather than creating a client-invented identity. MPD events retain their
+MPD file identity and use a canonical mobile track ID when available; they do
+not invent another credential or identity when catalog mapping is unavailable.
 
 ## Reliability and deduplication
 
@@ -162,4 +191,4 @@ produce one local play and at most one Last.fm scrobble. If a rollback is ever
 needed, stop Sonuvi MPD submission before re-enabling mpdscribble to avoid
 double submissions.
 
-*Last reviewed: 2026-10-20 18:54 America/Chicago*
+*Last reviewed: 2026-10-28 America/Chicago*

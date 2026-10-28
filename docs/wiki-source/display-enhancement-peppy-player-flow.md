@@ -296,6 +296,31 @@ A practical push flow looks like:
 
 This is the core operational model of the system.
 
+### Implementation effects and data direction
+
+```text
+Builder intent -> profile persistence (POST /peppy/last-profile)
+Explicit Push -> host/browser targeting or reload action
+Router load -> GET /peppy/last-profile -> set renderer iframe src
+moOde meter/spectrum producer -> PUT samples -> Server -> GET samples -> browser
+```
+
+`POST /peppy/last-profile` writes profile state; it does not itself run SSH or
+restart Chromium. `display.html` reads the profile once on load and assigns
+its iframe `src`; it does not perform a `location.replace` renderer redirect
+or continuously poll that profile. Explicit push/reload is a separate effect.
+The builder/host actions, persisted profile and active renderer must therefore
+be inspected separately when an apparent push does not become visible.
+
+For moOde r1034+, retain the portless Target URL guidance above. Some runtime
+fallback strings still contain `:8101`; those are legacy implementation
+context, not instructions to reintroduce that port in moOde's target field.
+
+Browser skins use `assets/peppy/catalog.json`; native skin export reads
+`skins/*/meter.json` and currently selects 1280×400 circular definitions.
+Runtime assets, authored definitions and exported artifacts are not one
+interchangeable source of truth.
+
 ## Player branch
 
 The Player family in this branch includes:
@@ -358,3 +383,5 @@ The main truths it preserves are:
 - kiosk is a different concept from those renderer modes
 - browser-driven display behavior depends on API-hosted VU/spectrum bridge data
 - boot persistence and bridge-mode exclusivity are real operational guardrails
+
+*Last reviewed: 2026-10-28 America/Chicago*

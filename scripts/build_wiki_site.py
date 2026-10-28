@@ -43,7 +43,13 @@ def site_link_target(target: str) -> str:
         candidate = SOURCE_DIR / Path(path).name
         if candidate.exists():
             path = candidate.stem + ".html"
-    elif path.endswith(".md") and (SOURCE_DIR / path).exists():
+    elif (
+        path.endswith(".md")
+        and (SOURCE_DIR / path).exists()
+        and (SOURCE_DIR / path).resolve().parent == SOURCE_DIR.resolve()
+    ):
+        # Only top-level canonical pages are emitted by build(). Standalone
+        # handoffs/runbooks and audit evidence remain Markdown destinations.
         path = str(Path(path).with_suffix(".html"))
     return path + (("#" + fragment) if fragment else "")
 

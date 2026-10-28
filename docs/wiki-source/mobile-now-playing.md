@@ -368,6 +368,14 @@ artwork URL is fetched. Same-album transitions are album-scoped for animated
 artwork lookup and do not reset the existing cover/action face merely because
 the next track has a different canonical artwork URL.
 
+## Current native contract navigation
+
+The [October Server/iOS handoff](../ios/server-to-ios-contract-handoff-2026-10.md)
+covers bearer Home controls, deterministic repeat/Consume, native Vibe preview
+versus Home jobs, queue paging, local-byte mapping and history observations.
+`GET /v1/mobile/history/recent` is a last-played seed, not current playback
+truth or a command to replace a nonempty device queue.
+
 ## Native Home summary shelf
 
 The iPad Home summary shelf uses the following bearer-authenticated contracts:
@@ -389,6 +397,13 @@ When Live Queue is selected as a Home discovery row, the native remote poll
 also reads the complete upcoming queue and reconciles that row. This covers
 queue additions made by another controller; local playback uses the device
 queue directly.
+
+The Audio Info entry now opens a **dedicated native screen/page**, replacing
+the earlier native drawer (product presentation confirmed 2026-10-28).
+This is not the Server web tablet's still-existing modal, nor a new Server HTML
+route. See [client entry points and provenance roles](diagnostics-interface.md#audio-info-entry-points-and-presentation).
+The dedicated screen uses the same sanitized bearer diagnostics contract;
+its navigation does not turn configured output into a hardware measurement.
 
 `/v1/mobile/audio-info` invokes the existing Track-Key-protected moOde reader
 server-side and returns sanitized `section`, `key`, and `value` rows plus an
@@ -449,10 +464,12 @@ unchanged for compatibility.
 
 ## Local audio source/cache
 
-The server catalog and queue remain authoritative when the native client plays
-to This iPhone/iPad. The attached SSD and Application Support store are byte
-sources below the normal canonical `MobileTrack` flow; they are not additional
-catalogs, queues, playlists, or track identities.
+For This iPhone/iPad, the device owns its playback queue/state. The current
+shared Server catalog/`MobileTrack` contracts resolve identities and authorize
+Server media access; the Home MPD queue is not the device's playback authority.
+Local SSD/cache availability supplies bytes beneath that identity model, not
+an automatic second catalog. A device-owned canonical catalog with provider
+aggregation remains planned architecture; see [catalog and byte ownership](media-library.md#catalog-identity-and-byte-ownership).
 
 The client obtains an authenticated availability manifest:
 
@@ -473,12 +490,18 @@ POST /v1/mobile/playback/events
 Authorization: Bearer <mobile-session-token>
 Content-Type: application/json
 
-{"trackId":"trk_...","sessionId":"device-session","state":"progress","elapsedSec":78,"durationSec":214}
+{"trackId":"trk_...","sessionId":"device-session","state":"progress","elapsedSec":78,"durationSec":214,"startedAtMs":1793180000000}
 ```
 
 The server resolves the track ID and feeds the shared listening-history
 qualification/idempotency path. The client never submits a filesystem path,
 synthetic SSD ID, or alternate queue identity.
+
+The example timestamp is Unix milliseconds. `startedAt` is not accepted as an
+alias; omission of `startedAtMs` uses request time. Explicit `state` is
+recommended although omission defaults to `progress`. Use the full
+[playback-event schema and qualification rules](centralized-playback-history-and-scrobbling.md)
+for catalog, radio and podcast identity resolution and stable session IDs.
 
 Native podcast playback is the feature-specific exception to the catalog ID
 shape: the client uses an opaque `podcast-...` episode identity for its local
@@ -488,4 +511,4 @@ invoking the native APNs bridge. This keeps podcast paths out of the client
 while allowing podcast starts to receive the same track-change notification
 behavior as music.
 
-*Last reviewed: 2026-10-21 05:40 America/Chicago*
+*Last reviewed: 2026-10-28 America/Chicago*

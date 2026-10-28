@@ -1,0 +1,27 @@
+{
+  "baseline": "4bf8889a767e167f50566ec4e193d4b625c2c1f2",
+  "site_link_projection_cases_passed": 7,
+  "wiki_link_projection_cases_passed": 9,
+  "canonical_html_pages": 121,
+  "changed_html_exact_source_matches": 19,
+  "canonical_navigation_pages_checked": 123,
+  "retained_preexisting_legacy_html": [
+    "agent-start",
+    "search-and-navigation"
+  ],
+  "local_fragment_checks_passed": 29,
+  "search_index_entries_exactly_match_sources": 121,
+  "site_byte_idempotent": true,
+  "unexpected_generated_files": [],
+  "offline_wiki_export_pages_plus_home": 120,
+  "wiki_local_links_resolve": 535,
+  "wiki_repository_links_resolve": 38,
+  "canonical_wiki_slug_conversions_unchanged": true,
+  "wiki_exclusion_redaction_and_legacy_retention_pass": true,
+  "github_wiki_pushed": false,
+  "repository_link_check": "documentation links ok (166 Markdown files, 123 HTML files)",
+  "diff_check": "pass for all refinements; two byte-preserved historical patches excluded for literal context-line whitespace",
+  "focused_runtime_tests_passed": 113,
+  "timestamp_probe_cases_passed": 5,
+  "shipped_ios_startedAtMs_payload_verified": false
+}

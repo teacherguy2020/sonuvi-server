@@ -1,0 +1,12 @@
+{
+  "passed": 7,
+  "cases": {
+    "architecture.md#transport-and-effect-boundaries": "architecture.html#transport-and-effect-boundaries",
+    "sources/architecture.md": "architecture.html",
+    "../ios/server-to-ios-contract-handoff-2026-10.md": "../ios/server-to-ios-contract-handoff-2026-10.md",
+    "../runbooks/28-qobuz-connect-now-playing.md": "../runbooks/28-qobuz-connect-now-playing.md",
+    "../../audit-evidence/page-ledger.md": "../../audit-evidence/page-ledger.md",
+    "https://example.test/doc.md": "https://example.test/doc.md",
+    "#anchor": "#anchor"
+  }
+}

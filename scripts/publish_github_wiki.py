@@ -80,6 +80,11 @@ def wiki_links(text: str) -> str:
         elif path.startswith("../"):
             candidate = SOURCE_DIR / path
             if candidate.exists():
+                if candidate.resolve().parent != SOURCE_DIR.resolve():
+                    # Standalone repository documents/evidence are not Wiki pages.
+                    repository_path = candidate.resolve().relative_to(ROOT.resolve()).as_posix()
+                    url = "https://github.com/teacherguy2020/now-playing/blob/main/" + repository_path
+                    return f"[{label}]({url}{('#' + fragment) if fragment else ''})"
                 path = candidate.name
         if path in {"README", "README.md"}:
             path = "Home"

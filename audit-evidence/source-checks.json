@@ -1,0 +1,1320 @@
+[
+  {
+    "id": "1",
+    "file": "moode-nowplaying-api.mjs",
+    "pattern": "express.static",
+    "claim": "Static UI and API coexist in Server process.",
+    "hits": 1,
+    "windows": [
+      {
+        "start": 700,
+        "end": 715,
+        "text": "700: app.use(cors());\n701: app.use(express.json({ limit: '50mb' }));\n702: app.use(handleMobileJsonError);\n703: // Serve controller/static UI assets from repo root on the same API port.\n704: app.use(express.static(path.resolve('.')));\n705: app.get('/', (_req, res) => {\n706:   res.sendFile(path.resolve('controller.html'));\n707: });\n708: \n709: // PeppyMeter bridge (HTTP level data -> app API)\n710: let peppyMeterLast = { left: 0, right: 0, mono: 0, spectrum: [], ts: 0, source: 'init' };\n711: let peppySpectrumLast = { bins: [], size: 0, maxValue: 100, ts: 0, source: 'init' };\n712: app.put('/peppy/vumeter', (req, res) => {\n713:   try {\n714:     const left = Number(req?.body?.left ?? req?.query?.left ?? 0);\n715:     const right = Number(req?.body?.right ?? req?.query?.right ?? 0);"
+      }
+    ]
+  },
+  {
+    "id": "1.1",
+    "file": "src/services/mpd.service.mjs",
+    "pattern": "net.createConnection",
+    "claim": "MPD has a direct TCP service adapter; not every player is MPD.",
+    "hits": 1,
+    "windows": [
+      {
+        "start": 105,
+        "end": 120,
+        "text": "105: }\n106: \n107: export function mpdQueryRaw(command, timeoutMs = 3000) {\n108:   return new Promise((resolve, reject) => {\n109:     const sock = net.createConnection({ host: MPD_HOST, port: MPD_PORT });\n110: \n111:     let buf = '';\n112:     let finished = false;\n113:     let greetingSeen = false;\n114:     let commandSent = false;\n115: \n116:     const finish = (err) => {\n117:       if (finished) return;\n118:       finished = true;\n119:       try { sock.destroy(); } catch {}\n120:       err ? reject(err) : resolve(buf);"
+      }
+    ]
+  },
+  {
+    "id": "1.2",
+    "file": "scripts/install.sh",
+    "pattern": "systemd",
+    "claim": "Installer provisions host services, distinct from deployment helper.",
+    "hits": 6,
+    "windows": [
+      {
+        "start": 104,
+        "end": 119,
+        "text": "104: require_bin npm\n105: require_bin curl\n106: \n107: if ! command -v systemctl >/dev/null 2>&1; then\n108:   err \"systemctl not found. This installer currently targets systemd hosts.\"\n109:   exit 1\n110: fi\n111: \n112: if ! command -v sudo >/dev/null 2>&1 && [[ \"${EUID:-$(id -u)}\" -ne 0 ]]; then\n113:   err \"sudo is required to write ${INSTALL_DIR} and systemd unit files.\"\n114:   exit 1\n115: fi\n116: \n117: SUDO=\"\"\n118: if [[ \"${EUID:-$(id -u)}\" -ne 0 ]]; then\n119:   SUDO=\"sudo\""
+      },
+      {
+        "start": 109,
+        "end": 124,
+        "text": "109:   exit 1\n110: fi\n111: \n112: if ! command -v sudo >/dev/null 2>&1 && [[ \"${EUID:-$(id -u)}\" -ne 0 ]]; then\n113:   err \"sudo is required to write ${INSTALL_DIR} and systemd unit files.\"\n114:   exit 1\n115: fi\n116: \n117: SUDO=\"\"\n118: if [[ \"${EUID:-$(id -u)}\" -ne 0 ]]; then\n119:   SUDO=\"sudo\"\n120: fi\n121: \n122: INSTALL_USER=\"${SUDO_USER:-$USER}\"\n123: STAGING_DIR=\"$(mktemp -d -t now-playing-install.XXXXXX)\"\n124: trap 'rm -rf \"$STAGING_DIR\"' EXIT"
+      }
+    ]
+  },
+  {
+    "id": "1.3",
+    "file": "src/lib/mobile-auth.mjs",
+    "pattern": "export function createMobileTrackId",
+    "claim": "Opaque track identity is separate from admin shared key.",
+    "hits": 1,
+    "windows": [
+      {
+        "start": 136,
+        "end": 146,
+        "text": "136: \n137:   return payload;\n138: }\n139: \n140: export function createMobileTrackId({ secret, trackIdentity } = {}) {\n141:   const key = String(secret || '');\n142:   const identity = String(trackIdentity || '');\n143:   if (!key || !identity) throw new Error('track ID secret and identity are required');\n144:   const digest = crypto.createHmac('sha256', key).update(identity).digest('base64url').slice(0, 32);\n145:   return `trk_${digest}`;\n146: }"
+      }
+    ]
+  },
+  {
+    "id": "2",
+    "file": "controller.html",
+    "pattern": "iframe",
+    "claim": "Browser shell composes separate pane documents.",
+    "hits": 3,
+    "windows": [
+      {
+        "start": 331,
+        "end": 346,
+        "text": "331:       to{transform:translateX(-24px);opacity:.38}\n332:     }\n333:     .navCover{position:fixed;inset:0;z-index:9999;background:var(--surface,#0b111c);transform:translateX(100%);transition:transform .28s cubic-bezier(.2,.72,.2,1);will-change:transform}\n334:     .navCover.open{transform:translateX(0)}\n335:     .navCover iframe{width:100%;height:100%;border:0;display:block;background:var(--surface,#0b111c)}\n336: \n337:   </style>\n338:   <link rel=\"stylesheet\" href=\"styles/controller-modals.css?v=20260310-modal-contrast1\" />\n339: </head>\n340: <body>\n341:   <div class=\"kioskCtl\" id=\"kioskCtl\" style=\"display:none\">\n342:     <label class=\"muted\" for=\"kioskSizeSel\" style=\"font-size:12px\">Size</label>\n343:     <select id=\"kioskSizeSel\">\n344:       <option value=\"controller.html?kiosk=1&edit=1\">1280\u00d7400</option>\n345:       <option value=\"controller.html\">Default</option>\n346:       <option value=\"controller-now-playing.html\">Now Playing</option>"
+      },
+      {
+        "start": 447,
+        "end": 462,
+        "text": "447:       <section class=\"ipadRecentPane\"><h4>Recent Playlists</h4><div class=\"rail\" id=\"ipadRailPlaylists\"></div></section>\n448:       <section class=\"ipadRecentPane\"><h4>Favorite Radio</h4><div class=\"rail\" id=\"ipadRailRadio\"></div></section>\n449:     </div>\n450:     <div class=\"kPane\" id=\"kioskPane\" aria-hidden=\"true\">\n451:       <iframe class=\"kPaneIf\" id=\"kioskPaneFrame\" src=\"about:blank\" loading=\"eager\"></iframe>\n452:     </div>\n453:   </div>\n454: \n455:   <div class=\"miniMenu\" id=\"recentAlbumMenu\">\n456:     <button data-ra-act=\"open\" id=\"raOpenBtn\">Open</button>\n457:     <button data-ra-act=\"play\" id=\"raPlayBtn\">Play</button>\n458:     <button data-ra-act=\"shuffle\" id=\"raThirdBtn\">Play Shuffled</button>\n459:   </div>\n460: \n461:   <div class=\"albumModal\" id=\"recentAlbumModal\" aria-hidden=\"true\">\n462:     <div class=\"albumCard\" role=\"dialog\" aria-modal=\"true\" aria-label=\"Album details\">"
+      }
+    ]
+  },
+  {
+    "id": "2.1",
+    "file": "app.html",
+    "pattern": "postMessage",
+    "claim": "App shell communicates across embedded display boundaries.",
+    "hits": 4,
+    "windows": [
+      {
+        "start": 747,
+        "end": 762,
+        "text": "747:             if (frame) frame.style.background = isThemePageNow ? railBg : appBg;\n748:           }\n749:           writeAppPreference('themeMode', t);\n750:           try { win.localStorage.setItem('np-theme', t); } catch {}\n751:           try { win.postMessage({ type: 'np-theme-sync', theme: t }, '*'); } catch {}\n752:           applyThemeBridgeToFrame();\n753:         } catch {}\n754:       }\n755: \n756:       function setPillState(pillId, state){\n757:         const map = { ok:{c:'#22c55e',b:'rgba(34,197,94,.55)'}, warn:{c:'#f59e0b',b:'rgba(245,158,11,.55)'}, bad:{c:'#ef4444',b:'rgba(239,68,68,.55)'}, off:{c:'#64748b',b:'rgba(100,116,139,.45)'} };\n758:         const s = map[state] || map.off;\n759:         const pill = document.getElementById(pillId); if (!pill) return;\n760:         const dot = pill.querySelector('.dot');\n761:         if (dot) { dot.style.background = s.c; dot.style.boxShadow = `0 0 0 6px ${s.b.replace('.55','.20')}`; }\n762:         pill.style.borderColor = s.b;"
+      },
+      {
+        "start": 926,
+        "end": 941,
+        "text": "926:           applyThemeTokens(selected.tokens);\n927:           document.body.classList.toggle('theme-light', targetMode === 'light');\n928:           writeAppPreference('themeMode', targetMode === 'light' ? 'light' : 'dark');\n929:           // Keep Theme editor iframe state in lockstep with shell toggle selection.\n930:           try { frame?.contentWindow?.postMessage({ type:'np-theme-load-preset', name:selectedName }, '*'); } catch {}\n931:           syncThemeToFrame();\n932:           return true;\n933:         } catch { return false; }\n934:       }\n935: \n936:       const quickThemeSelect = document.getElementById('quickThemeSelect');\n937:       const heroQuickSearch = document.getElementById('heroQuickSearch');\n938:       const heroQuickSearchResults = document.getElementById('heroQuickSearchResults');\n939:       let heroQuickIndex = [];\n940:       let heroQuickLoadedAt = 0;\n941:       let heroQuickSelected = {"
+      }
+    ]
+  },
+  {
+    "id": "2.2",
+    "file": "scripts/now-playing-art.js",
+    "pattern": "function source",
+    "claim": "Shared artwork selection serves multiple display surfaces.",
+    "hits": 1,
+    "windows": [
+      {
+        "start": 53,
+        "end": 68,
+        "text": "53:       || source === 'upnp-sonuvi'\n54:       || source === 'external-upnp';\n55:   }\n56: \n57:   function source(data = {}, options = {}) {\n58:     const head = options.head || data?.__queueHead || null;\n59:     const podcast = !!data?.isPodcast || /\\/podcasts?\\//i.test(String(data?.file || ''));\n60:     const candidates = podcast && head?.thumbUrl\n61:       ? [head.thumbUrl, data.displayArtUrl, data.albumArtUrl, data.altArtUrl, data.stationLogoUrl]\n62:       : [data.displayArtUrl, data.albumArtUrl, data.altArtUrl, data.stationLogoUrl, head?.thumbUrl];\n63:     return candidates.map((x) => String(x || '').trim()).find(Boolean) || '';\n64:   }\n65: \n66:   function currentUrl(raw, base = '') {\n67:     const api = apiBase(base);\n68:     const value = String(raw || '').trim();"
+      }
+    ]
+  },
+  {
+    "id": "2.2.1",
+    "file": "scripts/index-ui.js",
+    "pattern": "function fetchNowPlaying",
+    "claim": "Desktop shared runtime polls Server state; scripts/index.js only sets standalone class.",
+    "hits": 1,
+    "windows": [
+      {
+        "start": 1480,
+        "end": 1495,
+        "text": "1480: /* =========================\n1481:  * Poller\n1482:  * ========================= */\n1483: \n1484: function fetchNowPlaying() {\n1485:   const sourcePromise = ALEXA_MODE_FORCED\n1486:     ? (async () => {\n1487:         const ap = await fetchAlexaPayload();\n1488:         return ap ? { ...ap, alexaMode: true } : null;\n1489:       })()\n1490:     : fetch(NOW_PLAYING_URL, { cache: 'no-store' })\n1491:         .then(async r => {\n1492:           if (!r.ok) throw new Error(`now-playing HTTP ${r.status}`);\n1493:           let data = await r.json();\n1494:           if (!data) return data;\n1495: "
+      }
+    ]
+  },
+  {
+    "id": "2.2.2",
+    "file": "scripts/index-ui.js",
+    "pattern": "if \\(pendingFavorite",
+    "claim": "Mobile web display uses temporary optimistic state, not playback authority.",
+    "hits": 1,
+    "windows": [
+      {
+        "start": 1591,
+        "end": 1606,
+        "text": "1591:       // \u2764\ufe0f favorites (single source of truth from server)\n1592:       const npFile = String(data.file || '').trim();\n1593:       const npFav  = !!data.isFavorite;\n1594: \n1595:       if (pendingFavorite && npFile && npFile === pendingFavorite.file) {\n1596:         const age = Date.now() - pendingFavorite.ts;\n1597: \n1598:         if (age < PENDING_FAVORITE_HOLD_MS) {\n1599:           // Hold UI truth briefly so now-playing can't snap it back\n1600:           setFavoriteUI(pendingFavorite.isFavorite, pendingFavorite.file);\n1601:         } else {\n1602:           pendingFavorite = null;\n1603:           setFavoriteUI(npFav, npFile);\n1604:         }\n1605:       } else {\n1606:         // Different track, or no hold"
+      }
+    ]
+  },
+  {
+    "id": "2.3",
+    "file": "controller-mobile.html",
+    "pattern": "config/controller",
+    "claim": "Web dashboard consumes controller configuration; native home rows are separate.",
+    "hits": 2,
+    "windows": [
+      {
+        "start": 632,
+        "end": 647,
+        "text": "632:       writeLocalControllerProfile(profile);\n633:       if (USE_LOCAL_PROFILE_ONLY) return;\n634:       try {\n635:         await ensureKey();\n636:         await fetch(`${base}/config/controller-profile`, {\n637:           method:'POST',\n638:           headers:reqHeaders(true),\n639:           body: JSON.stringify({ profile })\n640:         });\n641:       } catch {}\n642:     }\n643: \n644:     function nextRecentSource(step=1){\n645:       const order = ['albums','podcasts','playlists','radio','queue'];\n646:       const cur = String(profile?.recentSource || 'albums').toLowerCase();\n647:       const idx = Math.max(0, order.indexOf(cur));"
+      },
+      {
+        "start": 846,
+        "end": 861,
+        "text": "846: \n847:     async function loadServerProfile(){\n848:       if (IS_PREVIEW || USE_LOCAL_PROFILE_ONLY) return; // preview/phone-local mode should not pull shared profile\n849:       try {\n850:         const r = await fetch(`${base}/config/controller-profile`, { cache:'no-store' });\n851:         const j = await r.json().catch(()=>({}));\n852:         if (r.ok && j?.ok && j?.profile) {\n853:           const existing = profile || {};\n854:           profile = { ...MOBILE_DEFAULT_PROFILE, ...existing, ...j.profile, recentSource: (j?.profile?.recentSource ?? existing?.recentSource ?? MOBILE_DEFAULT_PROFILE.recentSource) };\n855:           // URL overrides must win over server profile sync (especially devicePreset testing links).\n856:           if (Q_DEVICE_PRESET) profile.devicePreset = Q_DEVICE_PRESET;\n857:           writeLocalControllerProfile(profile);\n858:           applyProfileUi();\n859:           loadRecentlyAdded().catch(()=>null);\n860:         }\n861:       } catch {}"
+      }
+    ]
+  },
+  {
+    "id": "2.4",
+    "file": "kiosk.html",
+    "pattern": "location.replace",
+    "claim": "Kiosk launcher redirects to controller shell with normalized preferences.",
+    "hits": 1,
+    "windows": [
+      {
+        "start": 76,
+        "end": 84,
+        "text": "76:       if (resolved.secondaryThemeColor) dst.searchParams.set('secondaryThemeColor', resolved.secondaryThemeColor);\n77:       if (resolved.primaryTextColor) dst.searchParams.set('primaryTextColor', resolved.primaryTextColor);\n78:       if (resolved.secondaryTextColor) dst.searchParams.set('secondaryTextColor', resolved.secondaryTextColor);\n79: \n80:       location.replace(dst.toString());\n81:     })();\n82:   </script>\n83: </body>\n84: </html>"
+      }
+    ]
+  },
+  {
+    "id": "2.5",
+    "file": "scripts/diagnostics.js",
+    "pattern": "config/diagnostics",
+    "claim": "Diagnostics UI exercises Server diagnostic endpoints.",
+    "hits": 5,
+    "windows": [
+      {
+        "start": 17,
+        "end": 32,
+        "text": "17:     { name: '/config/alexa-heard-artist', method: 'POST', path: '/config/alexa-heard-artist', body: {} },\n18:     { name: '/config/alexa-heard-playlist', method: 'POST', path: '/config/alexa-heard-playlist', body: {} },\n19:     { name: '/config/alexa/check-domain', method: 'POST', path: '/config/alexa/check-domain', body: { domain: \"\" } },\n20:     { name: '/config/artist-alias-suggestion', method: 'POST', path: '/config/artist-alias-suggestion', body: {} },\n21:     { name: '/config/diagnostics/playback', method: 'POST', path: '/config/diagnostics/playback', body: { action: \"play\" } },\n22:     { name: '/config/diagnostics/queue', method: 'GET', path: '/config/diagnostics/queue' },\n23:     { name: '/config/library-health', method: 'GET', path: '/config/library-health' },\n24:     { name: '/config/library-health/album-art', method: 'GET', path: '/config/library-health/album-art' },\n25:     { name: '/config/library-health/album-art', method: 'POST', path: '/config/library-health/album-art', body: {} },\n26:     { name: '/config/library-health/album-genre', method: 'GET', path: '/config/library-health/album-genre' },\n27:     { name: '/config/library-health/album-genre', method: 'POST', path: '/config/library-health/album-genre', body: {} },\n28:     { name: '/config/library-health/animated-art/discovery', method: 'GET', path: '/config/library-health/animated-art/discovery' },\n29:     { name: '/config/library-health/animated-art/lookup', method: 'GET', path: '/config/library-health/animated-art/lookup' },\n30:     { name: '/config/library-health/animated-art/job', method: 'GET', path: '/config/library-health/animated-art/job' },\n31:     { name: '/config/library-health/animated-art/discover', method: 'POST', path: '/config/library-health/animated-art/discover', body: { force: false } },\n32:     { name: '/config/library-health/animated-art/build', method: 'POST', path: '/config/library-health/animated-art/build', body: { album: \"\", artist: \"\", sourceUrl: \"\" } },"
+      },
+      {
+        "start": 18,
+        "end": 33,
+        "text": "18:     { name: '/config/alexa-heard-playlist', method: 'POST', path: '/config/alexa-heard-playlist', body: {} },\n19:     { name: '/config/alexa/check-domain', method: 'POST', path: '/config/alexa/check-domain', body: { domain: \"\" } },\n20:     { name: '/config/artist-alias-suggestion', method: 'POST', path: '/config/artist-alias-suggestion', body: {} },\n21:     { name: '/config/diagnostics/playback', method: 'POST', path: '/config/diagnostics/playback', body: { action: \"play\" } },\n22:     { name: '/config/diagnostics/queue', method: 'GET', path: '/config/diagnostics/queue' },\n23:     { name: '/config/library-health', method: 'GET', path: '/config/library-health' },\n24:     { name: '/config/library-health/album-art', method: 'GET', path: '/config/library-health/album-art' },\n25:     { name: '/config/library-health/album-art', method: 'POST', path: '/config/library-health/album-art', body: {} },\n26:     { name: '/config/library-health/album-genre', method: 'GET', path: '/config/library-health/album-genre' },\n27:     { name: '/config/library-health/album-genre', method: 'POST', path: '/config/library-health/album-genre', body: {} },\n28:     { name: '/config/library-health/animated-art/discovery', method: 'GET', path: '/config/library-health/animated-art/discovery' },\n29:     { name: '/config/library-health/animated-art/lookup', method: 'GET', path: '/config/library-health/animated-art/lookup' },\n30:     { name: '/config/library-health/animated-art/job', method: 'GET', path: '/config/library-health/animated-art/job' },\n31:     { name: '/config/library-health/animated-art/discover', method: 'POST', path: '/config/library-health/animated-art/discover', body: { force: false } },\n32:     { name: '/config/library-health/animated-art/build', method: 'POST', path: '/config/library-health/animated-art/build', body: { album: \"\", artist: \"\", sourceUrl: \"\" } },\n33:     { name: '/config/library-health/animated-art/suppress', method: 'POST', path: '/config/library-health/animated-art/suppress', body: { album: \"\", artist: \"\", suppressed: true } },"
+      }
+    ]
+  },
+  {
+    "id": "2.6",
+    "file": "controller-tablet.html",
+    "pattern": "upnp",
+    "claim": "Tablet has explicit UPnP handling beyond MPD queue.",
+    "hits": 15,
+    "windows": [
+      {
+        "start": 725,
+        "end": 740,
+        "text": "725:     <li class=\"row\" data-page=\"kiosk-albums.html\"><span class=\"ico ico-album\" aria-hidden=\"true\"></span><span class=\"lbl\">Albums</span><span class=\"chev\">\u203a</span></li>\n726:     <li class=\"row\" data-page=\"kiosk-genres.html\"><span class=\"ico ico-genre\" aria-hidden=\"true\"><svg viewBox=\"0 0 24 24\"><path d=\"M3 10V4h6l12 12l-6 6L3 10zm4-2.5A1.5 1.5 0 1 0 7 10.5A1.5 1.5 0 0 0 7 7.5z\"/></svg></span><span class=\"lbl\">Genres</span><span class=\"chev\">\u203a</span></li>\n727:     <li class=\"row\" data-page=\"kiosk-podcasts.html\"><span class=\"ico ico-podcast\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 11.5a1.7 1.7 0 1 0 0 3.4a1.7 1.7 0 0 0 0-3.4zm0-4.7a6.4 6.4 0 0 0-6.4 6.4h2.2a4.2 4.2 0 1 1 8.4 0h2.2A6.4 6.4 0 0 0 12 6.8zm0-3.6A10 10 0 0 0 2 13.2h2.2a7.8 7.8 0 0 1 15.6 0H22A10 10 0 0 0 12 3.2zM11 17h2v3h-2z\"/></svg></span><span class=\"lbl\">Podcasts</span><span class=\"chev\">\u203a</span></li>\n728:     <li class=\"row\" data-page=\"kiosk-radio.html\"><span class=\"ico ico-radio\" aria-hidden=\"true\"></span><span class=\"lbl\">Radio</span><span class=\"chev\">\u203a</span></li>\n729:     <li class=\"row\" data-page=\"kiosk-upnp.html\"><span class=\"ico\" aria-hidden=\"true\">\u21c4</span><span class=\"lbl\">Music Sources</span><span class=\"chev\">\u203a</span></li>\n730:     <li class=\"row\" data-page=\"kiosk-queue-wizard.html\"><span class=\"ico ico-queuewiz\" aria-hidden=\"true\"><svg viewBox=\"0 0 24 24\"><path d=\"M5 19l10.6-10.6l1.4 1.4L6.4 20.4L5 19zm9.8-13.2l1.1-2.8l1.1 2.8l2.8 1.1l-2.8 1.1l-1.1 2.8l-1.1-2.8L12 6.9l2.8-1.1zM20 12l.8-2l.8 2l2 .8l-2 .8l-.8 2l-.8-2l-2-.8l2-.8zM10 3l.6-1.5L11.2 3l1.5.6l-1.5.6L10.6 5.8L10 4.2L8.5 3.6L10 3z\"/></svg></span><span class=\"lbl\">Queue Wizard</span><span class=\"chev\">\u203a</span></li>\n731:     <li class=\"rowWrap\" data-row-wrap=\"live-queue\">\n732:       <div class=\"row\" data-page=\"kiosk-queue.html\"><span class=\"ico\">\u2630</span><span class=\"lbl\">Live Queue<span class=\"tabletQueuePosAfterLive\" id=\"tabletQueuePos\">Track \u2014 of \u2014</span></span><span class=\"chev\">\u203a</span></div>\n733:       <div class=\"rowActions\" aria-hidden=\"true\">\n734:         <button type=\"button\" class=\"rowActionBtn vibe\" data-queue-act=\"vibe\" title=\"Build a Vibe queue from the currently playing track\">Vibe</button>\n735:         <button type=\"button\" class=\"rowActionBtn crop\" data-queue-act=\"crop\" title=\"Keep only currently playing track\">Crop</button>\n736:         <button type=\"button\" class=\"rowActionBtn clear\" data-queue-act=\"clear\" title=\"Clear entire queue\">Clear</button>\n737:       </div>\n738:     </li>\n739:     <li class=\"row\" data-page=\"visualizer.html\"><span class=\"ico\">\u25c9</span><span class=\"lbl\">Visualizer</span><span class=\"chev\">\u203a</span></li>\n740:     <li class=\"row settingsRow\" data-page=\"kiosk-settings.html\"><span class=\"ico ico-settings\" aria-hidden=\"true\"><svg viewBox=\"0 0 24 24\"><path d=\"M19.14 12.94a7.96 7.96 0 0 0 .06-.94a7.96 7.96 0 0 0-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.3 7.3 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.58.22-1.12.52-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.7 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.62-.06.94s.02.63.06.94L2.82 14.52a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.31.6.22l2.39-.96c.51.41 1.05.72 1.63.94l.36 2.54c.04.24.25.42.5.42h3.84c.25 0 .46-.18.5-.42l.36-2.54c.58-.22 1.12-.53 1.63-.94l2.39.96c.23.09.48 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z\"/></svg></span><span class=\"lbl\">Settings</span><span class=\"chev\">\u203a</span></li>"
+      },
+      {
+        "start": 807,
+        "end": 822,
+        "text": "807:     </div>\n808:   </div>\n809: \n810:   <script src=\"/scripts/client-preferences.js?v=20260922-preferences2\"></script>\n811:   <script src=\"/scripts/now-playing-art.js?v=20261014-upnp-motion2\"></script>\n812:   <script src=\"/scripts/about-card.js?v=20261002-about3\"></script>\n813:   <script>\n814: (() => {\n815:   const NP_PREFS = window.NPClientPreferences;\n816:   const MOBILE_PROFILE_KEY = \"nowplaying.mobile.profile.v2\";\n817:   const MOBILE_DEFAULT_PROFILE = { devicePreset: \"tablet\", theme: \"auto\", layout: \"home-rail\", showRecent: true, recentSource: \"albums\", recentRows: [\"albums\", \"playlists\", \"podcasts\", \"radio\"], colorPreset: \"ocean\", recentCount: 18 };\n818:   function readLocalControllerProfile() {\n819:     try {\n820:       if (NP_PREFS?.getControllerProfile) return NP_PREFS.getControllerProfile({});\n821:     } catch {\n822:     }"
+      }
+    ]
+  },
+  {
+    "id": "2.7",
+    "file": "src/routes/config.browse.routes.mjs",
+    "pattern": "app.get",
+    "claim": "Browse panes consume read endpoints backed by index data.",
+    "hits": 9,
+    "windows": [
+      {
+        "start": 149,
+        "end": 164,
+        "text": "149:     refreshRecentPlaylistsCache().catch(() => null);\n150:     refreshRecentRadioCache().catch(() => null);\n151:   }, 2200);\n152: \n153:   app.get('/recent/albums', async (req, res) => {\n154:     try {\n155:       const limit = Math.max(1, Math.min(60, Number(req.query?.limit || 18) || 18));\n156:       const now = Date.now();\n157:       const fresh = Array.isArray(recentAlbumsFastCache.items) && recentAlbumsFastCache.items.length && (now - Number(recentAlbumsFastCache.ts || 0)) < 5 * 60 * 1000;\n158: \n159:       if (fresh) {\n160:         const items = recentAlbumsFastCache.items.slice(0, limit);\n161:         return res.json({ ok: true, count: items.length, items, source: 'library-health-cache' });\n162:       }\n163: \n164:       await refreshRecentAlbumsFastCache();"
+      },
+      {
+        "start": 194,
+        "end": 209,
+        "text": "194:       return res.status(500).json({ ok: false, error: e?.message || String(e) });\n195:     }\n196:   });\n197: \n198:   app.get('/recent/podcasts', async (req, res) => {\n199:     try {\n200:       const limit = Math.max(1, Math.min(60, Number(req.query?.limit || 18) || 18));\n201:       const fresh = Array.isArray(recentPodcastsCache.items) && recentPodcastsCache.items.length && (Date.now() - Number(recentPodcastsCache.ts || 0)) < 5 * 60 * 1000;\n202:       if (!fresh) await refreshRecentPodcastsCache();\n203:       const items = (recentPodcastsCache.items || []).slice(0, limit);\n204:       return res.json({ ok: true, count: items.length, items, source: 'podcasts-cache' });\n205:     } catch (e) {\n206:       return res.status(500).json({ ok: false, error: e?.message || String(e) });\n207:     }\n208:   });\n209: "
+      }
+    ]
+  },
+  {
+    "id": "3",
+    "file": "display.html",
+    "pattern": "last-profile",
+    "claim": "Display router reads persisted render profile once on load.",
+    "hits": 1,
+    "windows": [
+      {
+        "start": 22,
+        "end": 37,
+        "text": "22:       let skin = '';\n23:       let theme = '';\n24:       let profile = {};\n25:       try {\n26:         const r = await fetch(`${api}/peppy/last-profile`, { cache: 'no-store' });\n27:         const j = await r.json().catch(() => ({}));\n28:         profile = j?.profile || {};\n29:         if (!forcedMode) mode = String(profile?.displayMode || fallback).trim().toLowerCase();\n30:         skin = String(profile?.skin || '').trim();\n31:         theme = String(profile?.theme || '').trim();\n32:       } catch {}\n33: \n34:       if (mode === 'moode') {\n35:         f.src = 'http://moode.local/index.php';\n36:         return;\n37:       }"
+      }
+    ]
+  },
+  {
+    "id": "3.1",
+    "file": "src/routes/config.runtime-admin.routes.mjs",
+    "pattern": "peppy/last-profile",
+    "claim": "Profile persistence is a separate route from host push.",
+    "hits": 2,
+    "windows": [
+      {
+        "start": 693,
+        "end": 708,
+        "text": "693:       return res.status(500).json({ ok: false, error: e?.message || String(e) });\n694:     }\n695:   });\n696: \n697:   app.get('/peppy/last-profile', async (_req, res) => {\n698:     try {\n699:       const raw = await fs.readFile(peppyLastPushPath, 'utf8');\n700:       const j = JSON.parse(raw || '{}');\n701:       return res.json({ ok: true, profile: j });\n702:     } catch {\n703:       return res.json({ ok: true, profile: null });\n704:     }\n705:   });\n706: \n707:   app.get('/peppy/live', async (req, res) => {\n708:     try {"
+      },
+      {
+        "start": 717,
+        "end": 732,
+        "text": "717:       return res.redirect(302, `http://${hostHdr}:8101/display.html?kiosk=1`);\n718:     }\n719:   });\n720: \n721:   app.post('/peppy/last-profile', async (req, res) => {\n722:     try {\n723:       if (!requireTrackKey(req, res)) return;\n724:       const visIn = (req.body && typeof req.body.visualizer === 'object') ? req.body.visualizer : {};\n725:       const visPreset = String(visIn?.preset || '').trim().toLowerCase();\n726:       const visEnergy = Number(visIn?.energy);\n727:       const visMotion = Number(visIn?.motion);\n728:       const visGlow = Number(visIn?.glow);\n729:       const incoming = {\n730:         url: String(req.body?.url || '').trim(),\n731:         skin: String(req.body?.skin || '').trim(),\n732:         theme: String(req.body?.theme || '').trim(),"
+      }
+    ]
+  },
+  {
+    "id": "3.2",
+    "file": "peppy.html",
+    "pattern": "peppy/vumeter",
+    "claim": "Peppy renderer consumes audio meter samples.",
+    "hits": 9,
+    "windows": [
+      {
+        "start": 245,
+        "end": 260,
+        "text": "245:       <div id=\"peppySetupCard\" class=\"peppySetupCard\" aria-label=\"Peppy setup instructions\">\n246:         <span id=\"peppyReadiness\" class=\"setupTxt\" style=\"color:#fbbf24;\">Checking Peppy readiness\u2026</span>\n247:         <button id=\"applyVuTargetBtn\" class=\"skinBtn\" type=\"button\" title=\"Show instructions to fix /etc/peppymeter/config.txt on moOde\">How to fix VU target</button>\n248:         <button id=\"applySpectrumTargetBtn\" class=\"skinBtn\" type=\"button\" title=\"Show instructions to fix /etc/peppyspectrum/config.txt on moOde\">How to fix Spectrum target</button>\n249:         <span class=\"setupTxt\" id=\"vuTargetHintWrap\" style=\"display:none;\">VU target should be <code id=\"vuTargetHint\">http://sonuvi.local:3101/peppy/vumeter</code>.</span>\n250:         <span class=\"setupTxt\" id=\"spectrumTargetHintWrap\" style=\"display:none;\">Spectrum target should be <code id=\"spectrumTargetHint\">http://sonuvi.local:3101/peppy/spectrum</code>.</span>\n251:       </div>\n252: \n253:       <div id=\"skinOps\" class=\"skinOps\" aria-label=\"Skin operations\">\n254:         <button id=\"skinExport\" class=\"skinBtn\" type=\"button\">Export JSON</button>\n255:         <button id=\"skinImport\" class=\"skinBtn\" type=\"button\">Import</button>\n256:         <button id=\"skinSavePreset\" class=\"skinBtn\" type=\"button\">Save as Preset</button>\n257:         <button id=\"skinDeletePreset\" class=\"skinBtn\" type=\"button\">Delete this Preset</button>\n258:         <select id=\"peppyPreset\" class=\"skinSelect\" aria-label=\"Peppy preset\">\n259:           <option value=\"\">Load preset\u2026</option>\n260:           <option value=\"builtin:0\">Modern Blue Circular</option>"
+      },
+      {
+        "start": 419,
+        "end": 434,
+        "text": "419:         try {\n420:           const el = document.getElementById('vuTargetHint');\n421:           if (!el) return;\n422:           const base = String(api || candidates[0] || '').replace(/\\/+$/, '');\n423:           el.textContent = `${base}/peppy/vumeter`;\n424:         } catch {}\n425:       }\n426: \n427:       function refreshSpectrumTargetHint(){\n428:         try {\n429:           const el = document.getElementById('spectrumTargetHint');\n430:           if (!el) return;\n431:           const base = String(api || candidates[0] || '').replace(/\\/+$/, '');\n432:           el.textContent = `${base}/peppy/spectrum`;\n433:         } catch {}\n434:       }"
+      }
+    ]
+  },
+  {
+    "id": "3.3",
+    "file": "player.html",
+    "pattern": "player-render",
+    "claim": "Builder targets a separate runtime renderer.",
+    "hits": 1,
+    "windows": [
+      {
+        "start": 87,
+        "end": 102,
+        "text": "87:         const [w,h]=dims(size);\n88:         frame.style.width=w+'px'; frame.style.height=h+'px';\n89:         preview.width=w; preview.height=h; preview.style.width=w+'px'; preview.style.height=h+'px';\n90:         applyScaleOnly();\n91:         if (reload) preview.src=`player-render.html?kiosk=1&size=${encodeURIComponent(size)}&theme=${encodeURIComponent(theme)}&sw=${Date.now()}`;\n92:         localStorage.setItem(KEY,JSON.stringify({size,theme,ts:Date.now()}));\n93:       }\n94:       try{const p=JSON.parse(localStorage.getItem(KEY)||'{}'); if(p.size) sizeSel.value=p.size; if(p.theme) themeSel.value=p.theme;}catch{}\n95:       sizeSel.addEventListener('change',()=>apply(true));\n96:       themeSel.addEventListener('change',()=>apply(true));\n97:       pushPlayerFromTab?.addEventListener('click',()=>{ try{ window.parent?.postMessage({ type:'np-display-action', action:'push-player' }, '*'); }catch{} });\n98:       window.addEventListener('resize',()=>applyScaleOnly());\n99:       apply(true);\n100:       refreshTargetHint();\n101:     })();\n102:   </script>"
+      }
+    ]
+  },
+  {
+    "id": "3.4",
+    "file": "display.html",
+    "pattern": "f.src",
+    "claim": "Router changes iframe URL; it does not issue SSH itself.",
+    "hits": 6,
+    "windows": [
+      {
+        "start": 31,
+        "end": 46,
+        "text": "31:         theme = String(profile?.theme || '').trim();\n32:       } catch {}\n33: \n34:       if (mode === 'moode') {\n35:         f.src = 'http://moode.local/index.php';\n36:         return;\n37:       }\n38:       if (mode === 'player') {\n39:         const q = new URLSearchParams();\n40:         q.set('kiosk', '1');\n41:         q.set('size', String(profile?.playerSize || '1280x400'));\n42:         q.set('ts', String(Date.now()));\n43:         f.src = `player-render.html?${q.toString()}`;\n44:         return;\n45:       }\n46:       if (mode === 'visualizer' || mode === 'viz') {"
+      },
+      {
+        "start": 39,
+        "end": 54,
+        "text": "39:         const q = new URLSearchParams();\n40:         q.set('kiosk', '1');\n41:         q.set('size', String(profile?.playerSize || '1280x400'));\n42:         q.set('ts', String(Date.now()));\n43:         f.src = `player-render.html?${q.toString()}`;\n44:         return;\n45:       }\n46:       if (mode === 'visualizer' || mode === 'viz') {\n47:         // Prefer explicit pushed visualizer URL when present.\n48:         const pushedUrl = String(profile?.url || '').trim();\n49:         if (/visualizer\\.html/i.test(pushedUrl)) {\n50:           try {\n51:             const u = new URL(pushedUrl, location.href);\n52:             u.searchParams.set('kiosk', '1');\n53:             u.searchParams.set('ts', String(Date.now()));\n54:             f.src = u.toString();"
+      }
+    ]
+  },
+  {
+    "id": "3.5",
+    "file": "moode-nowplaying-api.mjs",
+    "pattern": "peppy/vumeter",
+    "claim": "Server proxies meter data rather than producing audio locally.",
+    "hits": 2,
+    "windows": [
+      {
+        "start": 708,
+        "end": 723,
+        "text": "708: \n709: // PeppyMeter bridge (HTTP level data -> app API)\n710: let peppyMeterLast = { left: 0, right: 0, mono: 0, spectrum: [], ts: 0, source: 'init' };\n711: let peppySpectrumLast = { bins: [], size: 0, maxValue: 100, ts: 0, source: 'init' };\n712: app.put('/peppy/vumeter', (req, res) => {\n713:   try {\n714:     const left = Number(req?.body?.left ?? req?.query?.left ?? 0);\n715:     const right = Number(req?.body?.right ?? req?.query?.right ?? 0);\n716:     const mono = Number(req?.body?.mono ?? req?.query?.mono ?? 0);\n717: \n718:     let spectrumRaw = req?.body?.spectrum ?? req?.query?.spectrum ?? [];\n719:     if (typeof spectrumRaw === 'string') {\n720:       try { spectrumRaw = JSON.parse(spectrumRaw); } catch { spectrumRaw = []; }\n721:     }\n722: \n723:     // Accept common alternate field names from external analyzers/bridges."
+      },
+      {
+        "start": 771,
+        "end": 786,
+        "text": "771:     return res.status(400).json({ ok: false, error: 'invalid payload' });\n772:   }\n773: });\n774: \n775: app.get('/peppy/vumeter', (_req, res) => {\n776:   const now = Date.now();\n777:   const ageMs = Math.max(0, now - Number(peppyMeterLast?.ts || 0));\n778:   return res.json({ ok: true, meter: peppyMeterLast, ageMs, fresh: ageMs < 4000 });\n779: });\n780: \n781: // PeppySpectrum bridge (bins -> app API)\n782: app.put('/peppy/spectrum', (req, res) => {\n783:   try {\n784:     let binsRaw = req?.body?.bins ?? req?.body?.spectrum ?? req?.query?.bins ?? req?.query?.spectrum ?? [];\n785:     if (typeof binsRaw === 'string') {\n786:       try { binsRaw = JSON.parse(binsRaw); } catch { binsRaw = []; }"
+      }
+    ]
+  },
+  {
+    "id": "3.6",
+    "file": "scripts/export-peppymeter-skins.mjs",
+    "pattern": "meter.json",
+    "claim": "Skin export reads skin definitions, not only asset catalog.",
+    "hits": 1,
+    "windows": [
+      {
+        "start": 12,
+        "end": 27,
+        "text": "12: \n13: for (const ent of entries) {\n14:   if (!ent.isDirectory()) continue;\n15:   const skinDir = path.join(skinsDir, ent.name);\n16:   const meterJson = path.join(skinDir, 'meter.json');\n17:   try {\n18:     const cfg = JSON.parse(await fs.readFile(meterJson, 'utf8'));\n19:     if (String(cfg?.resolution || '') !== '1280x400') continue;\n20:     const m = cfg.meter || {};\n21:     const a = cfg.assets || {};\n22: \n23:     // Native export currently supports circular schema only.\n24:     if (String(m.type || 'circular') !== 'circular') {\n25:       continue;\n26:     }\n27: "
+      }
+    ]
+  },
+  {
+    "id": "4",
+    "file": "src/routes/config.queue-wizard-apply.routes.mjs",
+    "pattern": "app.post",
+    "claim": "Queue mutation is distinct from preview generation.",
+    "hits": 2,
+    "windows": [
+      {
+        "start": 14,
+        "end": 29,
+        "text": "14: \n15: export function registerConfigQueueWizardApplyRoute(app, deps) {\n16:   const { requireTrackKey } = deps;\n17: \n18:   app.post('/config/queue-wizard/add-to-playlist', async (req, res) => {\n19:     try {\n20:       if (!requireTrackKey(req, res)) return;\n21:       const rawName = String(req.body?.playlistName || '').trim();\n22:       const playlistName = safePlaylistName(rawName);\n23:       if (!playlistName || playlistName !== rawName) {\n24:         return res.status(400).json({ ok: false, error: 'playlistName is required and may contain only letters, numbers, spaces, _, ., or -' });\n25:       }\n26:       const tracks = Array.isArray(req.body?.tracks)\n27:         ? req.body.tracks.map((x) => String(x || '').trim().replace(/[\\\\/]+$/g, '')).filter(Boolean)\n28:         : [];\n29:       if (!tracks.length) return res.status(400).json({ ok: false, error: 'tracks[] is required' });"
+      },
+      {
+        "start": 44,
+        "end": 59,
+        "text": "44:     }\n45:   });\n46: \n47:   // --- apply route ---\n48:   app.post('/config/queue-wizard/apply', async (req, res) => {\n49:     try {\n50:       if (!requireTrackKey(req, res)) return;\n51: \n52:       const mode = String(req.body?.mode || 'replace').trim().toLowerCase();\n53:       const saveOnly = Boolean(req.body?.saveOnly);\n54:       if (!['replace', 'append'].includes(mode)) {\n55:         return res.status(400).json({ ok: false, error: 'mode must be replace|append' });\n56:       }\n57: \n58:       const shuffle = Boolean(req.body?.shuffle);\n59:       const forceRandomOff = Boolean(req.body?.forceRandomOff);"
+      }
+    ]
+  },
+  {
+    "id": "4.1",
+    "file": "scripts/queue-wizard.js",
+    "pattern": "currentTracks",
+    "claim": "Wizard stages preview tracks before apply.",
+    "hits": 34,
+    "windows": [
+      {
+        "start": 88,
+        "end": 103,
+        "text": "88:   let podcastShowByRss = new Map();\n89: \n90:   // Persist the current list (vibe OR filters)\n91:   let currentListSource = 'none'; // 'none' | 'filters' | 'vibe' | 'radio' | 'podcast' | 'queue'\n92:   let currentTracks = [];         // array of {artist,title,album,genre,file,...}\n93:   let currentFiles = [];          // array of file paths\n94: \n95:   // Prevent repeated collage preview for the same inputs\n96:   let lastCollageSig = '';\n97:   let collageInputTimer = null;\n98:   let collageSuppressedUntil = 0;\n99:   let lastPreviewDataBase64 = '';\n100:   let lastPreviewMimeType = 'image/jpeg';\n101:   let lastPreviewSig = '';\n102:   let dragTrackIdx = -1;\n103:   let dragOverTrackIdx = -1;"
+      },
+      {
+        "start": 703,
+        "end": 718,
+        "text": "703:     const selectedArtists = selectedValues($('artists')).map(shortArtist).filter(Boolean);\n704:     const selectedAlbums = selectedValues($('albums')).map((x) => String(x || '').trim()).filter(Boolean);\n705:     const selectedGenres = selectedValues($('genres')).map((x) => String(x || '').trim()).filter(Boolean);\n706: \n707:     const trackArtists = currentTracks.map((t) => String(t?.artist || '').trim()).filter(Boolean);\n708:     const trackGenres = currentTracks\n709:       .map((t) => String(t?.genre || '').split(/[;,|/]/).map((x) => String(x || '').trim()).filter(Boolean))\n710:       .flat();\n711: \n712:     const topArtist = topFrom(trackArtists);\n713:     const topGenre = topFrom(trackGenres);\n714: \n715:     if (currentListSource === 'vibe') {\n716:       return sanitizePlaylistName(`Vibe Mix${topArtist ? ` \u2014 ${topArtist}` : ''}`);\n717:     }\n718: "
+      }
+    ]
+  },
+  {
+    "id": "4.2",
+    "file": "src/routes/config.queue-wizard-preview.routes.mjs",
+    "pattern": "app.post",
+    "claim": "Filter preview constructs candidate results separately from playback mutation.",
+    "hits": 1,
+    "windows": [
+      {
+        "start": 64,
+        "end": 79,
+        "text": "64:       return true;\n65:     }\n66:   }\n67: \n68:   app.post('/config/queue-wizard/preview', async (req, res) => {\n69:     try {\n70:       if (!requireTrackKey(req, res)) return;\n71: \n72:       const wantedGenres = Array.isArray(req.body?.genres)\n73:         ? req.body.genres.map((x) => String(x || '').trim().toLowerCase()).filter(Boolean)\n74:         : [];\n75:       const wantedArtists = Array.isArray(req.body?.artists)\n76:         ? req.body.artists.map((x) => String(x || '').trim().toLowerCase()).filter(Boolean)\n77:         : [];\n78:       const wantedAlbums = Array.isArray(req.body?.albums)\n79:         ? req.body.albums.map((x) => String(x || '').trim().toLowerCase()).filter(Boolean)"
+      }
+    ]
+  },
+  {
+    "id": "4.3",
+    "file": "src/routes/config.queue-wizard-vibe.routes.mjs",
+    "pattern": "spawn",
+    "claim": "Vibe work delegates to Python/library matching.",
+    "hits": 7,
+    "windows": [
+      {
+        "start": 1,
+        "end": 14,
+        "text": "1: import fs from 'node:fs/promises';\n2: import path from 'node:path';\n3: import { execFile, spawn } from 'node:child_process';\n4: import { promisify } from 'node:util';\n5: import { MPD_HOST } from '../config.mjs';\n6: \n7: const execFileP = promisify(execFile);\n8: \n9: function makeVibeJobId() {\n10:   return `vibe-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;\n11: }\n12: \n13: export function registerConfigQueueWizardVibeRoutes(app, deps) {\n14:   const {"
+      },
+      {
+        "start": 319,
+        "end": 334,
+        "text": "319:       if (!indexReady) {\n320:         return res.status(500).json({ ok: false, error: job.error || 'Index build failed', jobId });\n321:       }\n322: \n323:       const child = spawn('python3', [pyPath, ...pyArgs], {\n324:         stdio: ['ignore', 'pipe', 'pipe'],\n325:       });\n326:       job.proc = child;\n327:       appendVibeJobLog(job, 'run', {\n328:         seedArtist: artist,\n329:         seedTitle: title,\n330:         targetQueue,\n331:         minRating,\n332:         excludeGenre,\n333:         playNow,\n334:         keepPlaying,"
+      }
+    ]
+  },
+  {
+    "id": "4.4",
+    "file": "src/routes/config.queue-wizard-collage.routes.mjs",
+    "pattern": "collage-preview",
+    "claim": "Collage route builds images, not playlist-name collision checking.",
+    "hits": 1,
+    "windows": [
+      {
+        "start": 94,
+        "end": 109,
+        "text": "94: \n95: export function registerConfigQueueWizardCollageRoute(app, deps) {\n96:   const { requireTrackKey } = deps;\n97: \n98:   app.post('/config/queue-wizard/collage-preview', async (req, res) => {\n99:     try {\n100:       if (!requireTrackKey(req, res)) return;\n101: \n102:       const playlistName = String(req.body?.playlistName || '').trim() || null;\n103:       const tracks = Array.isArray(req.body?.tracks) ? req.body.tracks : [];\n104:       const forceSingle = Boolean(req.body?.forceSingle);\n105:       const randomize = Boolean(req.body?.randomize);\n106: \n107:       const jpg = await buildCollageJpeg({ tracks, req, forceSingle, randomize });\n108:       return res.json({\n109:         ok: true,"
+      }
+    ]
+  },
+  {
+    "id": "4.5",
+    "file": "src/routes/queue.routes.mjs",
+    "pattern": "app.post",
+    "claim": "Live queue operations are Server route mutations.",
+    "hits": 2,
+    "windows": [
+      {
+        "start": 140,
+        "end": 155,
+        "text": "140:       source: 'moode-json',\n141:     };\n142:   }\n143: \n144:   app.post('/queue/advance', async (req, res) => {\n145:     try {\n146:       if (!requireTrackKey(req, res)) return;\n147: \n148:       const songidRaw =\n149:         (req?.body?.songid !== undefined ? req.body.songid : undefined) ??\n150:         (req?.query?.songid !== undefined ? req.query.songid : undefined);\n151: \n152:       const songid = Number.parseInt(String(songidRaw ?? '').trim(), 10);\n153: \n154:       const pos0raw =\n155:         (req?.body?.pos0 !== undefined ? req.body.pos0 : undefined) ??"
+      },
+      {
+        "start": 264,
+        "end": 279,
+        "text": "264:       return res.status(500).json({ ok: false, error: e?.message || String(e) });\n265:     }\n266:   });\n267: \n268:   app.post('/queue/mix', async (req, res) => {\n269:     try {\n270:       if (!requireTrackKey(req, res)) return;\n271: \n272:       const artistsRaw = Array.isArray(req?.body?.artists) ? req.body.artists : [];\n273:       const artists = artistsRaw\n274:         .map((x) => String(x || '').trim())\n275:         .filter(Boolean);\n276: \n277:       if (!artists.length) {\n278:         return res.status(400).json({ ok: false, error: 'artists[] is required' });\n279:       }"
+      }
+    ]
+  },
+  {
+    "id": "5",
+    "file": "src/routes/mobile.routes.mjs",
+    "pattern": "local-source-manifest",
+    "claim": "Server can access and deliver locally mounted media; not solely a metadata facade.",
+    "hits": 1,
+    "windows": [
+      {
+        "start": 4847,
+        "end": 4862,
+        "text": "4847:     entries.sort((a, b) => a.relativePath.localeCompare(b.relativePath));\n4848:     res.set('Cache-Control', 'no-store');\n4849:     return res.json({\n4850:       ok: true,\n4851:       schema: 'now-playing.mobile-local-source-manifest.v1',\n4852:       catalogRevision: catalog.builtAt || 'unknown',\n4853:       entries,\n4854:     });\n4855:   }));\n4856: \n4857:   app.post('/v1/mobile/playback/events', asyncRoute(async (req, res) => {\n4858:     const session = requireSession(req, res);\n4859:     if (!session) return;\n4860:     if (!listeningHistory) return errorResponse(res, 503, 'mobile playback history is not configured');\n4861: \n4862:     const body = req?.body && typeof req.body === 'object' ? req.body : {};"
+      }
+    ]
+  },
+  {
+    "id": "5.1",
+    "file": "src/routes/config.library-health-read.routes.mjs",
+    "pattern": "app.get",
+    "claim": "Library health reads report/index state.",
+    "hits": 7,
+    "windows": [
+      {
+        "start": 197,
+        "end": 212,
+        "text": "197: \n198: export function registerConfigLibraryHealthReadRoutes(app, deps) {\n199:   const { requireTrackKey, mpdQueryRaw, getRatingForFile, mpdStickerGetSong } = deps;\n200: \n201:   app.get('/config/library-health', async (req, res) => {\n202:     try {\n203:       if (!requireTrackKey(req, res)) return;\n204:       if (\n205:         typeof mpdQueryRaw !== 'function' ||\n206:         typeof getRatingForFile !== 'function' ||\n207:         typeof mpdStickerGetSong !== 'function'\n208:       ) {\n209:         return res.status(501).json({ ok: false, error: 'library-health dependencies not wired' });\n210:       }\n211: \n212:       const sampleLimit = Math.max(10, Math.min(500, Number(req.query?.sampleLimit || 100)));"
+      },
+      {
+        "start": 302,
+        "end": 317,
+        "text": "302:       return res.status(500).json({ ok: false, error: e?.message || String(e) });\n303:     }\n304:   });\n305: \n306:   app.get('/config/library-health/job', async (req, res) => {\n307:     try {\n308:       if (!requireTrackKey(req, res)) return;\n309:       return res.json({\n310:         ok: true,\n311:         running: !!libraryHealthJob,\n312:         startedAt: libraryHealthJob?.startedAt || null,\n313:         cache: libraryHealthCache\n314:           ? {\n315:               generatedAt: libraryHealthCache.payload?.generatedAt || null,\n316:               cachedAt: new Date(Number(libraryHealthCache.cachedAt || 0)).toISOString(),\n317:               ageMs: Date.now() - Number(libraryHealthCache.cachedAt || 0),"
+      }
+    ]
+  },
+  {
+    "id": "5.2",
+    "file": "src/routes/art.routes.mjs",
+    "pattern": "isQobuzCurrentArtReference",
+    "claim": "Artwork endpoint is provider-aware rather than one generic album lookup.",
+    "hits": 3,
+    "windows": [
+      {
+        "start": 1,
+        "end": 15,
+        "text": "1: import fs from 'node:fs';\n2: import path from 'node:path';\n3: import sharp from 'sharp';\n4: import { isQobuzCurrentArtReference } from '../lib/qobuz-connect.mjs';\n5: \n6: async function fetchMoodeCoverBytes(ref, deps) {\n7:   const { agentForUrl, normalizeCoverUrl, MOODE_BASE_URL, dispatcherForUrl } = deps;\n8: \n9:   const s = String(ref || '').trim();\n10:   if (!s) throw new Error('empty cover ref');\n11: \n12:   if (/^https?:\\/\\//i.test(s)) {\n13:     const resp = await fetch(s, { agent: agentForUrl(s), cache: 'no-store' });\n14:     if (!resp.ok) throw new Error(`cover fetch failed: HTTP ${resp.status}`);\n15:     return Buffer.from(await resp.arrayBuffer());"
+      },
+      {
+        "start": 218,
+        "end": 233,
+        "text": "218:         // Qobuz payloads use an opaque fingerprint on the mediated current-art\n219:         // URL so browsers repaint when albums change. Resolve that reference\n220:         // through the live source; never treat the public current-art URL as\n221:         // the image source itself (which would re-cache the first Qobuz cover).\n222:         if (isQobuzCurrentArtReference(v)) {\n223:           const best = await resolveCurrentBestArt();\n224:           if (!best) return res.status(404).end();\n225:           return await serveCachedOrResizedSquare(res, best, 640, artPath640ForKey, deps);\n226:         }\n227: \n228:         const key = normalizeArtKey(v);\n229:         if (!key) return res.status(404).end();\n230: \n231:         // Older index/player clients stripped the file query from the\n232:         // file-aware station-logo URL. Resolve that generic key against the\n233:         // current song instead of returning a stale/shared logo or 404."
+      }
+    ]
+  },
+  {
+    "id": "5.3",
+    "file": "src/routes/config.library-health-animated-art.routes.mjs",
+    "pattern": "app.post",
+    "claim": "Animated-art search/override is its own provider pipeline.",
+    "hits": 4,
+    "windows": [
+      {
+        "start": 918,
+        "end": 933,
+        "text": "918:       return res.status(500).json({ ok: false, error: e?.message || String(e) });\n919:     }\n920:   });\n921: \n922:   app.post('/config/library-health/animated-art/suppress', async (req, res) => {\n923:     try {\n924:       if (!requireTrackKey(req, res)) return;\n925:       const keyRaw = String(req.body?.key || '');\n926:       const artist = String(req.body?.artist || '').trim();\n927:       const album = String(req.body?.album || '').trim();\n928:       const requestedKey = keyRaw || albumKey(artist, album);\n929:       const suppress = !!req.body?.suppress;\n930:       if (!String(requestedKey || '').trim()) return res.status(400).json({ ok: false, error: 'key or artist+album required' });\n931: \n932:       const cache = await readCache();\n933:       cache.entries = cache.entries || {};"
+      },
+      {
+        "start": 949,
+        "end": 964,
+        "text": "949:       return res.status(500).json({ ok: false, error: e?.message || String(e) });\n950:     }\n951:   });\n952: \n953:   app.post('/config/library-health/animated-art/clear', async (req, res) => {\n954:     try {\n955:       if (!requireTrackKey(req, res)) return;\n956:       const keyRaw = String(req.body?.key || '');\n957:       const artist = String(req.body?.artist || '').trim();\n958:       const album = String(req.body?.album || '').trim();\n959:       const requestedKey = keyRaw || albumKey(artist, album);\n960:       if (!String(requestedKey || '').trim()) return res.status(400).json({ ok: false, error: 'key or artist+album required' });\n961: \n962:       const cache = await readCache();\n963:       cache.entries = cache.entries || {};\n964: "
+      }
+    ]
+  },
+  {
+    "id": "5.4",
+    "file": "src/routes/config.library-health-performers.routes.mjs",
+    "pattern": "app.post",
+    "claim": "Metadata overrides are explicit write routes.",
+    "hits": 3,
+    "windows": [
+      {
+        "start": 166,
+        "end": 181,
+        "text": "166:       return res.status(500).json({ ok: false, error: e?.message || String(e) });\n167:     }\n168:   });\n169: \n170:   app.post('/config/library-health/album-artist-cleanup', async (req, res) => {\n171:     try {\n172:       if (!requireTrackKey(req, res)) return;\n173:       const folderWanted = String(req.body?.folder || '').trim();\n174:       if (!folderWanted) return res.status(400).json({ ok: false, error: 'folder is required' });\n175: \n176:       const isAudio = (f) => /\\.(flac|mp3|m4a|aac|ogg|opus|wav|aiff|alac|dsf|wv|ape)$/i.test(String(f || ''));\n177:       const folderOf = (file) => {\n178:         const s = String(file || '');\n179:         const i = s.lastIndexOf('/');\n180:         return i > 0 ? s.slice(0, i) : '(root)';\n181:       };"
+      },
+      {
+        "start": 281,
+        "end": 296,
+        "text": "281:       return res.status(500).json({ ok: false, error: e?.message || String(e) });\n282:     }\n283:   });\n284: \n285:   app.post('/config/library-health/album-performers-apply', async (req, res) => {\n286:     try {\n287:       if (!requireTrackKey(req, res)) return;\n288:       const folderWanted = String(req.body?.folder || '').trim();\n289:       const rawLines = Array.isArray(req.body?.performers)\n290:         ? req.body.performers.map((x) => String(x || '').trim()).filter(Boolean)\n291:         : [];\n292:       const performerVals = [];\n293:       const producerVals = [];\n294:       for (const ln of rawLines) {\n295:         if (/^PERFORMER=/i.test(ln)) {\n296:           const v = ln.replace(/^PERFORMER=/i, '').trim();"
+      }
+    ]
+  },
+  {
+    "id": "5.5",
+    "file": "src/routes/podcasts-download.routes.mjs",
+    "pattern": "app.post.*download",
+    "claim": "Podcast download has separate Server lifecycle from subscriptions.",
+    "hits": 2,
+    "windows": [
+      {
+        "start": 252,
+        "end": 267,
+        "text": "252:       return res.status(500).json({ ok: false, error: e?.message || String(e) });\n253:     }\n254:   });\n255: \n256:   app.post('/podcasts/download-one', async (req, res) => {\n257:     try {\n258:       const rss = normUrl(req.body?.rss);\n259:       const id = String(req.body?.id || '').trim().toLowerCase();\n260:       const enclosure = String(req.body?.enclosure || '').trim();\n261:       const imageUrl = String(req.body?.imageUrl || '').trim();\n262: \n263:       if (!rss) return res.status(400).json({ ok: false, error: 'Missing/invalid rss' });\n264:       if (!/^[a-f0-9]{12}$/.test(id)) return res.status(400).json({ ok: false, error: 'Missing/invalid id' });\n265:       if (!/^https?:\\/\\//i.test(enclosure)) return res.status(400).json({ ok: false, error: 'Missing/invalid enclosure' });\n266: \n267:       const subs = readSubs();"
+      },
+      {
+        "start": 482,
+        "end": 497,
+        "text": "482:       map: mapRes,\n483:     };\n484:   };\n485: \n486:   app.post('/podcasts/download-latest', async (req, res) => {\n487:     try {\n488:       const rss = normUrl(req.body?.rss);\n489:       const count = Math.max(0, Math.min(50, Number(req.body?.count ?? 5)));\n490:       if (!rss) return res.status(400).json({ ok: false, error: 'Missing/invalid rss' });\n491:       const subs = readSubs();\n492:       const sub = subs.find(it => normUrl(it?.rss) === rss);\n493:       if (!sub) return res.status(404).json({ ok: false, error: 'Subscription not found', rss });\n494:       const out = await runDownloadLatestForSubscription(sub, count);\n495:       return res.json(out);\n496:     } catch (e) {\n497:       return res.status(500).json({ ok: false, error: e?.message || String(e) });"
+      }
+    ]
+  },
+  {
+    "id": "5.6",
+    "file": "src/lib/radio-metadata.mjs",
+    "pattern": "holdback",
+    "claim": "Radio metadata applies stability policy, not blind passthrough.",
+    "hits": 2,
+    "windows": [
+      {
+        "start": 303,
+        "end": 311,
+        "text": "303:     artUrl: text(parsedIheart?.artUrl),\n304:   };\n305: }\n306: \n307: export function radioHoldbackPolicy(stationName = '', stationKey = '', { defaultMs = 6000, wfmtMs = 45000, normalMs = 1500 } = {}) {\n308:   const source = `${text(stationName)} ${text(stationKey)}`.toLowerCase();\n309:   const strict = /\\bwfmt\\b|\\bclassical\\b|\\bking\\s*fm\\b|\\bkusc\\b|\\bkdfc\\b|\\bbc\\s*radio\\s*3\\b/.test(source);\n310:   return { mode: strict ? 'strict' : 'normal', holdbackMs: strict ? (source.includes('wfmt') ? wfmtMs : defaultMs) : normalMs };\n311: }"
+      },
+      {
+        "start": 306,
+        "end": 311,
+        "text": "306: \n307: export function radioHoldbackPolicy(stationName = '', stationKey = '', { defaultMs = 6000, wfmtMs = 45000, normalMs = 1500 } = {}) {\n308:   const source = `${text(stationName)} ${text(stationKey)}`.toLowerCase();\n309:   const strict = /\\bwfmt\\b|\\bclassical\\b|\\bking\\s*fm\\b|\\bkusc\\b|\\bkdfc\\b|\\bbc\\s*radio\\s*3\\b/.test(source);\n310:   return { mode: strict ? 'strict' : 'normal', holdbackMs: strict ? (source.includes('wfmt') ? wfmtMs : defaultMs) : normalMs };\n311: }"
+      }
+    ]
+  },
+  {
+    "id": "6",
+    "file": "src/services/about.service.mjs",
+    "pattern": "createAboutResolver",
+    "claim": "About metadata service is not a playback-history consumer.",
+    "hits": 1,
+    "windows": [
+      {
+        "start": 7,
+        "end": 22,
+        "text": "7:   AVAILABLE: 'available',\n8:   NOT_REQUESTED: 'not-requested',\n9: });\n10: \n11: export function createAboutResolver({ providers = [] } = {}) {\n12:   const configuredProviders = providers.filter((provider) => (\n13:     provider && provider.configured && typeof provider.getAbout === 'function'\n14:   ));\n15: \n16:   async function resolve(input = {}) {\n17:     if (!configuredProviders.length) {\n18:       return { status: ABOUT_STATUS.UNCONFIGURED, data: null, provider: null };\n19:     }\n20:     for (const provider of configuredProviders) {\n21:       try {\n22:         const data = await provider.getAbout(input);"
+      }
+    ]
+  },
+  {
+    "id": "6.1",
+    "file": "moode-nowplaying-api.mjs",
+    "pattern": "suppressMpdHistory",
+    "claim": "Qobuz/UPnP ownership affects MPD history eligibility.",
+    "hits": 5,
+    "windows": [
+      {
+        "start": 7180,
+        "end": 7195,
+        "text": "7180:       lastNowPlayingTs = Date.now();\n7181:       return res.json(payload);\n7182:     }\n7183:     const qobuzOwnershipUnknown = currentQobuzState?.ownershipState === 'unknown';\n7184:     if (currentQobuzState.suppressMpdHistory && !qobuzOwnershipUnknown) {\n7185:       return res.status(503).json({\n7186:         error: 'qobuz metadata unavailable',\n7187:         ...(debug ? { reason: currentQobuzState.reason || 'transport-error' } : {}),\n7188:       });\n7189:     }\n7190: \n7191:     let upnpNowPlaying = null;\n7192:     if (upnpPlaybackSession) {\n7193:       try { upnpNowPlaying = await upnpPlaybackSession.getNowPlaying(); } catch {}\n7194:     }\n7195:     if (upnpNowPlaying) {"
+      },
+      {
+        "start": 8761,
+        "end": 8776,
+        "text": "8761: \n8762: async function resolveBestArtForCurrentSong(song, statusRaw) {\n8763:   const qobuz = await qobuzConnect.get().catch(() => null);\n8764:   if (qobuz?.active && qobuz.artworkUrl) return qobuz.artworkUrl;\n8765:   if (qobuz?.suppressMpdHistory && qobuz?.ownershipState !== 'unknown') return '';\n8766: \n8767:   const file = String(song?.file || '').trim();\n8768:   if (!file) return '';\n8769:   if (qobuz?.ownershipState === 'unknown' && !hasVerifiedMpdPlaybackEvidence({\n8770:     state: moodeValByKey(statusRaw, 'state'),\n8771:     file,\n8772:   })) return '';\n8773: \n8774:   const stream = isStreamPath(file);\n8775:   const airplay =\n8776:     isAirplayFile(file) || String(song?.encoded || '').toLowerCase() === 'airplay';"
+      }
+    ]
+  },
+  {
+    "id": "6.2",
+    "file": "src/routes/config.diagnostics.routes.mjs",
+    "pattern": "qobuzUnavailableActions",
+    "claim": "Transport protects foreign playback ownership.",
+    "hits": 2,
+    "windows": [
+      {
+        "start": 826,
+        "end": 841,
+        "text": "826:       if (!requireTrackKey(req, res)) return;\n827:       const action = String(req.body?.action || '').trim().toLowerCase();\n828:       const mpdHost = String(MPD_HOST || 'moode.local');\n829:       const map = { play: 'play', pause: 'pause', toggle: 'toggle', next: 'next', prev: 'prev', previous: 'prev', stop: 'stop' };\n830:       const qobuzUnavailableActions = new Set([\n831:         'play', 'pause', 'toggle', 'toggle_play_pause', 'next', 'prev', 'previous', 'stop',\n832:         'seek', 'seekcur', 'seekpct', 'shuffle', 'shufflequeue', 'undoshuffle',\n833:         'repeat', 'repeat-mode', 'consume', 'crossfade',\n834:       ]);\n835: \n836:       if (qobuzUnavailableActions.has(action) && typeof getQobuzNowPlaying === 'function') {\n837:         let qobuz = null;\n838:         try { qobuz = await getQobuzNowPlaying(); } catch {}\n839:         if (qobuz?.active) {\n840:           return res.status(409).json({\n841:             ok: false,"
+      },
+      {
+        "start": 832,
+        "end": 847,
+        "text": "832:         'seek', 'seekcur', 'seekpct', 'shuffle', 'shufflequeue', 'undoshuffle',\n833:         'repeat', 'repeat-mode', 'consume', 'crossfade',\n834:       ]);\n835: \n836:       if (qobuzUnavailableActions.has(action) && typeof getQobuzNowPlaying === 'function') {\n837:         let qobuz = null;\n838:         try { qobuz = await getQobuzNowPlaying(); } catch {}\n839:         if (qobuz?.active) {\n840:           return res.status(409).json({\n841:             ok: false,\n842:             unavailable: true,\n843:             source: 'qobuz-connect',\n844:             error: 'MPD playback controls are unavailable while Qobuz Connect owns playback',\n845:           });\n846:         }\n847:       }"
+      }
+    ]
+  },
+  {
+    "id": "6.3",
+    "file": "moode-nowplaying-api.mjs",
+    "pattern": "sticker set song",
+    "claim": "Rating writes use MPD sticker storage.",
+    "hits": 1,
+    "windows": [
+      {
+        "start": 2907,
+        "end": 2922,
+        "text": "2907:   if (!f || !k) throw new Error('mpdStickerSetSong: missing file/key');\n2908:   if (isStreamPath(f) || isAirplayFile(f)) throw new Error('mpdStickerSetSong: not a local file');\n2909: \n2910:   const raw = await mpdQueryRaw(\n2911:     `sticker set song ${mpdEscapeValue(f)} ${k} ${mpdEscapeValue(v)}`\n2912:   );\n2913:   if (!raw || mpdHasACK(raw)) throw new Error('mpd sticker set failed');\n2914:   return true;\n2915: }\n2916: \n2917: async function mpdStickerDeleteSong(file, key) {\n2918:   const f = String(file || '').trim();\n2919:   const k = String(key || '').trim();\n2920:   if (!f || !k) return false;\n2921:   if (isStreamPath(f) || isAirplayFile(f)) return false;\n2922: "
+      }
+    ]
+  },
+  {
+    "id": "6.4",
+    "file": "scripts/index-ui.js",
+    "pattern": "const elapsedNow",
+    "claim": "Display extrapolates progress between state reads.",
+    "hits": 1,
+    "windows": [
+      {
+        "start": 1931,
+        "end": 1946,
+        "text": "1931:   const tick = () => {\n1932:     if (!progressAnim.running) return;\n1933: \n1934:     const now = performance.now();\n1935:     const elapsedNow = progressAnim.baseElapsed + (now - progressAnim.t0) / 1000;\n1936: \n1937:     const pct = (elapsedNow / progressAnim.duration) * 100;\n1938:     updateProgressBarPercent(pct);\n1939: \n1940:     if (elapsedNow >= progressAnim.duration) {\n1941:       updateProgressBarPercent(100);\n1942:       stopProgressAnimator();\n1943:       return;\n1944:     }\n1945: \n1946:     progressAnimRaf = requestAnimationFrame(tick);"
+      }
+    ]
+  },
+  {
+    "id": "6.5",
+    "file": "scripts/web-stream.js",
+    "pattern": "local-output",
+    "claim": "Browser listen-on-device coordinates local-output mute with stream playback.",
+    "hits": 3,
+    "windows": [
+      {
+        "start": 121,
+        "end": 136,
+        "text": "121:       const result = await response.json().catch(() => ({}));\n122:       if (!response.ok || !result?.ok) throw new Error(result?.error || `HTTP ${response.status}`);\n123:       return result;\n124:     };\n125:     const outputRequest = (method, body) => controlRequest('/mpd/local-output', method, body);\n126:     let refreshLocalOutputStatus = () => Promise.resolve();\n127:     const playbackRequest = (action) => controlRequest('/config/diagnostics/playback', 'POST', { action });\n128:     const notifyLocalOutputState = (enabled) => {\n129:       try {\n130:         window.dispatchEvent(new CustomEvent('np-local-output-change', { detail: { enabled: enabled === true } }));\n131:       } catch {}\n132:     };\n133:     const preferenceEnabled = (key) => {\n134:       try {\n135:         const stored = JSON.parse(localStorage.getItem('nowplaying.clientSettings.v1') || 'null');\n136:         if (stored && Object.prototype.hasOwnProperty.call(stored, key)) return stored[key] === true;"
+      },
+      {
+        "start": 126,
+        "end": 141,
+        "text": "126:     let refreshLocalOutputStatus = () => Promise.resolve();\n127:     const playbackRequest = (action) => controlRequest('/config/diagnostics/playback', 'POST', { action });\n128:     const notifyLocalOutputState = (enabled) => {\n129:       try {\n130:         window.dispatchEvent(new CustomEvent('np-local-output-change', { detail: { enabled: enabled === true } }));\n131:       } catch {}\n132:     };\n133:     const preferenceEnabled = (key) => {\n134:       try {\n135:         const stored = JSON.parse(localStorage.getItem('nowplaying.clientSettings.v1') || 'null');\n136:         if (stored && Object.prototype.hasOwnProperty.call(stored, key)) return stored[key] === true;\n137:       } catch {}\n138:       return window.NPClientPreferences?.get?.(key, false) === true;\n139:     };\n140: \n141:     const muteLocalOutputForSession = async (session) => {"
+      }
+    ]
+  },
+  {
+    "id": "6.6",
+    "file": "src/lib/lastfm-scrobbler.mjs",
+    "pattern": "threshold",
+    "claim": "Qualification precedes Server-owned Last.fm submission.",
+    "hits": 3,
+    "windows": [
+      {
+        "start": 14,
+        "end": 29,
+        "text": "14: function md5(value) {\n15:   return crypto.createHash('md5').update(value).digest('hex');\n16: }\n17: \n18: export function lastfmScrobbleThreshold(durationSec, {\n19:   minTrackDurationSec = 30,\n20:   minPlayedSec = 30,\n21:   completionFraction = 0.5,\n22:   maxCompletionWaitSec = 240,\n23: } = {}) {\n24:   const duration = Math.max(0, number(durationSec));\n25:   if (duration > 0 && duration < minTrackDurationSec) return Infinity;\n26:   if (duration > 0) return Math.max(minPlayedSec, Math.min(duration * completionFraction, maxCompletionWaitSec));\n27:   return maxCompletionWaitSec;\n28: }\n29: "
+      },
+      {
+        "start": 28,
+        "end": 43,
+        "text": "28: }\n29: \n30: export function qualifiesLastfmScrobble({ artist, title, elapsedSec, durationSec } = {}, options = {}) {\n31:   const elapsed = Math.max(0, number(elapsedSec));\n32:   const threshold = lastfmScrobbleThreshold(durationSec, options);\n33:   return !!text(artist) && !!text(title) && Number.isFinite(threshold) && elapsed >= threshold;\n34: }\n35: \n36: export function createLastfmScrobbler({\n37:   apiKey = process.env.LASTFM_API_KEY || '',\n38:   apiSecret = process.env.LASTFM_API_SECRET || '',\n39:   sessionKey = process.env.LASTFM_SESSION_KEY || '',\n40:   fetchImpl = globalThis.fetch,\n41:   endpoint = ENDPOINT,\n42:   log = null,\n43: } = {}) {"
+      }
+    ]
+  },
+  {
+    "id": "7",
+    "file": "src/routes/config.routes.index.mjs",
+    "pattern": "register",
+    "claim": "Integrations mount distinct route modules.",
+    "hits": 47,
+    "windows": [
+      {
+        "start": 1,
+        "end": 12,
+        "text": "1: import { registerConfigQueueWizardBasicRoutes } from './config.queue-wizard-basic.routes.mjs';\n2: import { registerConfigQueueWizardPreviewRoute } from './config.queue-wizard-preview.routes.mjs';\n3: import { registerConfigQueueWizardCollageRoute } from './config.queue-wizard-collage.routes.mjs';\n4: import { registerConfigQueueWizardApplyRoute } from './config.queue-wizard-apply.routes.mjs';\n5: import { registerConfigQueueWizardVibeRoutes } from './config.queue-wizard-vibe.routes.mjs';\n6: import { registerConfigDiagnosticsRoutes } from './config.diagnostics.routes.mjs';\n7: import { registerConfigRatingsStickerRoutes } from './config.ratings-sticker.routes.mjs';\n8: import { registerConfigRuntimeAdminRoutes } from './config.runtime-admin.routes.mjs';\n9: import { registerConfigListeningHistoryRoutes } from './config.listening-history.routes.mjs';\n10: import { registerConfigAlexaAliasRoutes } from './config.alexa-alias.routes.mjs';\n11: import { registerConfigLibraryHealthArtRoutes } from './config.library-health-art.routes.mjs';\n12: import { registerConfigLibraryHealthGenreRoutes } from './config.library-health-genre.routes.mjs';"
+      },
+      {
+        "start": 1,
+        "end": 13,
+        "text": "1: import { registerConfigQueueWizardBasicRoutes } from './config.queue-wizard-basic.routes.mjs';\n2: import { registerConfigQueueWizardPreviewRoute } from './config.queue-wizard-preview.routes.mjs';\n3: import { registerConfigQueueWizardCollageRoute } from './config.queue-wizard-collage.routes.mjs';\n4: import { registerConfigQueueWizardApplyRoute } from './config.queue-wizard-apply.routes.mjs';\n5: import { registerConfigQueueWizardVibeRoutes } from './config.queue-wizard-vibe.routes.mjs';\n6: import { registerConfigDiagnosticsRoutes } from './config.diagnostics.routes.mjs';\n7: import { registerConfigRatingsStickerRoutes } from './config.ratings-sticker.routes.mjs';\n8: import { registerConfigRuntimeAdminRoutes } from './config.runtime-admin.routes.mjs';\n9: import { registerConfigListeningHistoryRoutes } from './config.listening-history.routes.mjs';\n10: import { registerConfigAlexaAliasRoutes } from './config.alexa-alias.routes.mjs';\n11: import { registerConfigLibraryHealthArtRoutes } from './config.library-health-art.routes.mjs';\n12: import { registerConfigLibraryHealthGenreRoutes } from './config.library-health-genre.routes.mjs';\n13: import { registerConfigLibraryHealthPerformersRoutes } from './config.library-health-performers.routes.mjs';"
+      }
+    ]
+  },
+  {
+    "id": "7.1",
+    "file": "alexa/handlers/audio.js",
+    "pattern": "AudioPlayer",
+    "claim": "Echo-targeted playback uses Alexa AudioPlayer directives.",
+    "hits": 16,
+    "windows": [
+      {
+        "start": 10,
+        "end": 25,
+        "text": "10:     decodeHtmlEntities,\n11:     makeToken,\n12:     absolutizeMaybe,\n13:     getEventType,\n14:     getAudioPlayerToken,\n15:     getAudioOffsetMs,\n16:     parseTokenB64,\n17:     advanceFromTokenIfNeeded,\n18:     rememberStop,\n19:     rememberIssuedStream,\n20:     setLastPlayedToken,\n21:     recentlyEnqueuedToken,\n22:     markEnqueuedToken,\n23:     enqueueAlreadyIssuedForPrevToken,\n24:     ensureNowPlayingForEnqueue,\n25:     getStableNowPlayingSnapshot,"
+      },
+      {
+        "start": 200,
+        "end": 215,
+        "text": "200:       return handlerInput.responseBuilder.getResponse();\n201:     },\n202:   };\n203: \n204:   const AudioPlayerEventHandler = {\n205:     canHandle(handlerInput) {\n206:       const t = Alexa.getRequestType(handlerInput.requestEnvelope);\n207:       return t && String(t).startsWith('AudioPlayer.');\n208:     },\n209: \n210:     async handle(handlerInput) {\n211:       const eventType = getEventType(handlerInput);\n212:       const token = getAudioPlayerToken(handlerInput);\n213: \n214:       if (eventType === 'AudioPlayer.PlaybackStopped') {\n215:         try {"
+      }
+    ]
+  },
+  {
+    "id": "7.2",
+    "file": "ops/moode-overrides/usr/local/bin/airplay-json-watchdog.sh",
+    "pattern": "systemctl",
+    "claim": "moOde integration includes explicit installed overrides/watchdog.",
+    "hits": 1,
+    "windows": [
+      {
+        "start": 24,
+        "end": 30,
+        "text": "24: echo \"$ts cpu=${cpu_sum}% hits=${hits}\" >> \"$LOG_FILE\"\n25: \n26: if (( hits >= HITS_REQUIRED )); then\n27:   echo \"$ts high cpu detected; restarting airplay-json.service\" >> \"$LOG_FILE\"\n28:   systemctl restart airplay-json.service || true\n29:   echo 0 > \"$STATE_FILE\"\n30: fi"
+      }
+    ]
+  },
+  {
+    "id": "7.3",
+    "file": "src/lib/lastfm-library-match.mjs",
+    "pattern": "export",
+    "claim": "Last.fm recommendations need matching to playable local catalog.",
+    "hits": 1,
+    "windows": [
+      {
+        "start": 3,
+        "end": 18,
+        "text": "3: function norm(s = '') {\n4:   return String(s || '').trim().toLowerCase().normalize('NFKD').replace(/[\\u0300-\\u036f]/g, '').replace(/[\u2019`\u00b4]/g, \"'\").replace(/[^a-z0-9]+/g, ' ').trim();\n5: }\n6: \n7: export async function createLastfmIndexResolver({ mpdHost = 'moode.local', baseUrl = '', trackKey = '' } = {}) {\n8:   const idx = await getBrowseIndex(String(mpdHost || 'moode.local'));\n9:   const tracks = Array.isArray(idx?.tracks) ? idx.tracks : [];\n10: \n11:   const byTrackArtist = new Map();\n12:   const byTrackAlbumArtist = new Map();\n13:   const byArtist = new Map();\n14:   const byAlbumTrackArtist = new Map();\n15:   const byAlbumArtist = new Map();\n16: \n17:   for (const t of tracks) {\n18:     const file = String(t?.file || '').trim();"
+      }
+    ]
+  },
+  {
+    "id": "7.4",
+    "file": "src/routes/config.diagnostics.routes.mjs",
+    "pattern": "const m3uLines",
+    "claim": "Proxy URLs are rewritten to stable YouTube URLs for queue identity.",
+    "hits": 1,
+    "windows": [
+      {
+        "start": 671,
+        "end": 686,
+        "text": "671:       let m3uRewritten = false;\n672:       let m3uRewriteError = '';\n673:       try {\n674:         const playlistFileName = `${safeName}.m3u`;\n675:         const m3uLines = sourceManifest.entries\n676:           .map((ent) => {\n677:             const t = String(ent?.type || '').trim().toLowerCase();\n678:             const f = String(ent?.file || '').trim();\n679:             const src = String(ent?.sourceUrl || '').trim();\n680:             if (t === 'youtube') return src || f;\n681:             return f;\n682:           })\n683:           .filter(Boolean);\n684:         const m3uText = `${m3uLines.join('\\n')}\\n`;\n685:         const m3uB64 = Buffer.from(m3uText, 'utf8').toString('base64');\n686:         const remoteM3u = `/var/lib/mpd/playlists/${playlistFileName}`;"
+      }
+    ]
+  },
+  {
+    "id": "7.5",
+    "file": "src/services/apple-about.service.mjs",
+    "pattern": "cache",
+    "claim": "Apple About enrichment has its own metadata cache.",
+    "hits": 13,
+    "windows": [
+      {
+        "start": 70,
+        "end": 85,
+        "text": "70:   positiveTtlMs = DEFAULT_POSITIVE_TTL_MS,\n71:   negativeTtlMs = DEFAULT_NEGATIVE_TTL_MS,\n72:   now = () => Date.now(),\n73: } = {}) {\n74:   const cache = new Map();\n75:   const token = text(developerToken);\n76: \n77:   const getCached = (key) => {\n78:     const hit = cache.get(key);\n79:     if (!hit) return { found: false, value: null };\n80:     const ttl = hit.value ? positiveTtlMs : negativeTtlMs;\n81:     if (now() - hit.ts >= ttl) {\n82:       cache.delete(key);\n83:       return { found: false, value: null };\n84:     }\n85:     return { found: true, value: hit.value };"
+      },
+      {
+        "start": 73,
+        "end": 88,
+        "text": "73: } = {}) {\n74:   const cache = new Map();\n75:   const token = text(developerToken);\n76: \n77:   const getCached = (key) => {\n78:     const hit = cache.get(key);\n79:     if (!hit) return { found: false, value: null };\n80:     const ttl = hit.value ? positiveTtlMs : negativeTtlMs;\n81:     if (now() - hit.ts >= ttl) {\n82:       cache.delete(key);\n83:       return { found: false, value: null };\n84:     }\n85:     return { found: true, value: hit.value };\n86:   };\n87: \n88:   const setCached = (key, value) => {"
+      }
+    ]
+  },
+  {
+    "id": "7.6",
+    "file": "src/routes/multiphone.routes.mjs",
+    "pattern": "jukebox",
+    "claim": "Multiphone uses shared priority state around playback commands.",
+    "hits": 43,
+    "windows": [
+      {
+        "start": 1,
+        "end": 14,
+        "text": "1: import path from 'node:path';\n2: import {\n3:   jukeboxEntries,\n4:   beginJukeboxSession,\n5:   getJukeboxInsertionPosition,\n6:   loadJukeboxState,\n7:   isJukeboxCurrent,\n8:   isJukeboxItem,\n9:   nextJukeboxSequence,\n10:   parsePlaylistFiles,\n11:   persistJukeboxState,\n12:   recoverJukeboxEntries,\n13:   reconcileJukeboxState,\n14:   withJukeboxMutation,"
+      },
+      {
+        "start": 1,
+        "end": 15,
+        "text": "1: import path from 'node:path';\n2: import {\n3:   jukeboxEntries,\n4:   beginJukeboxSession,\n5:   getJukeboxInsertionPosition,\n6:   loadJukeboxState,\n7:   isJukeboxCurrent,\n8:   isJukeboxItem,\n9:   nextJukeboxSequence,\n10:   parsePlaylistFiles,\n11:   persistJukeboxState,\n12:   recoverJukeboxEntries,\n13:   reconcileJukeboxState,\n14:   withJukeboxMutation,\n15: } from './seeburg.routes.mjs';"
+      }
+    ]
+  },
+  {
+    "id": "7.7",
+    "file": "src/routes/mills.routes.mjs",
+    "pattern": "snapshot",
+    "claim": "Mills captures/restores playback state for physical-record display ownership.",
+    "hits": 21,
+    "windows": [
+      {
+        "start": 92,
+        "end": 107,
+        "text": "92:     const slot = Number(text);\n93:     return Number.isSafeInteger(slot) && slot >= 1 && slot <= 20 ? slot : null;\n94:   }\n95: \n96:   async function snapshotMpdSession() {\n97:     const statusRaw = await mpdQueryRaw('status');\n98:     if (!statusRaw || mpdHasACK(statusRaw)) throw new Error('MPD status snapshot failed');\n99:     const status = parseMpdFirstBlock(statusRaw);\n100:     const queueRaw = await mpdQueryRaw('playlistinfo');\n101:     if (mpdHasACK(queueRaw)) throw new Error('MPD queue snapshot failed');\n102:     const queue = parseMpdBlocks(queueRaw)\n103:       .filter((item) => String(item.file || '').trim())\n104:       .map((item) => ({\n105:         file: String(item.file).trim(),\n106:         mpdSongId: Number(item.id || 0) || 0,\n107:         position: Number(item.pos || 0) || 0,"
+      },
+      {
+        "start": 94,
+        "end": 109,
+        "text": "94:   }\n95: \n96:   async function snapshotMpdSession() {\n97:     const statusRaw = await mpdQueryRaw('status');\n98:     if (!statusRaw || mpdHasACK(statusRaw)) throw new Error('MPD status snapshot failed');\n99:     const status = parseMpdFirstBlock(statusRaw);\n100:     const queueRaw = await mpdQueryRaw('playlistinfo');\n101:     if (mpdHasACK(queueRaw)) throw new Error('MPD queue snapshot failed');\n102:     const queue = parseMpdBlocks(queueRaw)\n103:       .filter((item) => String(item.file || '').trim())\n104:       .map((item) => ({\n105:         file: String(item.file).trim(),\n106:         mpdSongId: Number(item.id || 0) || 0,\n107:         position: Number(item.pos || 0) || 0,\n108:       }));\n109:     const currentPos = Number(status.song ?? -1);"
+      }
+    ]
+  },
+  {
+    "id": "7.8",
+    "file": "integrations/echo-link/echo_link_volume.py",
+    "pattern": "127.0.0.1",
+    "claim": "Echo Link uses a separate loopback sidecar.",
+    "hits": 1,
+    "windows": [
+      {
+        "start": 359,
+        "end": 374,
+        "text": "359:     parser.add_argument(\"--list-devices\", action=\"store_true\")\n360:     parser.add_argument(\"--data-dir\", default=os.environ.get(\"ECHO_LINK_DATA_DIR\", \"~/.local/share/echo-link-volume\"))\n361:     parser.add_argument(\"--credentials\", default=os.environ.get(\"ECHO_LINK_CREDENTIALS\"))\n362:     parser.add_argument(\"--state-file\", default=os.environ.get(\"ECHO_LINK_STATE\", \"~/.local/share/echo-link-volume/state.json\"))\n363:     parser.add_argument(\"--host\", default=os.environ.get(\"ECHO_LINK_HOST\", \"127.0.0.1\"))\n364:     parser.add_argument(\"--port\", type=int, default=int(os.environ.get(\"ECHO_LINK_PORT\", \"8765\")))\n365:     args = parser.parse_args()\n366:     if args.self_test:\n367:         self_test()\n368:         return\n369:     if not args.credentials:\n370:         parser.error(\"live mode requires ECHO_LINK_CREDENTIALS\")\n371:     if not args.list_devices and not args.device_serial:\n372:         parser.error(\"live mode requires ECHO_LINK_DEVICE_SERIAL\")\n373:     controller = EchoLinkController(args)\n374:     controller.start()"
+      }
+    ]
+  },
+  {
+    "id": "7.9",
+    "file": "src/lib/upnp-playback-session.mjs",
+    "pattern": "readiness",
+    "claim": "UPnP session startup has readiness and handoff gates, not just discovery.",
+    "hits": 6,
+    "windows": [
+      {
+        "start": 914,
+        "end": 929,
+        "text": "914:         attempts = attempt;\n915:         const mediaProbe = await probe('GetMediaInfo');\n916:         if (mediaProbe.timedOut) {\n917:           reason = 'get_media_info_timeout';\n918:           this._logStartupTiming(session, 'uri_readiness_probe_timeout', { attempt, action: 'GetMediaInfo' });\n919:           break;\n920:         }\n921:         if (mediaProbe.error) {\n922:           const error = mediaProbe.error;\n923:           reason = error?.code === 'UPNP_UNSUPPORTED'\n924:             ? 'get_media_info_unavailable'\n925:             : 'get_media_info_failed';\n926:           this._logStartupTiming(session, 'uri_readiness_probe_failed', {\n927:             attempt,\n928:             code: String(error?.code || 'UPNP_PROBE_FAILED'),\n929:           });"
+      },
+      {
+        "start": 922,
+        "end": 937,
+        "text": "922:           const error = mediaProbe.error;\n923:           reason = error?.code === 'UPNP_UNSUPPORTED'\n924:             ? 'get_media_info_unavailable'\n925:             : 'get_media_info_failed';\n926:           this._logStartupTiming(session, 'uri_readiness_probe_failed', {\n927:             attempt,\n928:             code: String(error?.code || 'UPNP_PROBE_FAILED'),\n929:           });\n930:           break;\n931:         }\n932: \n933:         const uriMatches = sameUpnpResourceUri(mediaProbe.value?.CurrentURI, session.resource.uri);\n934:         lastUriMatched = uriMatches;\n935:         let transportState = '';\n936:         let transportStateObservable = false;\n937:         if (serviceHasAction(inspection, 'GetTransportInfo')) {"
+      }
+    ]
+  },
+  {
+    "id": "8",
+    "file": "scripts/theme-toggle.js",
+    "pattern": "localStorage",
+    "claim": "Theme state is browser-persisted.",
+    "hits": 2,
+    "windows": [
+      {
+        "start": 8,
+        "end": 23,
+        "text": "8:     body.classList.toggle('theme-light', t === 'light');\n9:     // Shell/page background is token-driven in app CSS; avoid hardcoded overrides here.\n10:     var btn = document.getElementById('themeToggle');\n11:     if (btn) btn.textContent = (t === 'light') ? '\u2600\ufe0f' : '\ud83c\udf19';\n12:     try { localStorage.setItem('np-theme', t); } catch (e) {}\n13:   }\n14: \n15:   function init() {\n16:     var saved = 'dark';\n17:     try { saved = localStorage.getItem('np-theme') || 'dark'; } catch (e) {}\n18:     applyTheme(saved);\n19:     var btn = document.getElementById('themeToggle');\n20:     if (btn) {\n21:       // In app shell, theme toggle behavior is handled by app.html paired-preset logic.\n22:       var isShell = !!document.getElementById('appFrame');\n23:       if (!isShell) {"
+      },
+      {
+        "start": 13,
+        "end": 28,
+        "text": "13:   }\n14: \n15:   function init() {\n16:     var saved = 'dark';\n17:     try { saved = localStorage.getItem('np-theme') || 'dark'; } catch (e) {}\n18:     applyTheme(saved);\n19:     var btn = document.getElementById('themeToggle');\n20:     if (btn) {\n21:       // In app shell, theme toggle behavior is handled by app.html paired-preset logic.\n22:       var isShell = !!document.getElementById('appFrame');\n23:       if (!isShell) {\n24:         btn.addEventListener('click', function () {\n25:           var isLight = document.body && document.body.classList.contains('theme-light');\n26:           applyTheme(isLight ? 'dark' : 'light');\n27:         });\n28:       }"
+      }
+    ]
+  },
+  {
+    "id": "8.1",
+    "file": "scripts/theme-toggle.js",
+    "pattern": "classList.toggle",
+    "claim": "Theme selection projects state onto DOM for CSS tokens.",
+    "hits": 2,
+    "windows": [
+      {
+        "start": 3,
+        "end": 18,
+        "text": "3:     var t = String(theme || 'dark').toLowerCase() === 'light' ? 'light' : 'dark';\n4:     var root = document.documentElement;\n5:     var body = document.body;\n6:     if (!root || !body) return;\n7:     root.classList.toggle('theme-light', t === 'light');\n8:     body.classList.toggle('theme-light', t === 'light');\n9:     // Shell/page background is token-driven in app CSS; avoid hardcoded overrides here.\n10:     var btn = document.getElementById('themeToggle');\n11:     if (btn) btn.textContent = (t === 'light') ? '\u2600\ufe0f' : '\ud83c\udf19';\n12:     try { localStorage.setItem('np-theme', t); } catch (e) {}\n13:   }\n14: \n15:   function init() {\n16:     var saved = 'dark';\n17:     try { saved = localStorage.getItem('np-theme') || 'dark'; } catch (e) {}\n18:     applyTheme(saved);"
+      },
+      {
+        "start": 4,
+        "end": 19,
+        "text": "4:     var root = document.documentElement;\n5:     var body = document.body;\n6:     if (!root || !body) return;\n7:     root.classList.toggle('theme-light', t === 'light');\n8:     body.classList.toggle('theme-light', t === 'light');\n9:     // Shell/page background is token-driven in app CSS; avoid hardcoded overrides here.\n10:     var btn = document.getElementById('themeToggle');\n11:     if (btn) btn.textContent = (t === 'light') ? '\u2600\ufe0f' : '\ud83c\udf19';\n12:     try { localStorage.setItem('np-theme', t); } catch (e) {}\n13:   }\n14: \n15:   function init() {\n16:     var saved = 'dark';\n17:     try { saved = localStorage.getItem('np-theme') || 'dark'; } catch (e) {}\n18:     applyTheme(saved);\n19:     var btn = document.getElementById('themeToggle');"
+      }
+    ]
+  },
+  {
+    "id": "8.2",
+    "file": "theme.html",
+    "pattern": "postMessage",
+    "claim": "Theme editor previews/publishes changes through browser UI coordination.",
+    "hits": 1,
+    "windows": [
+      {
+        "start": 367,
+        "end": 382,
+        "text": "367:   }\n368: \n369:   function push(){\n370:     try {\n371:       window.parent?.postMessage({\n372:         type:'np-theme-updated',\n373:         tokens: withLinkedTokens(state)\n374:       }, '*');\n375:     } catch {}\n376:   }\n377: \n378:   function sameTokens(a={}, b={}){\n379:     const keys = Array.from(new Set([...Object.keys(defaults), ...Object.keys(a||{}), ...Object.keys(b||{})]));\n380:     return keys.every((k)=> String((a||{})[k] ?? defaults[k] ?? '') === String((b||{})[k] ?? defaults[k] ?? ''));\n381:   }\n382: "
+      }
+    ]
+  },
+  {
+    "id": "8.3",
+    "file": "styles/hero.css",
+    "pattern": "@media",
+    "claim": "Responsive layouts contain breakpoint-specific rules.",
+    "hits": 3,
+    "windows": [
+      {
+        "start": 3,
+        "end": 18,
+        "text": "3:  * IMPORTANT: keep desktop/full-size layout untouched.\n4:  */\n5: \n6: /* Full-size proportion restore */\n7: @media (min-width:1201px){\n8:   #heroTransport{align-items:stretch}\n9:   #heroTransport .heroArt{align-self:flex-start}\n10:   #heroTransport .heroMain{align-self:stretch;display:flex;min-height:100%}\n11:   #heroTransport .np{height:100%;display:flex;flex-direction:column;justify-content:space-between;align-items:center}\n12:   #heroTransport .np .txt{align-self:center;margin-top:2px}\n13:   #heroTransport .np .progress-bar-wrapper{margin-top:auto;margin-bottom:2px}\n14: }\n15: \n16: .heroTransport .heroCurrentPlaylistBtn{\n17:   display:inline-flex;\n18:   align-items:center;"
+      },
+      {
+        "start": 35,
+        "end": 50,
+        "text": "35:   outline:none;\n36: }\n37: .heroTransport .heroCurrentPlaylistBtn svg{width:16px;height:16px;display:block;fill:currentColor}\n38: /* Narrow/tablet only */\n39: @media (max-width: 980px){\n40:   .heroTransport{\n41:     display:grid;\n42:     grid-template-columns:100px minmax(0,1fr);\n43:     align-items:center;\n44:     gap:24px;\n45:     padding:12px;\n46:     position:relative;\n47:   }\n48:   .heroTransport .heroArt{flex:0 0 100px;display:block;justify-self:start}\n49:   .heroTransport .heroArt img,.heroTransport .heroArtPh,.heroTransport .heroArtVid{\n50:     width:100px;height:100px;border-radius:12px;"
+      }
+    ]
+  },
+  {
+    "id": "8.4",
+    "file": "peppy.html",
+    "pattern": "catalog.json",
+    "claim": "Peppy loads asset catalog for selectable visual skins.",
+    "hits": 1,
+    "windows": [
+      {
+        "start": 887,
+        "end": 902,
+        "text": "887:         skinName.value = final.includes(selected) ? selected : (final[0] || 'blue-1280');\n888:       }\n889:       async function loadSkinCatalog(){\n890:         try {\n891:           const r = await fetch('assets/peppy/catalog.json', { cache: 'no-store' });\n892:           const j = await r.json();\n893:           const items = Array.isArray(j?.skins) ? j.skins : [];\n894:           for (const it of items) {\n895:             if (!it?.name || !it?.bgr) continue;\n896:             SKIN_ASSETS[it.name] = { bgr: String(it.bgr), fgr: String(it.fgr || ''), needle: String(it.needle || '') };\n897:           }\n898:         } catch {}\n899:       }\n900:       const needleVisibleRatioCache = new Map();\n901:       function getNeedleVisibleRatio(img){\n902:         try {"
+      }
+    ]
+  },
+  {
+    "id": "9",
+    "file": "src/routes/config.routes.index.mjs",
+    "pattern": "register",
+    "claim": "Backend groups modular routes under the Server composition root.",
+    "hits": 47,
+    "windows": [
+      {
+        "start": 1,
+        "end": 12,
+        "text": "1: import { registerConfigQueueWizardBasicRoutes } from './config.queue-wizard-basic.routes.mjs';\n2: import { registerConfigQueueWizardPreviewRoute } from './config.queue-wizard-preview.routes.mjs';\n3: import { registerConfigQueueWizardCollageRoute } from './config.queue-wizard-collage.routes.mjs';\n4: import { registerConfigQueueWizardApplyRoute } from './config.queue-wizard-apply.routes.mjs';\n5: import { registerConfigQueueWizardVibeRoutes } from './config.queue-wizard-vibe.routes.mjs';\n6: import { registerConfigDiagnosticsRoutes } from './config.diagnostics.routes.mjs';\n7: import { registerConfigRatingsStickerRoutes } from './config.ratings-sticker.routes.mjs';\n8: import { registerConfigRuntimeAdminRoutes } from './config.runtime-admin.routes.mjs';\n9: import { registerConfigListeningHistoryRoutes } from './config.listening-history.routes.mjs';\n10: import { registerConfigAlexaAliasRoutes } from './config.alexa-alias.routes.mjs';\n11: import { registerConfigLibraryHealthArtRoutes } from './config.library-health-art.routes.mjs';\n12: import { registerConfigLibraryHealthGenreRoutes } from './config.library-health-genre.routes.mjs';"
+      },
+      {
+        "start": 1,
+        "end": 13,
+        "text": "1: import { registerConfigQueueWizardBasicRoutes } from './config.queue-wizard-basic.routes.mjs';\n2: import { registerConfigQueueWizardPreviewRoute } from './config.queue-wizard-preview.routes.mjs';\n3: import { registerConfigQueueWizardCollageRoute } from './config.queue-wizard-collage.routes.mjs';\n4: import { registerConfigQueueWizardApplyRoute } from './config.queue-wizard-apply.routes.mjs';\n5: import { registerConfigQueueWizardVibeRoutes } from './config.queue-wizard-vibe.routes.mjs';\n6: import { registerConfigDiagnosticsRoutes } from './config.diagnostics.routes.mjs';\n7: import { registerConfigRatingsStickerRoutes } from './config.ratings-sticker.routes.mjs';\n8: import { registerConfigRuntimeAdminRoutes } from './config.runtime-admin.routes.mjs';\n9: import { registerConfigListeningHistoryRoutes } from './config.listening-history.routes.mjs';\n10: import { registerConfigAlexaAliasRoutes } from './config.alexa-alias.routes.mjs';\n11: import { registerConfigLibraryHealthArtRoutes } from './config.library-health-art.routes.mjs';\n12: import { registerConfigLibraryHealthGenreRoutes } from './config.library-health-genre.routes.mjs';\n13: import { registerConfigLibraryHealthPerformersRoutes } from './config.library-health-performers.routes.mjs';"
+      }
+    ]
+  },
+  {
+    "id": "9.1",
+    "file": "src/routes/config.moode-audio-info.routes.mjs",
+    "pattern": "deps",
+    "claim": "Route registration uses injected dependencies.",
+    "hits": 6,
+    "windows": [
+      {
+        "start": 78,
+        "end": 93,
+        "text": "78:     return { available: false, devices: [], activeDevice: null, state: 'unavailable' };\n79:   }\n80: }\n81: \n82: export function registerConfigMoodeAudioInfoRoutes(app, deps = {}) {\n83:   const requireTrackKey = deps.requireTrackKey;\n84:   const getQobuzNowPlaying = deps.getQobuzNowPlaying;\n85:   const readAlsaHardware = deps.probeAlsaHardware || (() => probeAlsaHardware());\n86:   const getDeviceMeta = deps.fetchMoodeDeviceMeta || fetchMoodeDeviceMeta;\n87:   const getSourceAudio = deps.getSourceAudio;\n88: \n89:   app.get('/config/moode/audio-info', async (req, res) => {\n90:     try {\n91:       if (!requireTrackKey(req, res)) return;\n92:       const base = String(MOODE_BASE_URL || '').trim().replace(/\\/+$/, '');\n93:       const url = `${base}/audioinfo.php`;"
+      },
+      {
+        "start": 79,
+        "end": 94,
+        "text": "79:   }\n80: }\n81: \n82: export function registerConfigMoodeAudioInfoRoutes(app, deps = {}) {\n83:   const requireTrackKey = deps.requireTrackKey;\n84:   const getQobuzNowPlaying = deps.getQobuzNowPlaying;\n85:   const readAlsaHardware = deps.probeAlsaHardware || (() => probeAlsaHardware());\n86:   const getDeviceMeta = deps.fetchMoodeDeviceMeta || fetchMoodeDeviceMeta;\n87:   const getSourceAudio = deps.getSourceAudio;\n88: \n89:   app.get('/config/moode/audio-info', async (req, res) => {\n90:     try {\n91:       if (!requireTrackKey(req, res)) return;\n92:       const base = String(MOODE_BASE_URL || '').trim().replace(/\\/+$/, '');\n93:       const url = `${base}/audioinfo.php`;\n94: "
+      }
+    ]
+  },
+  {
+    "id": "9.2",
+    "file": "src/routes/queue.routes.mjs",
+    "pattern": "requireTrackKey",
+    "claim": "Classic queue writes have shared-key protection, unlike native bearer routes.",
+    "hits": 3,
+    "windows": [
+      {
+        "start": 1,
+        "end": 14,
+        "text": "1: export function registerQueueRoutes(app, deps) {\n2:   const {\n3:     requireTrackKey,\n4:     mpdPlaylistInfoById,\n5:     mpdDeleteId,\n6:     mpdDeletePos0,\n7:     mpdQueryRaw,\n8:     parseMpdKeyVals,\n9:     parseMpdFirstBlock,\n10:     mpdPrimeIfIdle,\n11:     fetchJson,\n12:     MOODE_BASE_URL,\n13:     moodeValByKey,\n14:     decodeHtmlEntities,"
+      },
+      {
+        "start": 142,
+        "end": 157,
+        "text": "142:   }\n143: \n144:   app.post('/queue/advance', async (req, res) => {\n145:     try {\n146:       if (!requireTrackKey(req, res)) return;\n147: \n148:       const songidRaw =\n149:         (req?.body?.songid !== undefined ? req.body.songid : undefined) ??\n150:         (req?.query?.songid !== undefined ? req.query.songid : undefined);\n151: \n152:       const songid = Number.parseInt(String(songidRaw ?? '').trim(), 10);\n153: \n154:       const pos0raw =\n155:         (req?.body?.pos0 !== undefined ? req.body.pos0 : undefined) ??\n156:         (req?.query?.pos0 !== undefined ? req.query.pos0 : undefined);\n157: "
+      }
+    ]
+  },
+  {
+    "id": "9.3",
+    "file": "src/lib/audio-info.mjs",
+    "pattern": "hw_params",
+    "claim": "Measured ALSA output is independent evidence from MPD source metadata.",
+    "hits": 3,
+    "windows": [
+      {
+        "start": 301,
+        "end": 316,
+        "text": "301:     sampleRateHz: device.sampleRateHz,\n302:     bitDepth: device.bitDepth,\n303:     channels: device.channels,\n304:     provenance: 'alsa-procfs',\n305:     reason: 'Read from the active ALSA playback hw_params/status files',\n306:   };\n307: }\n308: \n309: function rowValue(rows, key, section = '') {\n310:   const match = rows.find((row) => (\n311:     String(row?.key || '').trim().toLowerCase() === String(key || '').trim().toLowerCase()\n312:       && (!section || String(row?.section || '').trim() === section)\n313:   ));\n314:   return text(match?.value);\n315: }\n316: "
+      },
+      {
+        "start": 614,
+        "end": 629,
+        "text": "614:     processing,\n615:     volume,\n616:     conversion: {\n617:       status: 'unknown',\n618:       reason: 'Read-only ALSA hw_params reports the negotiated endpoint format, not every transformation before it',\n619:       provenance: 'alsa-procfs+moode-audioinfo.php',\n620:       valueType: 'not-measured',\n621:       live: false,\n622:       measured: false,\n623:       configured: false,\n624:     },\n625:   };\n626: }\n627: \n628: export function buildQobuzAudioInfo({ moodeRows = [], qobuz = {}, alsa = null } = {}) {\n629:   const rows = (Array.isArray(moodeRows) ? moodeRows : []).map((row) => ({ ...row }));"
+      }
+    ]
+  },
+  {
+    "id": "9.4",
+    "file": "src/lib/exec.mjs",
+    "pattern": "execFile",
+    "claim": "Process wrapper executes an argv vector; does not itself prove all remote-shell quoting.",
+    "hits": 3,
+    "windows": [
+      {
+        "start": 1,
+        "end": 12,
+        "text": "1: import { execFile } from 'node:child_process';\n2: \n3: export function execFileStrict(cmd, args, opts = {}) {\n4:   return new Promise((resolve, reject) => {\n5:     execFile(cmd, args, { timeout: 120000, ...opts }, (err, stdout, stderr) => {\n6:       if (err) {\n7:         const msg = [\n8:           `cmd=${cmd}`,\n9:           `args=${JSON.stringify(args)}`,\n10:           `err=${err.message}`,\n11:           `stderr=${(stderr || '').trim()}`,\n12:           `stdout=${(stdout || '').trim()}`,"
+      },
+      {
+        "start": 1,
+        "end": 14,
+        "text": "1: import { execFile } from 'node:child_process';\n2: \n3: export function execFileStrict(cmd, args, opts = {}) {\n4:   return new Promise((resolve, reject) => {\n5:     execFile(cmd, args, { timeout: 120000, ...opts }, (err, stdout, stderr) => {\n6:       if (err) {\n7:         const msg = [\n8:           `cmd=${cmd}`,\n9:           `args=${JSON.stringify(args)}`,\n10:           `err=${err.message}`,\n11:           `stderr=${(stderr || '').trim()}`,\n12:           `stdout=${(stdout || '').trim()}`,\n13:         ].filter(Boolean).join('\\n');\n14:         return reject(new Error(msg));"
+      }
+    ]
+  },
+  {
+    "id": "9.5",
+    "file": "src/routes/config.library-health-animated-art.routes.mjs",
+    "pattern": "rename",
+    "claim": "Atomic rename visibility is not an fsync durability guarantee.",
+    "hits": 1,
+    "windows": [
+      {
+        "start": 144,
+        "end": 159,
+        "text": "144:         '-pix_fmt', 'yuv420p',\n145:         '-movflags', '+faststart',\n146:         tmpPath,\n147:       ], { timeout: 180000, maxBuffer: 4 * 1024 * 1024 });\n148:       await fs.rename(tmpPath, outPath);\n149:       await trimH264Cache();\n150:       return outPath;\n151:     })().finally(async () => {\n152:       h264TranscodeInFlight.delete(src);\n153:       try { await fs.unlink(tmpPath); } catch {}\n154:     });\n155:     h264TranscodeInFlight.set(src, p);\n156:   }\n157: \n158:   return p;\n159: }"
+      }
+    ]
+  },
+  {
+    "id": "9.6",
+    "file": "src/routes/mobile.routes.mjs",
+    "pattern": "pairing/challenges",
+    "claim": "Authorized web display or already-paired native device creates challenge; unpaired device submits proof.",
+    "hits": 2,
+    "windows": [
+      {
+        "start": 2401,
+        "end": 2416,
+        "text": "2401:   const requirePairingAdmin = (req, res) => {\n2402:     return requirePairingCredential(req, res);\n2403:   };\n2404: \n2405:   app.post('/v1/mobile/pairing/challenges', pairingRoute(async (req, res) => {\n2406:     if (!requirePairingAdmin(req, res)) return;\n2407:     const baseUrl = pairingBaseUrl(req, mobileBaseUrl);\n2408:     const created = pairingStore.createChallenge({ baseUrl });\n2409:     const qrPayload = {\n2410:       protocol: 'now-playing-mobile-pairing',\n2411:       version: MOBILE_PAIRING_PROTOCOL_VERSION,\n2412:       baseUrl: created.baseUrl,\n2413:       challenge: created.challenge,\n2414:       expiresAt: created.expiresAt,\n2415:     };\n2416:     const qrDataUrl = await QRCode.toDataURL(JSON.stringify(qrPayload), {"
+      },
+      {
+        "start": 2470,
+        "end": 2485,
+        "text": "2470:     });\n2471:     return res.json({ ok: true, ...result });\n2472:   }));\n2473: \n2474:   app.post('/v1/mobile/pairing/challenges/cancel', pairingRoute(async (req, res) => {\n2475:     const displayToken = requirePairingDisplay(req, res);\n2476:     if (!displayToken) return;\n2477:     return res.json({ ok: true, ...pairingStore.cancel({ displayToken }) });\n2478:   }));\n2479: \n2480:   app.get('/v1/mobile/pairing/requests/:requestId/complete', pairingRoute(async (req, res) => {\n2481:     const pollToken = text(req?.headers?.['x-mobile-pairing-poll-token']);\n2482:     const result = pairingStore.complete({\n2483:       requestId: req?.params?.requestId,\n2484:       pollToken,\n2485:       issueSession: ({ deviceId }) => issueMobileSession(deviceId),"
+      }
+    ]
+  },
+  {
+    "id": "10",
+    "file": "src/routes/config.runtime-admin.routes.mjs",
+    "pattern": "app.get\\('/config/runtime'",
+    "claim": "Runtime bootstrap GET is not uniformly protected by requireTrackKey.",
+    "hits": 1,
+    "windows": [
+      {
+        "start": 305,
+        "end": 320,
+        "text": "305:       items: Array.isArray(items) ? items : [],\n306:     };\n307:   }\n308: \n309:   app.get('/config/runtime', async (req, res) => {\n310:     try {\n311:       const raw = await fs.readFile(configPath, 'utf8');\n312:       const cfg = JSON.parse(raw);\n313:       return res.json({ ok: true, configPath, config: withEnvOverrides(cfg), fullConfig: cfg });\n314:     } catch (e) {\n315:       return res.status(500).json({ ok: false, error: e?.message || String(e) });\n316:     }\n317:   });\n318: \n319:   const lastfmEnvPath = () => process.env.LASTFM_ENV_FILE || path.resolve(process.cwd(), '.env');\n320:   const lastfmStatus = async () => {"
+      }
+    ]
+  },
+  {
+    "id": "10.1",
+    "file": "src/config.mjs",
+    "pattern": "process.env",
+    "claim": "Configuration merges environment with persisted settings.",
+    "hits": 77,
+    "windows": [
+      {
+        "start": 12,
+        "end": 27,
+        "text": "12: const mpdCfg = MASTER_CONFIG?.mpd || {};\n13: const moodeCfg = MASTER_CONFIG?.moode || {};\n14: const runtimeCfg = MASTER_CONFIG?.runtime || {};\n15: \n16: export const FFMPEG = process.env.FFMPEG || '/usr/bin/ffmpeg';\n17: export const CURL = process.env.CURL || '/usr/bin/curl';\n18: \n19: export const MPD_PLAYLIST_DIR = '/var/lib/mpd/playlists';\n20: export const FAVORITES_PATH = `${MPD_PLAYLIST_DIR}/Favorites.m3u`;\n21: export const MOODE_SSH_USER = process.env.MOODE_SSH_USER || moodeCfg?.sshUser || 'moode';\n22: export const MOODE_SSH_HOST = process.env.MOODE_SSH_HOST || moodeCfg?.sshHost || mpdCfg?.host || 'moode.local';\n23: export const PORT = Number(process.env.PORT || MASTER_CONFIG?.ports?.api || '3000');\n24: \n25: export const MOODE_BASE_URL = normalizeMoodeBaseUrl(\n26:   process.env.MOODE_BASE_URL || moodeCfg?.baseUrl,\n27:   MOODE_SSH_HOST,"
+      },
+      {
+        "start": 13,
+        "end": 28,
+        "text": "13: const moodeCfg = MASTER_CONFIG?.moode || {};\n14: const runtimeCfg = MASTER_CONFIG?.runtime || {};\n15: \n16: export const FFMPEG = process.env.FFMPEG || '/usr/bin/ffmpeg';\n17: export const CURL = process.env.CURL || '/usr/bin/curl';\n18: \n19: export const MPD_PLAYLIST_DIR = '/var/lib/mpd/playlists';\n20: export const FAVORITES_PATH = `${MPD_PLAYLIST_DIR}/Favorites.m3u`;\n21: export const MOODE_SSH_USER = process.env.MOODE_SSH_USER || moodeCfg?.sshUser || 'moode';\n22: export const MOODE_SSH_HOST = process.env.MOODE_SSH_HOST || moodeCfg?.sshHost || mpdCfg?.host || 'moode.local';\n23: export const PORT = Number(process.env.PORT || MASTER_CONFIG?.ports?.api || '3000');\n24: \n25: export const MOODE_BASE_URL = normalizeMoodeBaseUrl(\n26:   process.env.MOODE_BASE_URL || moodeCfg?.baseUrl,\n27:   MOODE_SSH_HOST,\n28: );"
+      }
+    ]
+  },
+  {
+    "id": "10.2",
+    "file": "src/routes/config.runtime-admin.routes.mjs",
+    "pattern": "runtime/check-env",
+    "claim": "Runtime validation route is check-env, not check.",
+    "hits": 1,
+    "windows": [
+      {
+        "start": 803,
+        "end": 818,
+        "text": "803:       return res.status(500).json({ ok: false, error: e?.message || String(e) });\n804:     }\n805:   });\n806: \n807:   app.post('/config/runtime/check-env', async (req, res) => {\n808:     try {\n809:       if (!requireTrackKey(req, res)) return;\n810: \n811:       const mpdHost = String(req.body?.mpdHost || MPD_HOST || 'moode.local').trim();\n812:       const mpdPort = Math.max(1, Math.min(65535, Number(req.body?.mpdPort || 6600) || 6600));\n813:       const sshHost = String(req.body?.sshHost || MOODE_SSH_HOST || mpdHost || 'moode.local').trim();\n814:       const sshUser = String(req.body?.sshUser || MOODE_SSH_USER || 'moode').trim();\n815:       const paths = req.body?.paths || {};\n816: \n817:       let sshOk = false;\n818:       let mpdOk = false;"
+      }
+    ]
+  },
+  {
+    "id": "10.3",
+    "file": "src/routes/config.runtime-admin.routes.mjs",
+    "pattern": "systemctl",
+    "claim": "Service actions execute explicit host administration commands.",
+    "hits": 12,
+    "windows": [
+      {
+        "start": 250,
+        "end": 265,
+        "text": "250: \n251: async function getMpdscribbleStatus({ user, host }) {\n252:   const script = [\n253:     'svc=\"mpdscribble.service\"',\n254:     'if systemctl list-unit-files \"$svc\" --no-legend >/dev/null 2>&1; then INSTALLED=1; else INSTALLED=0; fi',\n255:     'ACTIVE=$(systemctl is-active \"$svc\" 2>/dev/null || true)',\n256:     'ENABLED=$(systemctl is-enabled \"$svc\" 2>/dev/null || true)',\n257:     'echo \"INSTALLED=$INSTALLED\"',\n258:     'echo \"ACTIVE=$ACTIVE\"',\n259:     'echo \"ENABLED=$ENABLED\"',\n260:   ].join('; ');\n261: \n262:   const { stdout } = await sshBashLc({ user, host, script, timeoutMs: 12000 });\n263:   const kv = parseKvOutput(stdout);\n264:   const installed = String(kv.INSTALLED || '0') === '1';\n265:   const activeRaw = String(kv.ACTIVE || '').trim().toLowerCase();"
+      },
+      {
+        "start": 251,
+        "end": 266,
+        "text": "251: async function getMpdscribbleStatus({ user, host }) {\n252:   const script = [\n253:     'svc=\"mpdscribble.service\"',\n254:     'if systemctl list-unit-files \"$svc\" --no-legend >/dev/null 2>&1; then INSTALLED=1; else INSTALLED=0; fi',\n255:     'ACTIVE=$(systemctl is-active \"$svc\" 2>/dev/null || true)',\n256:     'ENABLED=$(systemctl is-enabled \"$svc\" 2>/dev/null || true)',\n257:     'echo \"INSTALLED=$INSTALLED\"',\n258:     'echo \"ACTIVE=$ACTIVE\"',\n259:     'echo \"ENABLED=$ENABLED\"',\n260:   ].join('; ');\n261: \n262:   const { stdout } = await sshBashLc({ user, host, script, timeoutMs: 12000 });\n263:   const kv = parseKvOutput(stdout);\n264:   const installed = String(kv.INSTALLED || '0') === '1';\n265:   const activeRaw = String(kv.ACTIVE || '').trim().toLowerCase();\n266:   const enabledRaw = String(kv.ENABLED || '').trim().toLowerCase();"
+      }
+    ]
+  },
+  {
+    "id": "10.4",
+    "file": "src/routes/config.moode-audio-info.routes.mjs",
+    "pattern": "app.get",
+    "claim": "Audio probes are diagnostic observations, not bit-perfect certification.",
+    "hits": 1,
+    "windows": [
+      {
+        "start": 85,
+        "end": 100,
+        "text": "85:   const readAlsaHardware = deps.probeAlsaHardware || (() => probeAlsaHardware());\n86:   const getDeviceMeta = deps.fetchMoodeDeviceMeta || fetchMoodeDeviceMeta;\n87:   const getSourceAudio = deps.getSourceAudio;\n88: \n89:   app.get('/config/moode/audio-info', async (req, res) => {\n90:     try {\n91:       if (!requireTrackKey(req, res)) return;\n92:       const base = String(MOODE_BASE_URL || '').trim().replace(/\\/+$/, '');\n93:       const url = `${base}/audioinfo.php`;\n94: \n95:       let meta = { deviceName: '', piModel: '', sessionId: '' };\n96:       try {\n97:         meta = await getDeviceMeta();\n98:       } catch {}\n99: \n100:       const sessionId = String(meta?.sessionId || '').trim();"
+      }
+    ]
+  },
+  {
+    "id": "10.5",
+    "file": "ops/moode-overrides/etc/systemd/system/airplay-json-watchdog.timer",
+    "pattern": "OnUnitActiveSec",
+    "claim": "Watchdog is periodically scheduled by systemd.",
+    "hits": 1,
+    "windows": [
+      {
+        "start": 2,
+        "end": 11,
+        "text": "2: Description=Run AirPlay metadata watchdog every 30s\n3: \n4: [Timer]\n5: OnBootSec=45s\n6: OnUnitActiveSec=30s\n7: Unit=airplay-json-watchdog.service\n8: AccuracySec=5s\n9: \n10: [Install]\n11: WantedBy=timers.target"
+      }
+    ]
+  },
+  {
+    "id": "11",
+    "file": "package.json",
+    "pattern": "node --test",
+    "claim": "Development includes scripts for focused tests and diagnostics.",
+    "hits": 1,
+    "windows": [
+      {
+        "start": 16,
+        "end": 27,
+        "text": "16:     \"undici\": \"5.28.5\",\n17:     \"ws\": \"^8.21.3\"\n18:   },\n19:   \"scripts\": {\n20:     \"test\": \"node --test test/*.test.mjs\",\n21:     \"peppy:export\": \"node scripts/export-peppymeter-skins.mjs\",\n22:     \"peppy:deploy\": \"scripts/deploy-peppy-skins-to-moode.sh\"\n23:   },\n24:   \"devDependencies\": {\n25:     \"playwright\": \"^1.58.2\"\n26:   }\n27: }"
+      }
+    ]
+  },
+  {
+    "id": "11.1",
+    "file": "scripts/deploy-pi5-files.sh",
+    "pattern": "restart",
+    "claim": "Canonical helper restarts only for backend-affecting paths.",
+    "hits": 4,
+    "windows": [
+      {
+        "start": 47,
+        "end": 62,
+        "text": "47:   -o UserKnownHostsFile=\"$KNOWN_HOSTS\"\n48:   -o StrictHostKeyChecking=yes\n49: )\n50: \n51: needs_restart=0\n52: for relative_path in \"$@\"; do\n53:   case \"$relative_path\" in\n54:     /*|..|../*|*/../*)\n55:       printf 'Refusing non-relative deployment path: %s\\n' \"$relative_path\" >&2\n56:       exit 2\n57:       ;;\n58:   esac\n59: \n60:   local_path=\"$ROOT_DIR/$relative_path\"\n61:   if [[ ! -f \"$local_path\" ]]; then\n62:     printf 'Missing local deployment file: %s\\n' \"$local_path\" >&2"
+      },
+      {
+        "start": 64,
+        "end": 79,
+        "text": "64:   fi\n65: \n66:   case \"$relative_path\" in\n67:     src/*|moode-nowplaying-api.mjs)\n68:       needs_restart=1\n69:       ;;\n70:   esac\n71: \n72:   safe_name=\"$(printf '%s' \"$relative_path\" | tr -c 'A-Za-z0-9._-' '_')\"\n73:   remote_tmp=\"/tmp/now-playing-deploy-$$-$safe_name\"\n74:   remote_path=\"$TARGET_DIR/$relative_path\"\n75:   remote_tmp_q=\"$(printf '%q' \"$remote_tmp\")\"\n76:   remote_path_q=\"$(printf '%q' \"$remote_path\")\"\n77: \n78:   scp \"${SSH_OPTS[@]}\" \"$local_path\" \"$SERVER:$remote_tmp\"\n79:   ssh \"${SSH_OPTS[@]}\" \"$SERVER\" \\"
+      }
+    ]
+  },
+  {
+    "id": "11.2",
+    "file": "src/routes/config.routes.index.mjs",
+    "pattern": "registerConfigMoodeAudioInfo",
+    "claim": "New route modules must be registered with dependencies.",
+    "hits": 2,
+    "windows": [
+      {
+        "start": 17,
+        "end": 32,
+        "text": "17: import { registerConfigRoutes } from './config.routes.mjs';\n18: import { registerConfigControllerProfileRoutes } from './config.controller-profile.routes.mjs';\n19: import { registerConfigEndlessVibeRoutes } from './config.endless-vibe.routes.mjs';\n20: import { registerConfigBrowseRoutes } from './config.browse.routes.mjs';\n21: import { registerConfigMoodeAudioInfoRoutes } from './config.moode-audio-info.routes.mjs';\n22: import { registerConfigQobuzAccountRoutes } from './config.qobuz-account.routes.mjs';\n23: import { registerEchoLinkRoutes } from './echo-link.routes.mjs';\n24: \n25: export function registerAllConfigRoutes(app, deps) {\n26:   registerEchoLinkRoutes(app, {\n27:     requireTrackKey: deps.requireTrackKey,\n28:   });\n29: \n30:   registerConfigQueueWizardBasicRoutes(app, {\n31:     requireTrackKey: deps.requireTrackKey,\n32:   });"
+      },
+      {
+        "start": 129,
+        "end": 144,
+        "text": "129:   registerConfigBrowseRoutes(app, {\n130:     requireTrackKey: deps.requireTrackKey,\n131:   });\n132: \n133:   registerConfigMoodeAudioInfoRoutes(app, {\n134:     requireTrackKey: deps.requireTrackKey,\n135:     getQobuzNowPlaying: deps.getQobuzNowPlaying,\n136:     probeAlsaHardware: deps.probeAlsaHardware,\n137:     getSourceAudio: deps.getSourceAudio,\n138:   });\n139: \n140:   if (deps.controlPoint) {\n141:     registerConfigQobuzAccountRoutes(app, {\n142:       requireTrackKey: deps.requireTrackKey,\n143:       controlPoint: deps.controlPoint,\n144:       releaseQobuzConnect: deps.releaseQobuzConnect,"
+      }
+    ]
+  },
+  {
+    "id": "11.3",
+    "file": "app.html",
+    "pattern": "iframe",
+    "claim": "UI uses document/pane boundaries rather than a monolithic component runtime.",
+    "hits": 23,
+    "windows": [
+      {
+        "start": 52,
+        "end": 67,
+        "text": "52:     .viewWrap{max-width:var(--app-shell-max);width:min(var(--app-shell-max), calc(100% - 12px));margin:0 auto;padding:0 0 14px;box-sizing:border-box;border:1px solid var(--theme-rail-border);border-radius:14px;overflow:hidden;background:var(--theme-frame-fill);}\n53:     .heroWrap{max-width:var(--app-shell-max) !important;width:min(var(--app-shell-max), calc(100% - 12px)) !important;margin:18px auto -1px !important;padding-top:24px !important;position:relative}\n54:     #appFrame{width:100% !important;height:1400px;min-height:0;border:0;border-radius:0;background:var(--theme-frame-bg);display:block;box-sizing:border-box}\n55:     #themeToggle{min-width:32px;padding:5px 8px;font-size:12px;line-height:1}\n56:     /* In app-shell mode, let top chrome scroll away (not sticky) to maximize iframe area */\n57:     .heroRail{position:sticky !important; top:0 !important; z-index:30; border-bottom:0 !important; background:var(--theme-bg) !important;}\n58:     body.peppy-shell .heroWrap{margin:18px auto -1px !important;padding-top:24px !important;}\n59:     .heroRail{backdrop-filter:none !important; -webkit-backdrop-filter:none !important; background:transparent !important;}\n60:     .heroRail::before{content:none !important; display:none !important;}\n61:     .heroRailTop{border:0;border-bottom:1px solid var(--theme-rail-border);border-radius:0;background:var(--theme-frame-fill);padding:6px 10px;box-sizing:border-box}\n62:     .heroTopBar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0}\n63:     .heroTopBar .topTabs{margin:0 !important}\n64:     .heroTopBar .statusInline{display:flex;align-items:center;gap:6px;flex-wrap:wrap}\n65:     .heroTopBar .statusInline .pill{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:999px;line-height:1;font-size:12px}\n66:     .heroTopBar .statusInline button.pill{appearance:none;-webkit-appearance:none;background:var(--theme-tab-active-bg);color:var(--theme-tab-active-text);border:1px solid var(--theme-tab-active-bg);transition:transform .08s ease,box-shadow .14s ease,filter .14s ease}\n67:     .heroTopBar .statusInline button.pill:hover{filter:brightness(1.08);box-shadow:0 0 0 1px var(--theme-pill-glow) inset,0 0 14px rgba(125,211,252,.18)}"
+      },
+      {
+        "start": 424,
+        "end": 439,
+        "text": "424:         <div id=\"peppyTechControlsRow\" style=\"display:flex; gap:8px; flex-wrap:wrap; align-items:center;\"></div>\n425:         <div id=\"peppyTechPillsRow\" style=\"display:flex; gap:8px; flex-wrap:wrap; align-items:center;\"></div>\n426:       </div>\n427:     </div>\n428:     <iframe id=\"appFrame\" title=\"Sonuvi view\" src=\"about:blank\" scrolling=\"yes\" allow=\"web-share; clipboard-write\" style=\"width:100%;display:block;\"></iframe>\n429:   </div>\n430: \n431:   <div id=\"queueAlbumModal\" class=\"queueAlbumModal\" aria-hidden=\"true\">\n432:     <div class=\"queueAlbumCard\" role=\"dialog\" aria-modal=\"true\" aria-label=\"Album details\">\n433:       <div class=\"queueAlbumHead\">\n434:         <div class=\"heroQueueTitle\">Album details</div>\n435:         <button id=\"queueAlbumClose\" class=\"queueAlbumClose\" type=\"button\">Close</button>\n436:       </div>\n437:       <div id=\"queueAlbumBody\" class=\"queueAlbumBody\"></div>\n438:     </div>\n439:   </div>"
+      }
+    ]
+  },
+  {
+    "id": "11.4",
+    "file": "test/mobile-http.test.mjs",
+    "pattern": "malformed",
+    "claim": "Mobile JSON handling has focused malformed-body tests.",
+    "hits": 1,
+    "windows": [
+      {
+        "start": 6,
+        "end": 21,
+        "text": "6:   handleMobileJsonError,\n7:   MOBILE_INVALID_JSON_REQUEST_CODE,\n8: } from '../src/lib/mobile-http.mjs';\n9: \n10: test('malformed mobile JSON returns a structured error before route dispatch', async (t) => {\n11:   const app = express();\n12:   app.use(express.json());\n13:   app.use(handleMobileJsonError);\n14:   app.post('/v1/mobile/vibe/preview', (_req, res) => res.json({ ok: true }));\n15: \n16:   const server = app.listen(0, '127.0.0.1');\n17:   await new Promise((resolve, reject) => {\n18:     server.once('listening', resolve);\n19:     server.once('error', reject);\n20:   });\n21:   t.after(() => new Promise((resolve) => server.close(resolve)));"
+      }
+    ]
+  },
+  {
+    "id": "11.5",
+    "file": "scripts/build_wiki_site.py",
+    "pattern": "wiki-source",
+    "claim": "Wiki-source publishes to wiki-site; runbooks are separate maintained sources.",
+    "hits": 4,
+    "windows": [
+      {
+        "start": 1,
+        "end": 13,
+        "text": "1: #!/usr/bin/env python3\n2: \"\"\"Build the generated HTML companion for docs/wiki-source.\n3: \n4: The Markdown in docs/wiki-source is canonical. This small renderer intentionally\n5: has no network or credential behavior; it only updates docs/wiki-site and its\n6: search index from the repository-local source tree.\n7: \"\"\"\n8: \n9: from __future__ import annotations\n10: \n11: import html\n12: import json\n13: import re"
+      },
+      {
+        "start": 1,
+        "end": 15,
+        "text": "1: #!/usr/bin/env python3\n2: \"\"\"Build the generated HTML companion for docs/wiki-source.\n3: \n4: The Markdown in docs/wiki-source is canonical. This small renderer intentionally\n5: has no network or credential behavior; it only updates docs/wiki-site and its\n6: search index from the repository-local source tree.\n7: \"\"\"\n8: \n9: from __future__ import annotations\n10: \n11: import html\n12: import json\n13: import re\n14: from pathlib import Path\n15: "
+      }
+    ]
+  },
+  {
+    "id": "11.6",
+    "file": ".github/workflows/sonuvi-pages.yml",
+    "pattern": "docs/sonuvi-site",
+    "claim": "Public-site workflow deploys the separate static marketing tree.",
+    "hits": 2,
+    "windows": [
+      {
+        "start": 3,
+        "end": 18,
+        "text": "3: on:\n4:   push:\n5:     branches: [main]\n6:     paths:\n7:       - 'docs/sonuvi-site/**'\n8:       - '.github/workflows/sonuvi-pages.yml'\n9:   workflow_dispatch:\n10: \n11: permissions:\n12:   contents: read\n13:   pages: write\n14:   id-token: write\n15: \n16: concurrency:\n17:   group: pages\n18:   cancel-in-progress: true"
+      },
+      {
+        "start": 27,
+        "end": 33,
+        "text": "27:       - uses: actions/checkout@v4\n28:       - uses: actions/configure-pages@v5\n29:       - uses: actions/upload-pages-artifact@v3\n30:         with:\n31:           path: docs/sonuvi-site\n32:       - id: deployment\n33:         uses: actions/deploy-pages@v4"
+      }
+    ]
+  },
+  {
+    "id": "12",
+    "file": "moode-nowplaying-api.mjs",
+    "pattern": "peppy/vumeter",
+    "claim": "Glossary reverses meter data direction in its playback diagram.",
+    "hits": 2,
+    "windows": [
+      {
+        "start": 708,
+        "end": 723,
+        "text": "708: \n709: // PeppyMeter bridge (HTTP level data -> app API)\n710: let peppyMeterLast = { left: 0, right: 0, mono: 0, spectrum: [], ts: 0, source: 'init' };\n711: let peppySpectrumLast = { bins: [], size: 0, maxValue: 100, ts: 0, source: 'init' };\n712: app.put('/peppy/vumeter', (req, res) => {\n713:   try {\n714:     const left = Number(req?.body?.left ?? req?.query?.left ?? 0);\n715:     const right = Number(req?.body?.right ?? req?.query?.right ?? 0);\n716:     const mono = Number(req?.body?.mono ?? req?.query?.mono ?? 0);\n717: \n718:     let spectrumRaw = req?.body?.spectrum ?? req?.query?.spectrum ?? [];\n719:     if (typeof spectrumRaw === 'string') {\n720:       try { spectrumRaw = JSON.parse(spectrumRaw); } catch { spectrumRaw = []; }\n721:     }\n722: \n723:     // Accept common alternate field names from external analyzers/bridges."
+      },
+      {
+        "start": 771,
+        "end": 786,
+        "text": "771:     return res.status(400).json({ ok: false, error: 'invalid payload' });\n772:   }\n773: });\n774: \n775: app.get('/peppy/vumeter', (_req, res) => {\n776:   const now = Date.now();\n777:   const ageMs = Math.max(0, now - Number(peppyMeterLast?.ts || 0));\n778:   return res.json({ ok: true, meter: peppyMeterLast, ageMs, fresh: ageMs < 4000 });\n779: });\n780: \n781: // PeppySpectrum bridge (bins -> app API)\n782: app.put('/peppy/spectrum', (req, res) => {\n783:   try {\n784:     let binsRaw = req?.body?.bins ?? req?.body?.spectrum ?? req?.query?.bins ?? req?.query?.spectrum ?? [];\n785:     if (typeof binsRaw === 'string') {\n786:       try { binsRaw = JSON.parse(binsRaw); } catch { binsRaw = []; }"
+      }
+    ]
+  }
+]

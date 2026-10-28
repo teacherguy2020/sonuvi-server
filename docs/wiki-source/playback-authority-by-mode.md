@@ -87,6 +87,30 @@ Server does not expose Qobuz credentials or claim to provide Qobuz catalog
 authentication. A Home queue mutation must release and confirm Qobuz
 ownership inactive before it starts competing MPD playback.
 
+## Release and handoff are explicit transitions
+
+| Current owner → intended target | Required behavior | Confirmation / conflict handling |
+| --- | --- | --- |
+| Home MPD → Home MPD | Use the applicable web or bearer Home contract | Read returned state; a UI optimistic hold is not command confirmation |
+| Qobuz Connect → Home MPD | Explicit `POST /v1/mobile/qobuz-connect/release` before a Home action | Wait for confirmed release; receiver recovery/readiness is a separate result. Do not treat connected/available as fresh active ownership |
+| Qobuz Connect → Qobuz control | Use fresh Connect snapshot and applicable current-track/queue-fingerprint guards | Read-after-write verification; refresh on conflict instead of replaying stale queue intent |
+| MPD/other renderer owner → Sonuvi UPnP | Read preflight, then use the explicit confirmed takeover contract when permitted | Validate queue revision/session generation; Qobuz ownership is not silently taken over |
+| Sonuvi UPnP → Home MPD | End the owned UPnP session through its contract before Home mutation | Refresh authoritative state; Home control reports `409 HOME_PLAYBACK_OWNERSHIP_CONFLICT` with source `upnp-sonuvi` while owned |
+| Home → This iPhone/iPad | Select native-device playback and its device queue | Server media authorization/metadata/history do not transfer device playback authority to MPD |
+
+For Qobuz-owned Home conflicts the same `409` code has source
+`qobuz-connect`. A failed observation is not evidence of release. UPnP startup
+uses bounded renderer URI/transport-readiness probes and session-generation
+checks; stale observations cannot establish ownership for a newer session.
+Probe fallbacks and duplicate-Play handling are implementation-specific, not
+an unconditional guarantee that every renderer reports readiness.
+
+See [Qobuz lifecycle and recovery](../runbooks/28-qobuz-connect-now-playing.md),
+[UPnP session/queue contract](upnp-control-point.md), and
+[current native controls](mobile-now-playing.md#home-transport-controls).
+Working PiBuZ Connect control is separate from the upmpdcli Qobuz MediaServer
+proof-of-concept; source discovery does not establish provider authentication.
+
 ## Mode 1: local file playback
 
 ## Authority model
@@ -298,9 +322,6 @@ This page should stay linked with:
 - `gotchas-and-lessons.md`
 - `local-environment.md`
 
-## Timestamp
-
-Last updated: 2026-10-20 18:54 America/Chicago
 
 ## Current status
 
@@ -309,3 +330,5 @@ This page now gives the wiki one of the project’s most important operating rul
 - art truth is mode-dependent
 - visible output is often interpreted rather than raw
 - debugging should begin with mode classification, not random file searching
+
+*Last reviewed: 2026-10-28 America/Chicago*

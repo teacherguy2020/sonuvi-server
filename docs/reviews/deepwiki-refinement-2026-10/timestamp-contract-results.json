@@ -1,0 +1,40 @@
+{
+  "scope": "mocked Server handler only; not an observed iOS payload",
+  "results": [
+    {
+      "case": "startedAtMs",
+      "status": 200,
+      "state": "progress",
+      "outcome": "preserved",
+      "passed": true
+    },
+    {
+      "case": "legacy-startedAt",
+      "status": 200,
+      "state": "progress",
+      "outcome": "request-time",
+      "passed": true
+    },
+    {
+      "case": "omitted-state-and-timestamp",
+      "status": 200,
+      "state": "progress",
+      "outcome": "request-time",
+      "passed": true
+    },
+    {
+      "case": "future-timestamp",
+      "status": 200,
+      "state": "progress",
+      "outcome": "request-time",
+      "passed": true
+    },
+    {
+      "case": "older-than-seven-days",
+      "status": 200,
+      "state": "progress",
+      "outcome": "clamped-to-seven-day-window",
+      "passed": true
+    }
+  ]
+}

@@ -290,6 +290,14 @@ This region is likely where the tablet shell most strongly overlaps with kiosk-s
 - `genre-pane-messaging.md`
 - `visualizer-in-embedded-mode.md`
 
+## Web tablet versus native Audio Info
+
+This anatomy describes the **Server web tablet controller**, not Sonuvi iOS.
+The web **Audio info** action still opens `audioInfoModal`; iOS now uses a
+dedicated Audio Info screen instead of its former drawer. Do not transfer the
+web-modal instructions to native navigation. See [Audio Info entry points](diagnostics-interface.md#audio-info-entry-points-and-presentation)
+for endpoints and evidence semantics.
+
 ## 9. Album / artist / audio-info modal family
 
 ### What it is
@@ -458,6 +466,4 @@ controls and cannot safely pause, seek, shuffle, or stop the Pibuz renderer;
 the server-side diagnostics playback route enforces the same boundary for
 clients that bypass this shell.
 
-## Timestamp
-
-Last updated: 2026-09-22 America/Chicago
+*Last reviewed: 2026-10-28 America/Chicago*

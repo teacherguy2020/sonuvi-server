@@ -190,4 +190,21 @@ Edit `docs/wiki-source/`. Do not hand-edit `docs/wiki-site/` or the published
 GitHub Wiki pages. Use `scripts/publish_github_wiki.py` for the GitHub Wiki and
 the documented site-generation workflow for `docs/wiki-site/`.
 
-*Last reviewed: 2026-09-22 America/Chicago*
+## October 2026 DeepWiki evidence and refinement
+
+The accepted [before-and-after comparison](deepwiki-comparison-2026-10.md)
+and [prioritized plan](deepwiki-documentation-refinement-plan-2026-10.md) are
+historical snapshots, preserved unchanged. The complete 77-page ledger,
+revision evidence and hashes are included in the repository's `audit-evidence/`
+directory. Full retrieved bodies and raw crawler responses are preserved in the
+durable local archive recorded by the refinement review; they are not generated
+as user-facing documentation.
+
+The [documentation refinement review](../reviews/deepwiki-refinement-2026-10/review.md)
+records subsequent source-backed corrections, timestamp-contract verification,
+the native Audio Info screen clarification, validation results and final
+publication verification. Read its Audio Info qualification alongside the earlier
+comparison: a removed DeepWiki leaf is not by itself proof of lost capability
+or an iOS UI-driven change to the indexed Server repository.
+
+*Last reviewed: 2026-10-28 America/Chicago*

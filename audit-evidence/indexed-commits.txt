@@ -1,0 +1,14 @@
+4bf8889a767e167f50566ec4e193d4b625c2c1f2 2026-10-23T10:25:03-05:00 fix: restore Alexa artwork backdrop on tablet
+1f866419882324187b6a3ca9d2e1e487f8914581 2026-10-23T09:49:46-05:00 docs: fix DeepWiki README badge
+10898a0fcf54b9c6980859ff37b8944bf42ee75e 2026-10-23T09:36:46-05:00 docs: add DeepWiki README badge
+c4569bd0a44b91cd44aea41bad2c185734ac13f6 2026-10-23T09:32:25-05:00 docs: refine README image captions
+50bc3a6c39deb9f7fbffc54750b99b478a1a20c2 2026-10-23T09:14:41-05:00 docs: add Sonuvi iOS screenshot to README
+65929ba4e4024bee39d1d7a2f7508b2203a9418d 2026-10-22T07:43:32-05:00 feat: add mobile home history and queue paging
+7e82355977be64871034e83aa6679cbf1c7e0b61 2026-10-21T05:54:57-05:00 feat: add mobile Consume control
+9603b14d8ee69b0cabc7246adee336a33b226436 2026-10-21T05:04:12-05:00 fix: harden mobile JSON transport and proxy routing
+bddd0714d50158c71af56599ff54bd31cc23b6f4 2026-10-20T23:10:05-05:00 feat: add mobile repeat mode and native Vibe preview
+a9f089df8db1c669f9b1f47ca0d77b11b64aba98 2026-10-20T19:33:37-05:00 feat: add bearer mobile Home controls
+f5db417528d0c206fd32ccba890a6ad3f57abed9 2026-10-20T19:13:18-05:00 docs: reconcile architecture documentation with implementation
+673e5037731443db17b82df6b293733fb030efa9 2026-10-20T18:52:34-05:00 docs: preserve DeepWiki architecture audit
+8c194c2f2ec2f90fe858b79529d8fbce3460f7b4 2026-10-20T17:01:06-05:00 fix(upnp): wait for renderer readiness before play
+cc9e7462fd673b8c250d1b7152b009e68bc8ffb7 2026-10-20T16:51:03-05:00 feat(qobuz): restore receiver after Home handoff

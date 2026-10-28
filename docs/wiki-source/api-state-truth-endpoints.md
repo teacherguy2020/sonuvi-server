@@ -162,6 +162,15 @@ A good current interpretation is:
 
 That distinction should stay explicit.
 
+## Audio Info is evidence, not playback authority
+
+Open [Audio Info](diagnostics-interface.md#audio-info-entry-points-and-presentation)
+through the appropriate client entry: the dedicated native iOS screen or the
+Server web tablet Audio info action. The [diagnostics contract](diagnostics-interface.md#audio-info-diagnostics-contract)
+separates source, decoded PCM, configured chain, measured ALSA, processing,
+freshness and conversion uncertainty. It does not replace source ownership or
+prove bit-perfect playback from endpoint format alone.
+
 ## Core distinctions to preserve
 
 ### `/now-playing` vs `/track`
@@ -210,3 +219,5 @@ This page should stay linked with:
 At the moment, this page makes the most important state/truth endpoints more explicit.
 
 That should help future agents avoid treating `/now-playing` as just another route in the list when it is really one of the project’s central presentation-truth surfaces.
+
+*Last reviewed: 2026-10-28 America/Chicago*

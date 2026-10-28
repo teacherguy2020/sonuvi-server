@@ -68,6 +68,15 @@ If you are trying to understand the playback branch as a system, read in this or
 
 Then move into route ownership or interface pages when the question becomes more implementation-specific.
 
+## Audio Info is evidence, not playback authority
+
+Open [Audio Info](diagnostics-interface.md#audio-info-entry-points-and-presentation)
+through the appropriate client entry: the dedicated native iOS screen or the
+Server web tablet Audio info action. The [diagnostics contract](diagnostics-interface.md#audio-info-diagnostics-contract)
+separates source, decoded PCM, configured chain, measured ALSA, processing,
+freshness and conversion uncertainty. It does not replace source ownership or
+prove bit-perfect playback from endpoint format alone.
+
 ## Strong current sub-branches
 
 ### 1. Playback authority branch
@@ -120,6 +129,4 @@ At the moment, this page establishes Playback Features as a real top-level branc
 
 That matters because the underlying content already existed, but the branch identity was still weaker than the DeepWiki model.
 
-## Timestamp
-
-Last updated: 2026-04-06 06:30 America/Chicago
+*Last reviewed: 2026-10-28 America/Chicago*

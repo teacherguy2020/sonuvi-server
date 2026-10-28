@@ -1,0 +1,29 @@
+{
+  "discovered": 77,
+  "retrieved": 77,
+  "compared_reconstructed_or_presence": 77,
+  "literal_old_new_body_diffs": 0,
+  "verified_selected_claims": 77,
+  "comparison_classifications": {
+    "Cannot determine reliably": 73,
+    "Improved materially": 3,
+    "Newly introduced": 1
+  },
+  "current_unavailable": [],
+  "historical_full_bodies_unavailable": 77,
+  "removed_old_pages": [
+    {
+      "id": "9.7",
+      "title": "Audio Info and Source Diagnostics",
+      "classification": "Removed or consolidated",
+      "url": "https://deepwiki.com/teacherguy2020/now-playing/9.7-audio-info-and-source-diagnostics",
+      "url_basis": "Candidate reconstructed from historical title; exact old URL not preserved",
+      "old_revision": "dee06724c3549b9ab87fc70412ce1043572befab",
+      "new_revision": null,
+      "retrieval_status": "Historical body unavailable; candidate URL returns Overview fallback",
+      "comparison_status": "Compared by inventory and old report; partial thematic overlap now in 9.3/10.4",
+      "verification_status": "Current audio contract/source checked via 9.3/10.4",
+      "assessment": "Structural discoverability regression; exact text loss cannot be measured"
+    }
+  ]
+}

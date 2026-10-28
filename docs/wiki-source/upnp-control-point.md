@@ -216,6 +216,16 @@ Qobuz cache is protected by directory mode `0700` plus an upmpdcli systemd
 authentication protocol officially authorized; package upgrades require a
 fresh source review and a clean patch application.
 
+## Cross-owner navigation
+
+Use the [authority transition table](playback-authority-by-mode.md#release-and-handoff-are-explicit-transitions)
+for Home/Qobuz/UPnP handoffs. This page describes **Server-mediated** UPnP:
+Sonuvi owns the logical queue/session and the renderer executes transport.
+An iOS-native UPnP control path is a different owner; do not attach its state
+to the Server queue merely because both address the same renderer. The
+[Server/iOS handoff](../ios/server-to-ios-contract-handoff-2026-10.md) preserves
+that boundary and labels the device-owned catalog as future architecture.
+
 ## Logical queue and ownership
 
 The queue manager stores a bounded ordered list of generated queue item IDs.
@@ -417,4 +427,4 @@ read-only route checks do not send `SetAVTransportURI`, `Play`, `Pause`, or
 `Stop`; a multi-track queue acceptance test remains separately approved and
 must be coordinated step by step.
 
-Last reviewed: 2026-10-20 18:54 America/Chicago.
+*Last reviewed: 2026-10-28 America/Chicago*
