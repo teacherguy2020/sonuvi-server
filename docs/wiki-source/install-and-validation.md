@@ -11,6 +11,18 @@ confidence: high
 
 # install and validation
 
+## Current installation boundary — 2026-10-28
+
+The legacy installer described below is retired. These are historical validation
+notes, not commands to run against the current Sonuvi installation. In particular,
+do not run the old installer, uninstaller, PM2 startup, or file-copy deployment
+against a migrated host.
+
+Use [Sonuvi Server operations](../runbooks/sonuvi-server-operations.md) for the
+current release/state layout, service templates, enablement, and preservation
+rules. Main alone does not yet provide the complete reviewed release bundle.
+No fresh-install or reboot acceptance is implied by an already running server.
+
 ## Purpose
 
 This page preserves the install-validation workflow for `now-playing`.
@@ -304,4 +316,4 @@ The important practical truth is:
 
 ## Timestamp
 
-Last updated: 2026-04-06 05:55 America/Chicago
+Last updated: 2026-10-28 America/Chicago

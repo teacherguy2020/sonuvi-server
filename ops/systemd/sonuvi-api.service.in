@@ -1,0 +1,47 @@
+[Unit]
+Description=Sonuvi API (repository-first immutable release)
+After=network-online.target remote-fs.target
+Wants=network-online.target
+RequiresMountsFor=@MUSIC_LIBRARY_ROOT@
+ConditionPathExists=/opt/sonuvi/current/release-manifest.json
+
+[Service]
+Type=simple
+User=@SERVICE_ACCOUNT@
+Group=@SERVICE_ACCOUNT@
+WorkingDirectory=/opt/sonuvi/current
+Environment=SONUVI_RELEASE_ROOT=/opt/sonuvi/releases/@RELEASE_ID@
+Environment=SONUVI_STATE_ROOT=/var/lib/sonuvi
+Environment=SONUVI_CONFIG_ROOT=/var/lib/sonuvi/config
+Environment=SONUVI_SECRETS_ROOT=/var/lib/sonuvi/protected
+Environment=SONUVI_MOODE_SSH_ROOT=/var/lib/sonuvi/protected/ssh
+Environment=LASTFM_ENV_FILE=/var/lib/sonuvi/protected/lastfm.env
+Environment=SONUVI_PUBLIC_WEB_ROOT=/opt/sonuvi/current/public
+Environment=SONUVI_RELEASE_MANIFEST=/opt/sonuvi/current/release-manifest.json
+Environment=SONUVI_RELEASE_ID=@RELEASE_ID@
+Environment=SONUVI_ACTIVATION_STATE=/var/lib/sonuvi/checkpoints/release-activation-state.json
+Environment=MUSIC_LIBRARY_ROOT=@MUSIC_LIBRARY_ROOT@
+Environment=PI4_MOUNT_BASE=@MUSIC_LIBRARY_ROOT@
+EnvironmentFile=-/var/lib/sonuvi/protected/legacy-config.env
+EnvironmentFile=-/var/lib/sonuvi/protected/now-playing.env
+EnvironmentFile=-/etc/now-playing/apns-provider.env
+EnvironmentFile=-/var/lib/sonuvi/protected/runtime-paths.env
+ExecStartPre=/usr/bin/node /opt/sonuvi/current/scripts/verify-current-release.mjs
+ExecStart=/usr/bin/node /opt/sonuvi/current/moode-nowplaying-api.mjs
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadOnlyPaths=/opt/sonuvi/current @MUSIC_LIBRARY_ROOT@ /etc/now-playing
+ReadWritePaths=/var/lib/sonuvi
+
+[Install]
+WantedBy=multi-user.target

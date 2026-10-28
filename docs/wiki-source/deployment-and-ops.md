@@ -78,14 +78,16 @@ This is separate from normal app-file deployment and should not be mentally coll
 
 ## Current Server deployment boundary
 
-The primary live app target is the configured Pi5 Server installation. From
-the repository, use `scripts/deploy-pi5-files.sh` for approved file deployment; it pins the
-verified host key, stages through `/tmp`, installs with passwordless sudo, and
-restarts `now-playing.service` only when a backend path requires it.
+The primary live app target is the configured Pi5 Sonuvi Server installation.
+Use approved immutable artifacts, `/opt/sonuvi/current`, and
+`sonuvi-api.service` / `sonuvi-web.service`. See
+[Sonuvi Server operations](../runbooks/sonuvi-server-operations.md).
+The old installer and `scripts/deploy-pi5-files.sh` now refuse mutations; copying
+individual files into a release would invalidate its manifest.
 
-- Frontend-only files can normally be deployed without an API restart, but
-  still require browser/controller/display verification.
-- Route, service, or server-code files require the helper's restart behavior;
+- Frontend changes also require a verified release artifact; browser refresh alone
+  does not deploy source changes.
+- API and web form a coupled systemd pair. Restart both together when authorized;
   verify service readiness and the affected endpoint afterward.
 - Verify the live `/now-playing`, `/next-up`, and relevant authenticated mobile
   route rather than relying on a successful copy or HTTP response alone.
@@ -407,4 +409,4 @@ Its job is to help an agent decide:
 - what must be checked next
 - and why a “successful” result at one layer may still not mean the system changed in the way you intended.
 
-*Last reviewed: 2026-10-20 18:54 America/Chicago*
+*Last reviewed: 2026-10-28 America/Chicago*

@@ -95,19 +95,17 @@ The native iOS app also supports selected device-local workflows without an acti
 ## Quick start: Sonuvi Server with moOde
 
 1. Have a working moOde/MPD player reachable on your LAN.
-2. Prepare the application host with Node.js, npm, `mpc`, and the process-management dependencies specified by the installer.
-3. Install Sonuvi Server:
-
-   ```sh
-   curl -fsSL https://raw.githubusercontent.com/teacherguy2020/now-playing/main/scripts/install.sh | bash -s -- --ref main
-   ```
-
-4. Open `config.html` and configure moOde/MPD connectivity, paths, SSH access, and a strong `trackKey`.
-5. Run **Check SSH + Paths**, save the configuration, and verify `/now-playing` and a controller page.
+2. Follow [Sonuvi Server operations](./docs/runbooks/sonuvi-server-operations.md) for the current immutable-release layout, service templates, and boot behavior.
+3. Use an approved release artifact, not an in-place copy of a checkout. Code lives under `/opt/sonuvi/releases`; writable state and protected credentials live under `/var/lib/sonuvi`.
+4. Verify API, controller, authenticated access, and existing data before accepting an installation.
 
 For complete prerequisites, first-run steps, and troubleshooting, see [Getting Started](./docs/wiki-source/getting-started.md).
 
-> **Repository-path note:** The installer URL retains the historical `now-playing` repository path. Verify that this remains the canonical installation location before changing it purely for branding.
+> The legacy one-line installer and file-push helper are retired: they targeted
+> `/opt/now-playing` and the old services. This branch does not yet contain the
+> complete reviewed immutable-release tooling. A fresh main checkout is **not**
+> a supported one-command production installation. Do not use Config Save/Restart
+> as an installation or migration mechanism.
 
 ## moOde display integration
 

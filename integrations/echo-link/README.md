@@ -23,7 +23,12 @@ the API or logs.
 
 ## Required deployment settings
 
-The systemd unit reads these values from `/opt/now-playing/.env`:
+The optional systemd unit reads these values from
+`/var/lib/sonuvi/protected/echo-link.env` (operator-managed, mode `0600`).
+Its application path is `/opt/sonuvi/current/integrations/echo-link/`.
+Confirm the chosen release includes this integration before enabling the sidecar.
+Adapt the example service user and virtualenv path to the host. Do not create
+new credentials or enable an unused integration just to install Sonuvi.
 
 ```text
 ECHO_LINK_ENABLED=1
@@ -39,6 +44,12 @@ ECHO_LINK_ACCOUNT_NAME=Main Floor Echo Link
 
 The complete serial and device type identify the target. Account name is a
 sanity check only. The sidecar binds to `127.0.0.1`.
+
+The API also needs its existing Echo Link enablement/connection settings in its
+approved protected environment. A sidecar-only environment file does not enable
+the API integration. Preserve existing credentials/state paths; keep them outside
+the immutable release. This optional template is not installed on the reference
+Pi5 and is not enabled by the Sonuvi API/web boot configuration.
 
 ## State behavior
 

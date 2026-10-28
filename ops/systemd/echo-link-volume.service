@@ -6,9 +6,9 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=brianwis
-WorkingDirectory=/opt/now-playing
-EnvironmentFile=-/opt/now-playing/.env
-ExecStart=/home/brianwis/.local/share/echo-link-volume/venv/bin/python /opt/now-playing/integrations/echo-link/echo_link_volume.py --credentials=${ECHO_LINK_CREDENTIALS} --device-type=${ECHO_LINK_DEVICE_TYPE} --device-serial=${ECHO_LINK_DEVICE_SERIAL} --account-name=${ECHO_LINK_ACCOUNT_NAME} --state-file=${ECHO_LINK_STATE} --host=127.0.0.1 --port=${ECHO_LINK_PORT}
+WorkingDirectory=/opt/sonuvi/current
+EnvironmentFile=/var/lib/sonuvi/protected/echo-link.env
+ExecStart=/home/brianwis/.local/share/echo-link-volume/venv/bin/python /opt/sonuvi/current/integrations/echo-link/echo_link_volume.py --credentials=${ECHO_LINK_CREDENTIALS} --device-type=${ECHO_LINK_DEVICE_TYPE} --device-serial=${ECHO_LINK_DEVICE_SERIAL} --account-name=${ECHO_LINK_ACCOUNT_NAME} --state-file=${ECHO_LINK_STATE} --host=127.0.0.1 --port=${ECHO_LINK_PORT}
 Restart=always
 RestartSec=5
 NoNewPrivileges=true

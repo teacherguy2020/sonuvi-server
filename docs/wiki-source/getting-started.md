@@ -10,7 +10,7 @@ confidence: high
 
 # Getting Started
 
-This is the shortest path for a new Sonuvi installation. Sonuvi is a
+This describes the current Sonuvi installation boundary. Sonuvi is a
 moOde-focused enhancement platform: it runs a web UI and API on an app host and
 uses MPD, moOde, SSH, and HTTP integrations to provide richer playback,
 metadata, queue, display, and controller experiences.
@@ -29,25 +29,27 @@ API host to reach moOde over the LAN.
 
 ## Install
 
-On the Sonuvi host, install Node.js, npm, `mpc`, and PM2, then use the
-repository installer:
+Use the [Sonuvi Server operations guide](../runbooks/sonuvi-server-operations.md).
+The production model is systemd (`sonuvi-api.service`, `sonuvi-web.service`),
+immutable releases under `/opt/sonuvi`, and writable state under `/var/lib/sonuvi`.
+PM2 and the legacy installer are not the current production startup mechanism.
+The old installer and file-push helper fail without making changes.
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/teacherguy2020/now-playing/main/scripts/install.sh | bash -s -- --ref main
-```
-
-The full installer flags, split-box/single-box choices, upgrade behavior, and
-rollback checks are in [install-and-validation.md](install-and-validation.md).
+This branch does not include the complete reviewed release tooling. Obtain an
+approved artifact and deployment procedure; do not treat a main checkout or
+these unit templates as a complete installation bundle. Historical validation
+notes remain in [install-and-validation.md](install-and-validation.md).
 
 ## Configure the first connection
 
 1. Open `config.html` on the Sonuvi UI host.
 2. Set the moOde/MPD host and port.
-3. Set a strong `trackKey` for protected API actions.
-4. Configure the optional moOde SSH host/user and required paths.
-5. Run **Check SSH + Paths**.
-6. Save the configuration and restart the API only if the UI reports that a
-   restart is required.
+3. Preserve the approved operator authentication and separate native-device pairing.
+4. Use the release's validated configuration/protected environment and managed SSH paths.
+5. Do not use Config Save/Restart to bootstrap an immutable installation: Save
+   still has known protected-field incompatibilities. A hardened service may
+   reject automatic restart; an administrator must restart the API/web pair
+   together and verify health. Never weaken its sandbox or restart legacy units.
 
 Use [config-interface.md](config-interface.md) for the page model and
 [config-network-and-runtime.md](config-network-and-runtime.md) for connection
@@ -75,4 +77,4 @@ The operator-facing checks are collected in
 - Understand the code and API → [developer-reference.md](developer-reference.md)
 - Diagnose a failure → [troubleshooting-and-technical-notes.md](troubleshooting-and-technical-notes.md)
 
-*Last reviewed: 2026-09-22 America/Chicago*
+*Last reviewed: 2026-10-28 America/Chicago*

@@ -17,6 +17,7 @@ import {
 } from '../config.mjs';
 import { createLastfmIndexResolver } from '../lib/lastfm-library-match.mjs';
 import { normalizeMoodeBaseUrl } from '../lib/moode-url.mjs';
+import { registerSonuviRestartRoutes } from '../lib/sonuvi-service-control.mjs';
 import { exchangeLastfmToken, lastfmAuthorizationUrl, requestLastfmToken } from '../../scripts/lastfm-authorize.mjs';
 
 const execFileP = promisify(execFile);
@@ -1052,7 +1053,7 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
 
       return res.json({
         ok: true,
-        message: 'Config saved. Restart api with --update-env to apply env-overridden values.',
+        message: 'Config saved. Environment overrides still take precedence; an administrator may need to restart both Sonuvi services.',
         config: withEnvOverrides(next),
         fullConfig: next,
       });
@@ -1061,30 +1062,7 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
     }
   });
 
-  app.post('/config/restart-api', async (req, res) => {
-    try {
-      if (!requireTrackKey(req, res)) return;
-
-      try {
-        await execFileP('pm2', ['restart', 'api', '--update-env']);
-        return res.json({ ok: true, restarted: true, method: 'pm2', services: ['api'] });
-      } catch (_) {}
-
-      try {
-        await execFileP('sudo', ['-n', 'systemctl', 'restart', 'now-playing.service']);
-        return res.json({ ok: true, restarted: true, method: 'systemd', services: ['now-playing.service'] });
-      } catch (e) {
-        return res.status(501).json({
-          ok: false,
-          restarted: false,
-          error: 'Automatic restart unavailable on this host. Restart your service manually.',
-          detail: e?.message || String(e),
-        });
-      }
-    } catch (e) {
-      return res.status(500).json({ ok: false, error: e?.message || String(e) });
-    }
-  });
+  registerSonuviRestartRoutes(app, { requireTrackKey, execFileP });
 
   app.get('/config/moode/display/status', async (req, res) => {
     try {
@@ -1631,59 +1609,4 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
     }
   });
 
-  app.post('/config/restart-services', async (req, res) => {
-    try {
-      if (!requireTrackKey(req, res)) return;
-
-      let systemdDetected = false;
-      let pm2Detected = false;
-      let systemdDetail = '';
-      let pm2Detail = '';
-
-      try {
-        await execFileP('systemctl', ['list-unit-files', 'now-playing.service', 'now-playing-web.service', '--no-legend']);
-        systemdDetected = true;
-      } catch (e) {
-        systemdDetail = e?.message || String(e);
-      }
-
-      if (systemdDetected) {
-        try {
-          await execFileP('sudo', ['-n', 'systemctl', 'restart', 'now-playing.service', 'now-playing-web.service']);
-          return res.json({ ok: true, restarted: true, method: 'systemd', services: ['now-playing.service', 'now-playing-web.service'] });
-        } catch (e) {
-          systemdDetail = e?.message || String(e);
-        }
-      }
-
-      try {
-        const { stdout } = await execFileP('pm2', ['jlist']);
-        const list = JSON.parse(String(stdout || '[]'));
-        const names = new Set((Array.isArray(list) ? list : []).map((x) => String(x?.name || '').trim()).filter(Boolean));
-        pm2Detected = names.has('api') || names.has('webserver');
-      } catch (e) {
-        pm2Detail = e?.message || String(e);
-      }
-
-      if (pm2Detected) {
-        try {
-          await execFileP('pm2', ['restart', 'api', '--update-env']);
-        } catch {}
-        try {
-          await execFileP('pm2', ['restart', 'webserver']);
-        } catch {}
-        return res.json({ ok: true, restarted: true, method: 'pm2', services: ['api', 'webserver'] });
-      }
-
-      return res.status(501).json({
-        ok: false,
-        restarted: false,
-        error: 'Automatic restart unavailable on this host. Restart services manually.',
-        detect: { systemdDetected, pm2Detected },
-        detail: { systemd: systemdDetail, pm2: pm2Detail },
-      });
-    } catch (e) {
-      return res.status(500).json({ ok: false, error: e?.message || String(e) });
-    }
-  });
 }
