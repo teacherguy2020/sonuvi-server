@@ -2,6 +2,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <script src="scripts/now-playing-art.js?v=20261028-https1"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <link rel="manifest" href="/manifest-controller.webmanifest?v=20260318b" />
@@ -16,7 +17,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>Controller Now Playing</title>
   <style>
-    html,body{color:#111;height:100dvh;min-height:100dvh;overflow:hidden !important;background-color:rgba(0,0,0,.56) !important;background-image:url('http://sonuvi.local:3101/art/current_bg_640_blur.jpg') !important;background-size:cover !important;background-position:center top !important;background-repeat:no-repeat !important;background-attachment:fixed !important;background-blend-mode:multiply !important;}
+    html,body{color:#111;height:100dvh;min-height:100dvh;overflow:hidden !important;background-color:rgba(0,0,0,.56) !important;background-size:cover !important;background-position:center top !important;background-repeat:no-repeat !important;background-attachment:fixed !important;background-blend-mode:multiply !important;}
     html.nav-enter-slide body{animation:cnpEnterFromRight .23s cubic-bezier(.2,.7,.2,1) both;will-change:transform,opacity}
     @keyframes cnpEnterFromRight{from{transform:translateX(38px);opacity:.72}to{transform:translateX(0);opacity:1}}
     body::before{content:none !important;display:none !important}
@@ -51,7 +52,7 @@
 
           // Use current art and let CSS blur/filter create the backdrop.
           if (bgA && !bgA.style.backgroundImage) {
-            bgA.style.backgroundImage = `url(${proto}//${host}:3101/art/current.jpg?t=${Date.now()})`;
+            bgA.style.backgroundImage = `url(${globalThis.NPArt.apiBase()}/art/current.jpg?t=${Date.now()})`;
           }
         }
       } catch (_) {}
@@ -513,7 +514,7 @@
         const host = location.hostname || 'sonuvi.local';
         const proto = location.protocol || 'http:';
         const applyBg = () => {
-          const url = `${proto}//${host}:3101/art/current_bg_640_blur.jpg?t=${Date.now()}`;
+          const url = `${globalThis.NPArt.apiBase()}/art/current_bg_640_blur.jpg?t=${Date.now()}`;
           try {
             const root = document.documentElement;
             const body = document.body;
@@ -620,7 +621,7 @@
     </div>
 
     <div id="next-up">
-      <span id="next-up-img-wrap"><img id="next-up-img" src="http://sonuvi.local:3101/art/current.jpg" alt=""><span id="nextUpSpin" aria-hidden="true"></span></span>
+      <span id="next-up-img-wrap"><img id="next-up-img" src="" alt=""><span id="nextUpSpin" aria-hidden="true"></span></span>
       <span id="next-up-text">
         <span class="marquee-track">
           <span class="marquee-copy">Loading next up…</span>
@@ -793,7 +794,6 @@
       } catch {}
     </script>
     <script src="scripts/index.js"></script>
-    <script src="scripts/now-playing-art.js?v=20261028-https1"></script>
     <script src="scripts/upnp-now-playing.js?v=20261013-upnp-controller4"></script>
 
 

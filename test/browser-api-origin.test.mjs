@@ -52,6 +52,14 @@ test('repository proxy example routes Peppy through API and preserves web/API po
  assert.match(s,/reverse_proxy 127\.0\.0\.1:3101/);
  assert.match(s,/reverse_proxy 127\.0\.0\.1:8101/);
 });
+test('embedded now-playing first-paint artwork uses the shared origin',()=>{
+ for(const page of ['controller-now-playing.html','controller-now-playing-tablet.html','controller-now-playing-grid.html']){
+  const s=fs.readFileSync(path.join(root,page),'utf8');
+  assert.doesNotMatch(s, /http:\/\/sonuvi\.local:3101|\$\{host\}:3101/, page);
+  assert(s.indexOf('scripts/now-playing-art.js')<s.indexOf('globalThis.NPArt.apiBase()'),page);
+  assert.match(s,/globalThis\.NPArt\.apiBase\(\)\}\/art\/current/,page);
+ }
+});
 test('Diagnostics preserves entered credentials and reuses browser authorization',()=>{
  const s=fs.readFileSync(path.join(root,'scripts/diagnostics.js'),'utf8');
  assert.doesNotMatch(s,/cfg\?\.trackKey/);
