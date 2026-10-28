@@ -1,0 +1,13 @@
+# Example for a NEW Sonuvi HTTPS site; merge into an existing configuration.
+# Do not overwrite existing host bindings, Tailscale, Alexa or media routes.
+sonuvi.local {
+    tls internal
+    @api path /now-playing /next-up /favorites/toggle /queue/* /mpd/* /track /track/* /art/* /_debug/* /alexa/* /podcasts* /rating* /config* /v1/mobile* /upnp* /recent* /peppy/*
+    handle @api {
+        reverse_proxy 127.0.0.1:3101
+    }
+    handle {
+        reverse_proxy 127.0.0.1:8101
+    }
+}
+

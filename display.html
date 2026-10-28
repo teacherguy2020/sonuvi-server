@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
+  <script src="scripts/now-playing-art.js?v=20261028-https1"></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <title>Sonuvi Display Router</title>
@@ -15,7 +16,7 @@
     (async () => {
       const f = document.getElementById('v');
       const host = location.hostname || 'sonuvi.local';
-      const api = `${location.protocol}//${host}:3101`;
+      const api = globalThis.NPArt.apiBase();
       const fallback = 'peppy';
       const forcedMode = String(new URLSearchParams(location.search).get('mode') || '').trim().toLowerCase();
       let mode = forcedMode || fallback;
@@ -48,7 +49,9 @@
         const pushedUrl = String(profile?.url || '').trim();
         if (/visualizer\.html/i.test(pushedUrl)) {
           try {
-            const u = new URL(pushedUrl, location.href);
+            const saved = new URL(pushedUrl, location.href);
+            const u = new URL('visualizer.html', location.href);
+            u.search = saved.search;
             u.searchParams.set('kiosk', '1');
             u.searchParams.set('ts', String(Date.now()));
             f.src = u.toString();

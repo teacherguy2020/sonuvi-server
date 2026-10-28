@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
+  <script src="scripts/now-playing-art.js?v=20261028-https1"></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <script id="shell-redirect">
@@ -301,7 +302,7 @@
     <input id="key" type="hidden" />
   </div>
 
-  <script src="scripts/diagnostics.js?v=20260311-kiosk-card1"></script>
+  <script src="scripts/diagnostics.js?v=20261028-https1"></script>
 
 <script src="scripts/theme-toggle.js?v=20260216-1"></script>
 
@@ -310,8 +311,7 @@
   try {
     const link = document.getElementById('podcastsNavLink');
     if (!link) return;
-    const apiPort = (location.port === '8101') ? '3101' : '3000';
-    const apiBase = `${location.protocol}//${location.hostname}:${apiPort}`;
+    const apiBase = globalThis.NPArt.apiBase();
     const r = await fetch(`${apiBase}/config/runtime`, { cache: 'no-store' });
     const j = await r.json().catch(() => ({}));
     const enabled = !!(r.ok && j?.ok && j?.config?.features?.podcasts);

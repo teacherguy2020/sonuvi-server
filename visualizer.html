@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
+  <script src="scripts/now-playing-art.js?v=20261028-https1"></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <title>Sonuvi Visualizer</title>
@@ -71,7 +72,7 @@
 (()=>{
   const qp=new URLSearchParams(location.search);
   const host=location.hostname||'sonuvi.local';
-  const api=`${location.protocol}//${host}:3101`;
+  const api=globalThis.NPArt.apiBase();
   const c=document.getElementById('c'),x=c.getContext('2d');
   const tEl=document.getElementById('t'),aEl=document.getElementById('a'),mEl=document.getElementById('m');
   const ctl=document.getElementById('ctl'),presetSel=document.getElementById('presetSel'),savedPresetSel=document.getElementById('savedPresetSel'),energySel=document.getElementById('energySel'),motionSel=document.getElementById('motionSel'),glowSel=document.getElementById('glowSel'),applyBtn=document.getElementById('applyBtn'),savePresetBtn=document.getElementById('savePresetBtn'),deletePresetBtn=document.getElementById('deletePresetBtn'),exportPresetBtn=document.getElementById('exportPresetBtn'),importPresetBtn=document.getElementById('importPresetBtn'),importPresetFile=document.getElementById('importPresetFile'),pushMoodeBtn=document.getElementById('pushMoodeBtn'),pushStatus=document.getElementById('pushStatus');
@@ -436,12 +437,12 @@
       const rt = await fetch(`${api}/config/runtime`, { cache:'no-store' });
       const rj = await rt.json().catch(()=>({}));
       const key = String(rj?.config?.trackKey || '').trim();
-      const url = `${location.protocol}//${host}:8101/display.html?kiosk=1`;
+      const url = `http://${host}:8101/display.html?kiosk=1`;
       const p = String(presetSel?.value || presetKey || 'classic').toLowerCase();
       const e = String(energySel?.value || Math.round(energyLevel));
       const m = String(motionSel?.value || Math.round(motionLevel));
       const g = String(glowSel?.value || Math.round(glowLevel));
-      const visUrl = `${location.protocol}//${host}:8101/visualizer.html?kiosk=1&preset=${encodeURIComponent(p)}&energy=${encodeURIComponent(e)}&motion=${encodeURIComponent(m)}&glow=${encodeURIComponent(g)}`;
+      const visUrl = `http://${host}:8101/visualizer.html?kiosk=1&preset=${encodeURIComponent(p)}&energy=${encodeURIComponent(e)}&motion=${encodeURIComponent(m)}&glow=${encodeURIComponent(g)}`;
       const saveResp = await fetch(`${api}/peppy/last-profile`, {
         method:'POST',
         headers:{'Content-Type':'application/json', ...(key?{'x-track-key':key}:{})},

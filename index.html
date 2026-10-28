@@ -27,7 +27,7 @@
 
           // Use current art and let CSS blur/filter create the backdrop.
           if (bgA && !bgA.style.backgroundImage) {
-            bgA.style.backgroundImage = `url(${proto}//${host}:3101/art/current.jpg?t=${Date.now()})`;
+            bgA.style.backgroundImage = `url(${globalThis.NPArt.apiBase()}/art/current.jpg?t=${Date.now()})`;
           }
         }
       } catch (_) {}
@@ -207,7 +207,7 @@
   </div>
 
     <script src="scripts/index.js"></script>
-    <script src="scripts/now-playing-art.js?v=20261014-upnp-motion2"></script>
+    <script src="scripts/now-playing-art.js?v=20261028-https1"></script>
 
 
   <script>
@@ -215,6 +215,6 @@
     window.__DISABLE_CONTROLS_AWAKE__ = true;
   </script>
   <script src="scripts/about-card.js?v=20261002-about2"></script>
-    <script src="scripts/index-ui.js?v=20261014-upnp-motion1"></script>
+    <script src="scripts/index-ui.js?v=20261028-https1"></script>
 </body>
 </html>

@@ -403,15 +403,11 @@
   </div>
   </div>
 
-  <script src="scripts/now-playing-art.js?v=20261014-upnp-motion2"></script>
+  <script src="scripts/now-playing-art.js?v=20261028-https1"></script>
   <script>
     (() => {
       const API_FALLBACK_HOST = 'sonuvi.local';
-      const candidates = [
-        `${location.protocol}//${location.hostname || API_FALLBACK_HOST}:3101`,
-        `http://${location.hostname || API_FALLBACK_HOST}:3101`,
-        `http://${API_FALLBACK_HOST}:3101`,
-      ];
+      const candidates = [globalThis.NPArt.apiBase()];
       let api = candidates[0];
       let runtimeTrackKey = '';
 
@@ -440,7 +436,7 @@
           const c = cfg && typeof cfg === 'object' ? cfg : {};
           const host = String(c.apiNodeIp || location.hostname || API_FALLBACK_HOST).trim() || (location.hostname || API_FALLBACK_HOST);
           const port = Number(c?.ports?.api || 3101) || 3101;
-          const proto = String(location.protocol || 'http:');
+          const proto = 'http:'; // moOde posts to the direct LAN API.
           el.textContent = `${proto}//${host}:${port}/peppy/vumeter`;
           const sel = document.getElementById('spectrumTargetHint');
           if (sel) sel.textContent = `${proto}//${host}:${port}/peppy/spectrum`;
@@ -2161,8 +2157,8 @@
           const tr = await fetch(`${api}/config/moode/browser-url/status`, { headers, cache:'no-store' });
           const tj = await tr.json().catch(() => ({}));
           const current = String(tj?.appUrl || tj?.runUrl || '').trim();
-          const expectedDisplayUrl = `${location.protocol}//${location.hostname || API_FALLBACK_HOST}:8101/display.html?kiosk=1`;
-          const onNowPlayingHost = !!current && current.startsWith(`${location.protocol}//${location.hostname || API_FALLBACK_HOST}:8101/`);
+          const expectedDisplayUrl = `http://${location.hostname || API_FALLBACK_HOST}:8101/display.html?kiosk=1`;
+          const onNowPlayingHost = !!current && current.startsWith(`http://${location.hostname || API_FALLBACK_HOST}:8101/`);
           const currentOnPeppy = !!current && current.includes('/peppy.html');
 
           const vr = await fetch(`${api}/peppy/vumeter`, { cache:'no-store' });
@@ -2582,7 +2578,7 @@
           await ensureRuntimeKey();
           const headers = { 'Content-Type':'application/json', ...(runtimeTrackKey ? { 'x-track-key': runtimeTrackKey } : {}) };
           const host = (location.hostname || API_FALLBACK_HOST);
-          const targetUrl = `${location.protocol}//${host}:8101/kiosk.html`;
+          const targetUrl = `http://${host}:8101/kiosk.html`;
           await fetch(`${api}/config/moode/browser-url`, { method:'POST', headers, body: JSON.stringify({ url: targetUrl, reason:'peppy-art-to-kiosk' }) }).catch(() => null);
           const navUrl = `${targetUrl}?ts=${Date.now()}`;
           try { if (window.top && window.top !== window) { window.top.location.href = navUrl; return; } } catch {}

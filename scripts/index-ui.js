@@ -71,7 +71,7 @@ function bindAlbumArtAppleLinkOnce() {
       const key = await ensureRuntimeTrackKey();
       const headers = { 'Content-Type': 'application/json', ...(key ? { 'x-track-key': key } : {}) };
       const host = (location.hostname || 'sonuvi.local');
-      const targetUrl = `${location.protocol}//${host}:8101/kiosk.html`;
+      const targetUrl = `http://${host}:8101/kiosk.html`;
       await fetch(`${API_BASE}/config/moode/browser-url`, {
         method: 'POST', headers, body: JSON.stringify({ url: targetUrl, reason:'player-art-to-kiosk' })
       }).catch(() => null);
@@ -284,17 +284,10 @@ const HOST = location.hostname.replace(/^www\./, '');
 const IS_PUBLIC = (HOST === 'moode.brianwis.com');
 
 // API (JSON + generated art)
-const LAN_API_PORT = (location.port === '8101') ? '3101' : '3000';
-const LAN_STATIC_PORT = (location.port === '8101') ? '8101' : '8000';
-
-const API_BASE = IS_PUBLIC
-  ? 'https://moode.brianwis.com'
-  : `${location.protocol}//${location.hostname}:${LAN_API_PORT}`;
+const API_BASE = globalThis.NPArt.apiBase();
 
 // Static assets (HTML / JS / CSS / icons)
-const STATIC_BASE = IS_PUBLIC
-  ? 'https://moode.brianwis.com'
-  : `${location.protocol}//${location.hostname}:${LAN_STATIC_PORT}`;
+const STATIC_BASE = location.origin;
 
 // API endpoints
 const NOW_PLAYING_URL = `${API_BASE}/now-playing`;
@@ -1989,7 +1982,7 @@ function updateNextUp({ isAirplay, isStream, data }) {
       const file = String(q.file || '').trim();
       const artist = String(q.artist || '').trim();
       const artUrlRaw = String(q.thumbUrl || q.albumArtUrl || q.altArtUrl || q.artUrl || q.coverUrl || '').trim();
-      const artUrl = artUrlRaw.startsWith('/') ? `${API_BASE}${artUrlRaw}` : artUrlRaw;
+      const artUrl = globalThis.NPArt.trackUrl(artUrlRaw, file, API_BASE);
 
       const hasIdentity = !!(title || file);
       if (!hasIdentity) return;
@@ -2074,9 +2067,7 @@ function updateNextUp({ isAirplay, isStream, data }) {
       // API may return "/art/current.jpg" (relative). That must be resolved against API_BASE,
       // NOT the page origin (STATIC_BASE / port 8000).
       const artUrlRaw = String(next.artUrl || '').trim();
-      const artUrl = artUrlRaw.startsWith('/')
-        ? `${API_BASE}${artUrlRaw}`
-        : artUrlRaw;
+      const artUrl = globalThis.NPArt.trackUrl(artUrlRaw, file, API_BASE);
 
       if (!title && !file) {
         setNextUpLine('');

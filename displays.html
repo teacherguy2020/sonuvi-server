@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
+  <script src="scripts/now-playing-art.js?v=20261028-https1"></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Displays</title>
@@ -98,7 +99,7 @@
   <script>
     (async()=>{
       const host = location.hostname || 'sonuvi.local';
-      const base = `${location.protocol}//${host}:3101`;
+      const base = globalThis.NPArt.apiBase();
       let key='';
       async function ensureKey(){
         if(key) return key;
@@ -131,7 +132,7 @@
           const p = JSON.parse(localStorage.getItem('player.profile.v2') || '{}') || {};
           size = String(p?.size || size).trim() || size;
         } catch {}
-        const url = `${location.protocol}//${host}:8101/display.html?kiosk=1`;
+        const url = `http://${host}:8101/display.html?kiosk=1`;
         try {
           if (btnEl) btnEl.textContent='Pushing…';
           await ensureKey();
@@ -149,7 +150,7 @@
       document.getElementById('pushPeppyBtn')?.addEventListener('click', async ()=>{
         const statusEl = document.getElementById('pushPeppyStatus');
         const btnEl = document.getElementById('pushPeppyBtn');
-        const url = `${location.protocol}//${host}:8101/display.html?kiosk=1`;
+        const url = `http://${host}:8101/display.html?kiosk=1`;
         try {
           if (btnEl) btnEl.textContent='Pushing…';
           await ensureKey();
@@ -167,7 +168,7 @@
       document.getElementById('pushVisualizerBtn')?.addEventListener('click', async ()=>{
         const statusEl = document.getElementById('pushVisualizerStatus');
         const btnEl = document.getElementById('pushVisualizerBtn');
-        const url = `${location.protocol}//${host}:8101/display.html?kiosk=1`;
+        const url = `http://${host}:8101/display.html?kiosk=1`;
         try {
           if (btnEl) btnEl.textContent='Pushing…';
           await ensureKey();
@@ -185,7 +186,7 @@
       document.getElementById('pushKioskBtn')?.addEventListener('click', async ()=>{
         const statusEl = document.getElementById('pushKioskStatus');
         const btnEl = document.getElementById('pushKioskBtn');
-        const url = `${location.protocol}//${host}:8101/kiosk.html`;
+        const url = `http://${host}:8101/kiosk.html`;
         await pushUrl(url, 'displays-kiosk-push', statusEl, btnEl);
       });
     })();

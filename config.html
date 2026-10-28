@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
+  <script src="scripts/now-playing-art.js?v=20261028-https1"></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <script id="shell-redirect">
@@ -539,10 +540,7 @@
 
 <script>
 const out = document.getElementById('out');
-const HOST = location.hostname.replace(/^www\./, '');
-const IS_PUBLIC = (HOST === 'moode.brianwis.com');
-const LAN_API_PORT = (location.port === '8101') ? '3101' : '3000';
-const API_BASE = IS_PUBLIC ? 'https://moode.brianwis.com' : `${location.protocol}//${location.hostname}:${LAN_API_PORT}`;
+const API_BASE = globalThis.NPArt.apiBase();
 
 document.getElementById('apiHint').textContent = API_BASE.replace(/^https?:\/\//, '');
 setPillState('apiPill', 'neutral');
@@ -578,11 +576,14 @@ function log(x){ out.textContent = typeof x === 'string' ? x : JSON.stringify(x,
 async function probeApiHostReachable(host, port = 3101){
   const h = String(host || '').trim();
   if (!h) return false;
+  // HTTPS probes must stay on the proxy origin, not cross to insecure LAN HTTP.
+  if (location.protocol === 'https:' && h !== location.hostname) return false;
   const ctl = new AbortController();
   const t = setTimeout(() => { try { ctl.abort(); } catch {} }, 1800);
   try {
     // no-cors keeps this usable even when host differs from current origin
-    await fetch(`http://${h}:${Number(port)||3101}/now-playing`, { method:'GET', mode:'no-cors', cache:'no-store', signal: ctl.signal });
+    const base = location.protocol === 'https:' ? API_BASE : `http://${h}:${Number(port)||3101}`;
+    await fetch(`${base}/now-playing`, { method:'GET', mode:'no-cors', cache:'no-store', signal: ctl.signal });
     return true;
   } catch {
     return false;
@@ -2189,7 +2190,7 @@ async function checkDisplayTakeoverTargetNow(){
   if (!enabled) { hint.textContent = ''; return; }
 
   const host = location.hostname || 'sonuvi.local';
-  const expected = `${location.protocol}//${host}:8101/display.html?kiosk=1`;
+  const expected = `http://${host}:8101/display.html?kiosk=1`;
   const key = getTrackKey();
   if (!key) {
     hint.style.color = '#f59e0b';
@@ -2202,7 +2203,7 @@ async function checkDisplayTakeoverTargetNow(){
     const r = await fetch(`${API_BASE}/config/moode/browser-url/status`, { headers:{ 'x-track-key': key }, cache:'no-store' });
     const j = await r.json().catch(()=>({}));
     const current = String(j?.appUrl || j?.runUrl || '').trim();
-    const ok = !!current && current.startsWith(`${location.protocol}//${host}:8101/display.html`);
+    const ok = !!current && current.startsWith(`http://${host}:8101/display.html`);
     if (ok) {
       hint.style.color = '#22c55e';
       hint.textContent = `✅ Target URL in moOde web-ui properly set to ${current}`;
@@ -2312,8 +2313,7 @@ const MOTION_ART_STORAGE_KEY = 'nowplaying.ui.motionArtEnabled';
   try {
     const link = document.getElementById('podcastsNavLink');
     if (!link) return;
-    const apiPort = (location.port === '8101') ? '3101' : '3000';
-    const apiBase = `${location.protocol}//${location.hostname}:${apiPort}`;
+    const apiBase = globalThis.NPArt.apiBase();
     const r = await fetch(`${apiBase}/config/runtime`, { cache: 'no-store' });
     const j = await r.json().catch(() => ({}));
     const enabled = !!(r.ok && j?.ok && j?.config?.features?.podcasts);

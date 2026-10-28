@@ -26,10 +26,12 @@
     const protocol = location.protocol || 'http:';
     const host = location.hostname || 'sonuvi.local';
     const port = String(location.port || '');
-    if (!port || port === '80' || port === '443') return location.origin.replace(/\/+$/, '');
+    // TLS belongs to the reverse proxy, never to the plain-HTTP API port.
+    if (protocol === 'https:' || !port || port === '80' || port === '443') return location.origin.replace(/\/+$/, '');
     if (port === '3101') return location.origin.replace(/\/+$/, '');
-    if (port === '8101') return `${protocol}//${host}:3101`;
-    return `${protocol}//${host}:3101`;
+    const target = new URL(location.origin);
+    target.port = port === '8000' ? '3000' : '3101';
+    return target.origin;
   }
 
   function absolute(raw, base = '') {
@@ -43,6 +45,16 @@
   function isRadio(data = {}) {
     const kind = String(data?.streamKind || data?.displayMode || '').trim().toLowerCase();
     return data?.isRadio === true || kind === 'radio' || kind === 'stream-radio';
+  }
+
+  function trackUrl(raw, file = '', base = '') {
+    const value = String(raw || '').trim();
+    const track = String(file || '').trim();
+    // Proxy known-track HTTP artwork through the existing API on HTTPS pages.
+    if (location.protocol === 'https:' && /^http:\/\//i.test(value) && track) {
+      return `${apiBase(base)}/art/track_640.jpg?file=${encodeURIComponent(track)}`;
+    }
+    return absolute(value, base);
   }
 
   function isUpnp(data = {}) {
@@ -320,5 +332,6 @@
     resolveMotionMp4,
     source,
     stationLogo,
+    trackUrl,
   });
 })();

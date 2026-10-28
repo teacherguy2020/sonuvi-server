@@ -224,8 +224,7 @@
   }
 
   function apiBaseDefault(){
-    const host = location.hostname || 'sonuvi.local';
-    return `${location.protocol}//${host}:3101`;
+    return globalThis.NPArt.apiBase();
   }
 
   function isCollapsed(key){
@@ -275,15 +274,11 @@
 
   function refreshPreviewFrame({ name, frameId, linkId, page, uiPort = 8101, applyZoom }){
     dbg(`refresh${name}Frame(uiPort=${uiPort})`);
-    const host = location.hostname || 'sonuvi.local';
-    const proto = location.protocol || 'http:';
     const sameOriginUrl = new URL(page, location.href).toString();
-    const fallbackUrl = `${proto}//${host}:${uiPort}/${String(page || '').replace(/^\/+/, '')}`;
     const fr = $(frameId);
     const a = $(linkId);
 
-    const preferSameOrigin = (window.top !== window.self) || (Number(location.port || 0) === Number(uiPort));
-    const url = preferSameOrigin ? sameOriginUrl : fallbackUrl;
+    const url = sameOriginUrl;
     const target = `${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`;
 
     if (fr) {
@@ -338,9 +333,18 @@
       const cfg = j.config || {};
       const apiPort = Number(cfg?.ports?.api || 3101);
       const uiPort = Number(cfg?.ports?.ui || 8101);
-      const base = `${location.protocol}//${host}:${apiPort}`;
+      const base = apiBaseDefault();
       if ($('apiBase')) $('apiBase').value = base;
-      if ($('key')) $('key').value = String(cfg?.trackKey || '').trim();
+      if ($('key') && !String($('key').value || '').trim()) {
+        // Reuse the operator's existing browser credential; runtime config
+        // need not disclose it, and refresh must not erase a manually entered key.
+        try {
+          $('key').value = String(globalThis.SonuviRuntimeAuth?.trackKey?.()
+            || ['nowplaying.trackkey', 'nowplaying.secret.trackKey', 'np_track_key']
+              .map((name) => localStorage.getItem(name)).find((value) => String(value || '').trim())
+            || '').trim();
+        } catch {}
+      }
       if ($('apiHint')) $('apiHint').textContent = `${host}:${apiPort}`;
       if ($('webHint')) $('webHint').textContent = `${host}:${uiPort}`;
       const axEnabled = !!cfg?.alexa?.enabled;

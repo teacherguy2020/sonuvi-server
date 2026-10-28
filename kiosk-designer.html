@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
+  <script src="scripts/now-playing-art.js?v=20261028-https1"></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Kiosk Designer</title>
@@ -84,7 +85,7 @@
   <script>
     (async()=>{
       const host=location.hostname||'10.0.0.4';
-      const api=`${location.protocol}//${host}:3101`;
+      const api=globalThis.NPArt.apiBase();
       const sizeSel=document.getElementById('sizeSel');
       const primaryThemeColor=document.getElementById('primaryThemeColor');
       const secondaryThemeColor=document.getElementById('secondaryThemeColor');
@@ -283,13 +284,13 @@
       }
       async function refreshTargetHint(){
         if (!targetHint) return;
-        const expected = `${location.protocol}//${host}:8101/kiosk.html`;
+        const expected = `http://${host}:8101/kiosk.html`;
         try {
           await ensureKey();
           const r = await fetch(`${api}/config/moode/browser-url/status`, { headers:{...(key?{'x-track-key':key}:{})}, cache:'no-store' });
           const j = await r.json().catch(()=>({}));
           const current = String(j?.appUrl || j?.runUrl || '').trim();
-          const ok = !!current && current.startsWith(`${location.protocol}//${host}:8101/`);
+          const ok = !!current && current.startsWith(`http://${host}:8101/`);
           targetHint.style.color = ok ? '#22c55e' : '#f59e0b';
           targetHint.textContent = ok
             ? `✅ Target URL in moOde web-ui properly set to ${current}`
