@@ -1,5 +1,22 @@
 import net from 'node:net';
 import { MPD_HOST, MPD_PORT } from '../config.mjs';
+import { runtimeCapabilities } from '../lib/runtime-capabilities.mjs';
+
+const READ_ONLY_MPD_COMMANDS = new Set([
+  'commands', 'notcommands', 'tagtypes', 'urlhandlers', 'decoders', 'status',
+  'currentsong', 'stats', 'playlistinfo', 'playlistid', 'listplaylists',
+  'listall', 'listallinfo', 'find', 'search', 'count', 'outputs', 'channels',
+  'readmessages', 'albumart', 'readpicture',
+]);
+
+function mpdCommandCapability(command) {
+  const normalized = String(command || '').trim().toLowerCase();
+  const verb = normalized.split(/\s+/, 1)[0];
+  if (READ_ONLY_MPD_COMMANDS.has(verb) || normalized.startsWith('sticker get ')) {
+    return { capability: 'mpd.read', readOnly: true };
+  }
+  return { capability: 'mpd.write', readOnly: false };
+}
 
 export function mpdEscapeValue(v) {
   const s = String(v || '');
@@ -106,6 +123,15 @@ export async function mpdStop() {
 
 export function mpdQueryRaw(command, timeoutMs = 3000) {
   return new Promise((resolve, reject) => {
+    try {
+      const capability = mpdCommandCapability(command);
+      const runtime = runtimeCapabilities();
+      if (capability.readOnly) runtime.assertExternalRead(capability.capability);
+      else runtime.assertExternalMutation(capability.capability);
+    } catch (error) {
+      reject(error);
+      return;
+    }
     const sock = net.createConnection({ host: MPD_HOST, port: MPD_PORT });
 
     let buf = '';

@@ -10,6 +10,7 @@ function createApp() {
     routes,
     get(path, handler) { routes.set(`GET ${path}`, handler); },
     post(path, handler) { routes.set(`POST ${path}`, handler); },
+    patch(path, handler) { routes.set(`PATCH ${path}`, handler); },
     delete(path, handler) { routes.set(`DELETE ${path}`, handler); },
   };
 }
@@ -176,6 +177,78 @@ test('PiBuZ Qobuz artwork route returns bounded mediated bytes', async () => {
   assert.equal(res.statusCode, 200);
   assert.equal(res.headers['content-type'], 'image/jpeg');
   assert.deepEqual(res.body, Buffer.from('jpeg'));
+});
+
+test('saved Qobuz queue routes retain their bearer contract and public response shape', async () => {
+  const savedQueue = {
+    schemaVersion: 1,
+    kind: 'sonuvi.named-qobuz-queue',
+    savedQueueId: 'sq_fixture',
+    title: 'Fixture Queue',
+    provider: 'qobuz',
+    sourceSnapshotId: 'fixture-snapshot',
+    createdAt: '2026-10-24T12:00:00.000Z',
+    updatedAt: '2026-10-24T12:00:00.000Z',
+    snapshot: { schemaVersion: 1, snapshotId: 'fixture-snapshot' },
+  };
+  const calls = [];
+  const savedQobuzQueueService = {
+    capture: async (input) => { calls.push(['capture', input]); return savedQueue; },
+    list: async () => { calls.push(['list']); return [savedQueue]; },
+    load: async (savedQueueId) => { calls.push(['load', savedQueueId]); return savedQueue; },
+    rename: async (input) => { calls.push(['rename', input]); return { ...savedQueue, title: input.title }; },
+    delete: async (input) => { calls.push(['delete', input]); return { savedQueueId: input.savedQueueId, deleted: true }; },
+  };
+  const app = registerFixture({}, { savedQobuzQueueService });
+
+  const unauthorized = createResponse();
+  await app.routes.get('POST /v1/mobile/qobuz-connect/saved-queues')?.({ headers: {}, body: { title: 'Fixture Queue' } }, unauthorized);
+  assert.equal(unauthorized.statusCode, 401);
+
+  const created = createResponse();
+  const createRequest = request(token());
+  createRequest.body = { title: 'Fixture Queue' };
+  await app.routes.get('POST /v1/mobile/qobuz-connect/saved-queues')?.(createRequest, created);
+  assert.equal(created.statusCode, 201);
+  assert.equal(created.body.savedQueue.savedQueueId, 'sq_fixture');
+  assert.equal(created.body.savedQueue.capabilities.capture, true);
+  assert.equal(created.body.savedQueue.restoration.available, true);
+  assert.deepEqual(calls[0], ['capture', { title: 'Fixture Queue' }]);
+
+  const listed = createResponse();
+  await app.routes.get('GET /v1/mobile/qobuz-connect/saved-queues')?.(request(token()), listed);
+  assert.equal(listed.statusCode, 200);
+  assert.equal(listed.body.savedQueues[0].savedQueueId, 'sq_fixture');
+  assert.equal(listed.body.capabilities.rename, true);
+
+  const renamed = createResponse();
+  const renameRequest = request(token(), { savedQueueId: 'sq_fixture' });
+  renameRequest.body = { title: 'Renamed Fixture Queue' };
+  await app.routes.get('PATCH /v1/mobile/qobuz-connect/saved-queues/:savedQueueId')?.(renameRequest, renamed);
+  assert.equal(renamed.statusCode, 200);
+  assert.equal(renamed.body.savedQueue.title, 'Renamed Fixture Queue');
+
+  const deleted = createResponse();
+  await app.routes.get('DELETE /v1/mobile/qobuz-connect/saved-queues/:savedQueueId')?.(request(token(), { savedQueueId: 'sq_fixture' }), deleted);
+  assert.equal(deleted.statusCode, 200);
+  assert.deepEqual(deleted.body, {
+    ok: true,
+    savedQueueId: 'sq_fixture',
+    deleted: true,
+    capabilities: {
+      capture: true,
+      list: true,
+      open: true,
+      rename: true,
+      delete: true,
+      restore: true,
+      play: true,
+    },
+    restoration: {
+      available: true,
+      reason: 'requires an active Qobuz Connect session on the PiBuZ receiver',
+    },
+  });
 });
 
 test('Qobuz control route is wired and forwards the guarded current-track evidence', async () => {

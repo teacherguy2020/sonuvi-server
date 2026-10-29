@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { runtimeCapabilities } from './runtime-capabilities.mjs';
 
 const ENDPOINT = 'https://ws.audioscrobbler.com/2.0/';
 
@@ -38,6 +39,7 @@ export function createLastfmScrobbler({
   apiSecret = process.env.LASTFM_API_SECRET || '',
   sessionKey = process.env.LASTFM_SESSION_KEY || '',
   fetchImpl = globalThis.fetch,
+  capabilities = runtimeCapabilities(),
   endpoint = ENDPOINT,
   log = null,
 } = {}) {
@@ -52,6 +54,7 @@ export function createLastfmScrobbler({
     if (!qualifiesLastfmScrobble({ artist, title: track, elapsedSec: event?.elapsedSec, durationSec: duration })) {
       return { state: 'ineligible', attempted: false };
     }
+    capabilities.assertExternalMutation('lastfm.scrobble');
 
     const params = {
       api_key: text(apiKey),

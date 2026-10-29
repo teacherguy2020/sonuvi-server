@@ -172,13 +172,16 @@
 
   async function load(){
     const base = apiBaseDefault();
-    const r = await fetch(`${base}/config/runtime`, { cache: 'no-store' });
+    const key = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || localStorage.getItem(TRACK_KEY_STORAGE) || '').trim();
+    if (!key) throw new Error('Track key is required to load Alexa administration settings. Enter it in Config first.');
+    const r = await fetch(`${base}/config/runtime/admin`, {
+      cache: 'no-store',
+      headers: { 'x-track-key': key },
+    });
     const j = await r.json();
     if (!r.ok || !j?.ok) throw new Error(j?.error || `HTTP ${r.status}`);
     runtimeConfig = j.config || {};
-
-    const key = String(runtimeConfig.trackKey || '').trim();
-    if (key) localStorage.setItem(TRACK_KEY_STORAGE, key);
+    localStorage.setItem(TRACK_KEY_STORAGE, key);
 
     const ax = runtimeConfig.alexa || {};
     $('alexaEnabled').checked = !!ax.enabled;

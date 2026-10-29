@@ -3,6 +3,7 @@
 <html lang="en">
 <head>
   <script src="scripts/now-playing-art.js?v=20261028-https1"></script>
+  <script src="scripts/runtime-auth.js?v=20261024-h2"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <link rel="manifest" href="/manifest-controller.webmanifest?v=20260318b" />
@@ -1115,7 +1116,7 @@
 
       async function ensureKey(){
         if (runtimeTrackKey) return runtimeTrackKey;
-        try { const r=await fetch(`${base}/config/runtime`,{cache:'no-store'}); const j=await r.json().catch(()=>({})); runtimeTrackKey=String(j?.config?.trackKey||'').trim(); } catch {}
+        try { const r=await fetch(`${base}/config/runtime`,{cache:'no-store'}); const j=await r.json().catch(()=>({})); runtimeTrackKey=String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim(); } catch {}
         return runtimeTrackKey;
       }
       function reqHeaders(json=true){ return Object.assign({}, json?{'Content-Type':'application/json'}:{}, runtimeTrackKey?{'x-track-key':runtimeTrackKey}:{}); }

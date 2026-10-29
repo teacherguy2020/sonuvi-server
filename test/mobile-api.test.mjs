@@ -2326,3 +2326,18 @@ test('mobile podcast playback falls back to the subscription MPD prefix', async 
   const playbackCall = calls.find((call) => call.pathname === '/config/diagnostics/playback');
   assert.equal(playbackCall?.options?.body?.file, 'USB/SamsungMoode/Podcasts/Example Show/episode-1.mp3');
 });
+
+test('mobile radio catalog failures propagate explicitly while valid empty catalogs remain empty', async () => {
+  const token=createMobileSessionToken({secret:'api-secret-for-test',deviceId:'radio-read-test'});
+  const headers={authorization:`Bearer ${token}`};
+  for(const failure of [{ok:false,status:503,json:{ok:false,error:'private upstream detail'}},{ok:true,json:{ok:false}},{ok:true,json:{}},null]){
+    const app=registerFixture({fetchInternalRequest:async()=>{if(failure===null)throw new Error('network');return failure}});
+    for(const endpoint of ['/v1/mobile/radio','/v1/mobile/radio/options']){
+      const res=createResponse();await app.routes.get('GET '+endpoint)(request({headers}),res);
+      assert.equal(res.statusCode,503);assert.equal(res.body.code,'RADIO_CATALOG_UNAVAILABLE');assert.equal(res.body.ok,false);assert(!('items' in res.body));assert(!JSON.stringify(res.body).includes('private'));
+    }
+    const denied=createResponse();await app.routes.get('GET /v1/mobile/radio')(request(),denied);assert.equal(denied.statusCode,401);
+  }
+  const app=registerFixture({fetchInternalRequest:async()=>({ok:true,json:{ok:true,tracks:[]}})});
+  const empty=createResponse();await app.routes.get('GET /v1/mobile/radio')(request({headers}),empty);assert.equal(empty.statusCode,200);assert.deepEqual(empty.body.items,[]);
+});

@@ -1,0 +1,11 @@
+// Render @SERVICE_USER@ to the verified Sonuvi systemd User.
+// Only restart of the two Sonuvi units. No start/stop, legacy, reboot or sudo.
+polkit.addRule(function(action, subject) {
+  if (action.id === "org.freedesktop.systemd1.manage-units"
+      && subject.user === "@SERVICE_USER@"
+      && action.lookup("verb") === "restart"
+      && (action.lookup("unit") === "sonuvi-api.service"
+          || action.lookup("unit") === "sonuvi-web.service")) {
+    return polkit.Result.YES;
+  }
+});

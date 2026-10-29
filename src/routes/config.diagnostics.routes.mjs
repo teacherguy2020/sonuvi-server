@@ -1,12 +1,30 @@
+import { readMoodeRadioCatalog } from '../lib/moode-radio-catalog.mjs';
 import fs from 'node:fs/promises';
+import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { MPD_HOST, MOODE_SSH_HOST, MOODE_SSH_USER } from '../config.mjs';
 import { getBrowseIndex } from '../lib/browse-index.mjs';
 import { radioDisplayName } from '../lib/radio-display.mjs';
 import { isMoodeTransportError, moodeDirectTransportCommand } from '../lib/moode-transport.mjs';
+import { runtimeStatePaths } from '../lib/runtime-state-paths.mjs';
+import { runtimeCapabilities } from '../lib/runtime-capabilities.mjs';
 
-const execFileP = promisify(execFile);
+const nativeExecFileP = promisify(execFile);
+const execFileP = (...args) => {
+  const command = path.basename(String(args[0] || 'external-command'));
+  runtimeCapabilities().assertExternalMutation(`process.${command}`);
+  return nativeExecFileP(...args);
+};
+function fetch(input, init = {}) {
+  const method = String(init?.method || input?.method || 'GET').toUpperCase();
+  if (['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+    runtimeCapabilities().assertExternalRead('network.fetch');
+  } else {
+    runtimeCapabilities().assertExternalMutation('network.fetch');
+  }
+  return globalThis.fetch(input, init);
+}
 
 // One-level, guarded undo for the Live Queue's physical shuffle. The snapshot
 // is intentionally process-local: undo is a convenience action, not a second
@@ -129,8 +147,6 @@ function stationLogoUrlFromAlbum(album) {
   return `/art/radio-logo.jpg?name=${encodeURIComponent(a)}`;
 }
 
-const radioLogoCacheDirUrl = new URL('../../var/radio-logo-cache/', import.meta.url);
-
 function safeLogoKey(name) {
   return String(name || '').trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 120);
 }
@@ -138,7 +154,7 @@ function safeLogoKey(name) {
 async function readCachedRadioLogo(name) {
   const k = safeLogoKey(name);
   if (!k) return null;
-  const p = new URL(`${k}.jpg`, radioLogoCacheDirUrl);
+  const p = path.join(runtimeStatePaths().radioLogoCacheDir, `${k}.jpg`);
   try {
     const buf = await fs.readFile(p);
     return buf;
@@ -150,9 +166,9 @@ async function readCachedRadioLogo(name) {
 async function writeCachedRadioLogo(name, buf) {
   const k = safeLogoKey(name);
   if (!k || !buf) return;
-  const p = new URL(`${k}.jpg`, radioLogoCacheDirUrl);
+  const p = path.join(runtimeStatePaths().radioLogoCacheDir, `${k}.jpg`);
   try {
-    await fs.mkdir(radioLogoCacheDirUrl, { recursive: true });
+    await fs.mkdir(path.dirname(p), { recursive: true });
     await fs.writeFile(p, buf);
   } catch {}
 }
@@ -174,7 +190,7 @@ let radioMetaByStation = new Map();
 
 async function loadRadioQueueMap() {
   try {
-    const p = new URL('../../data/radio-queue-map.json', import.meta.url);
+    const p = runtimeStatePaths().radioQueueMapPath;
     const raw = await fs.readFile(p, 'utf8');
     const j = JSON.parse(raw || '{}');
     const map = new Map();
@@ -216,16 +232,11 @@ function stationHost(raw) {
 async function loadRadioCatalogMap() {
   const now = Date.now();
   if (radioMetaByStation.size && (now - radioCatalogCacheTs) < (5 * 60 * 1000)) return radioMetaByStation;
-  const host = String(MOODE_SSH_HOST || MPD_HOST || 'moode.local');
-  const user = String(MOODE_SSH_USER || 'moode');
-  const sql = "select station,name,genre,type from cfg_radio;";
-  const { stdout } = await execFileP('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=6', `${user}@${host}`, 'sqlite3', '-separator', '\t', '/var/local/www/db/moode-sqlite3.db', sql], { timeout: 12000, maxBuffer: 4 * 1024 * 1024 });
+  const catalog = await readMoodeRadioCatalog();
   const map = new Map();
   const hostCounts = new Map();
   const hostName = new Map();
-  for (const ln of String(stdout || '').split(/\r?\n/)) {
-    if (!ln) continue;
-    const [station = '', name = '', genre = '', type = ''] = ln.split('\t');
+  for (const { station, name, genre, type } of catalog) {
     const s = String(station || '').trim();
     const n = String(name || '').trim();
     const g = String(genre || '').trim();
@@ -272,7 +283,8 @@ export function registerConfigDiagnosticsRoutes(app, deps) {
     getQobuzNowPlaying,
     runMpc,
   } = deps;
-  const configPath = process.env.NOW_PLAYING_CONFIG_PATH || `${process.cwd()}/config/now-playing.config.json`;
+  const configPath = runtimeStatePaths().configPath;
+  const immutableRuntime = () => runtimeStatePaths().sharedStateEnabled;
   const executeMpc = typeof runMpc === 'function'
     ? runMpc
     : (args, options) => execFileP('mpc', args, options);
@@ -303,6 +315,9 @@ export function registerConfigDiagnosticsRoutes(app, deps) {
   }
 
   async function getAlexaRouteWebhookUrl() {
+    const protectedValue = String(process.env.ALEXA_ROUTE_WEBHOOK_URL || '').trim();
+    if (protectedValue) return protectedValue;
+    if (immutableRuntime()) return '';
     try {
       const raw = await fs.readFile(configPath, 'utf8');
       const cfg = JSON.parse(raw || '{}');
@@ -313,6 +328,9 @@ export function registerConfigDiagnosticsRoutes(app, deps) {
   }
 
   async function getAlexaStopWebhookUrl() {
+    const protectedValue = String(process.env.ALEXA_STOP_WEBHOOK_URL || '').trim();
+    if (protectedValue) return protectedValue;
+    if (immutableRuntime()) return '';
     try {
       const raw = await fs.readFile(configPath, 'utf8');
       const cfg = JSON.parse(raw || '{}');
@@ -324,18 +342,33 @@ export function registerConfigDiagnosticsRoutes(app, deps) {
 
   async function getAlexaControlWebhookUrl(control) {
     try {
+      const name = String(control || '').trim().toLowerCase();
+      const envName = `ALEXA_${name.replace(/[^a-z0-9]+/gi, '_').toUpperCase()}_WEBHOOK_URL`;
+      const protectedValue = String(process.env[envName] || '').trim();
+      if (protectedValue) return protectedValue;
+
+      const route = await getAlexaRouteWebhookUrl();
+      if (immutableRuntime()) {
+        if (!route) return '';
+        const parsed = new URL(route);
+        if (/\/alexa-start\/?$/i.test(parsed.pathname)) {
+          parsed.pathname = parsed.pathname.replace(/alexa-start\/?$/i, `alexa-${name}`);
+          return parsed.toString();
+        }
+        return '';
+      }
+
       const raw = await fs.readFile(configPath, 'utf8');
       const cfg = JSON.parse(raw || '{}');
-      const name = String(control || '').trim().toLowerCase();
       const explicit = String(cfg?.alexa?.[`${name}WebhookUrl`] || '').trim();
       if (explicit) return explicit;
 
       // Derive the sibling Homebridge action from the configured start URL.
       // This keeps the new controls aligned with the existing Homebridge host
       // and port without adding another required config field.
-      const route = String(cfg?.alexa?.routeWebhookUrl || '').trim();
-      if (!route) return '';
-      const parsed = new URL(route);
+      const configuredRoute = String(cfg?.alexa?.routeWebhookUrl || '').trim();
+      if (!configuredRoute) return '';
+      const parsed = new URL(configuredRoute);
       if (/\/alexa-start\/?$/i.test(parsed.pathname)) {
         parsed.pathname = parsed.pathname.replace(/alexa-start\/?$/i, `alexa-${name}`);
         return parsed.toString();
@@ -1092,7 +1125,14 @@ export function registerConfigDiagnosticsRoutes(app, deps) {
           return res.status(502).json({ ok: false, error: `Webhook returned HTTP ${response.status}`, statusCode: response.status, body: bodyPreview });
         }
 
-        return res.json({ ok: true, action, alexaControl, webhookUrl: parsed.toString(), statusCode: response.status, body: bodyPreview });
+        return res.json({
+          ok: true,
+          action,
+          alexaControl,
+          ...(immutableRuntime() ? { webhookConfigured: true } : { webhookUrl: parsed.toString() }),
+          statusCode: response.status,
+          body: bodyPreview,
+        });
       }
 
       if (action === 'routealexa') {
@@ -1122,7 +1162,13 @@ export function registerConfigDiagnosticsRoutes(app, deps) {
           return res.status(502).json({ ok: false, error: `Webhook returned HTTP ${response.status}`, statusCode: response.status, body: bodyPreview });
         }
 
-        return res.json({ ok: true, action, webhookUrl: parsed.toString(), statusCode: response.status, body: bodyPreview });
+        return res.json({
+          ok: true,
+          action,
+          ...(immutableRuntime() ? { webhookConfigured: true } : { webhookUrl: parsed.toString() }),
+          statusCode: response.status,
+          body: bodyPreview,
+        });
       }
 
       if (action === 'stopalexa' || action === 'stop-alexa') {
@@ -1155,7 +1201,14 @@ export function registerConfigDiagnosticsRoutes(app, deps) {
         const alexaCleared = typeof clearAlexaWasPlayingState === 'function';
         if (alexaCleared) await clearAlexaWasPlayingState();
 
-        return res.json({ ok: true, action, webhookUrl: parsed.toString(), statusCode: response.status, body: bodyPreview, alexaCleared });
+        return res.json({
+          ok: true,
+          action,
+          ...(immutableRuntime() ? { webhookConfigured: true } : { webhookUrl: parsed.toString() }),
+          statusCode: response.status,
+          body: bodyPreview,
+          alexaCleared,
+        });
       }
 
       if (action === 'playpos') {

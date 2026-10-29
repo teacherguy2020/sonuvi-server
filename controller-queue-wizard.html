@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
+  <script src="scripts/runtime-auth.js?v=20261024-h2"></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <title>Queue Wizard</title>
@@ -269,7 +270,7 @@
       if(key) return key;
       const r=await fetch(`${base}/config/runtime`,{cache:'no-store'});
       const j=await r.json().catch(()=>({}));
-      key=String(j?.config?.trackKey||'').trim();
+      key=String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
       ratingsEnabled = Boolean(j?.config?.features?.ratings ?? true);
       applyRatingsUiDefaults();
       return key;
@@ -432,16 +433,22 @@
       if (!playlistName) { $('meta').textContent='Enter playlist name first.'; return; }
       const files = previewTracks.map(t=>String(t?.file||'').trim()).filter(Boolean);
       if (!files.length) { $('meta').textContent='Nothing to save.'; return; }
-      if (!collageDataBase64) await refreshCollage();
+      if (!collageDataBase64) {
+        try { await refreshCollage(); } catch { /* Preview is optional; playlist saving is independent. */ }
+      }
       await ensureKey();
       const body = {
         mode:'replace', keepNowPlaying:false, tracks:files, shuffle:false, forceRandomOff:false, fastStart:false,
         playlistName, generateCollage:true, saveOnly:true,
         previewCoverDataUrl: collageDataBase64 ? `data:${collageMimeType};base64,${collageDataBase64}` : ''
       };
+      $('meta').textContent='Saving playlist…';
       const r=await fetch(`${base}/config/queue-wizard/apply`,{method:'POST',headers:headers(true),body:JSON.stringify(body)});
       const j=await r.json().catch(()=>({}));
-      $('meta').textContent = (r.ok && j?.ok) ? `Saved playlist: ${playlistName}` : `Save failed (${r.status})`;
+      const warnings = [...(j?.playlistWarnings || []), j?.collageError].filter(Boolean).join(' ');
+      $('meta').textContent = (r.ok && j?.ok && j?.playlistSaved)
+        ? `Saved playlist: ${playlistName}${warnings ? ` — ${warnings}` : ''}`
+        : `Save failed: ${j?.error || j?.playlistError || r.status}`;
     }
 
     async function doApply(){
@@ -485,7 +492,9 @@
 
     $('quickSearch').addEventListener('input', (ev)=>renderQuickResults(ev.target.value||''));
     $('refreshCollageBtn').addEventListener('click', ()=>refreshCollage().catch(()=>{}));
-    $('savePlaylistBtn').addEventListener('click', ()=>saveToPlaylistOnly().catch(()=>{}));
+    $('savePlaylistBtn').addEventListener('click', ()=>saveToPlaylistOnly().catch(()=>{
+      $('meta').textContent='Save could not be confirmed. Check playlists before retrying.';
+    }));
     $('quickResults').addEventListener('click', (ev)=>{
       const row=ev.target.closest('[data-qtype][data-qval]'); if(!row) return;
       const type=String(row.getAttribute('data-qtype')||'');

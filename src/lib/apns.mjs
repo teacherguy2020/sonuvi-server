@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import http2 from 'node:http2';
+import { runtimeCapabilities } from './runtime-capabilities.mjs';
 
 const PRODUCTION_AUTHORITY = 'https://api.push.apple.com';
 const DEVELOPMENT_AUTHORITY = 'https://api.sandbox.push.apple.com';
@@ -116,6 +117,7 @@ export function createApnsProvider({
   environment = 'auto',
   timeoutMs = DEFAULT_TIMEOUT_MS,
   request = requestOverHttp2,
+  capabilities = runtimeCapabilities(),
 } = {}) {
   const normalizedKeyId = text(keyId);
   const normalizedTeamId = text(teamId);
@@ -172,6 +174,7 @@ export function createApnsProvider({
         return { ok: false, status: 400, reason: 'BadDeviceToken', invalidToken: true };
       }
 
+      capabilities.assertExternalMutation('push.apns');
       const targetEnvironment = defaultEnvironmentFor(configuredEnvironment, requestedEnvironment);
       const jwt = await authorizationToken();
       const result = await request({

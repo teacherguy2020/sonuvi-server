@@ -109,7 +109,7 @@
     const getTrackKey = async () => {
       const runtime = await fetch(`${controlOrigin}/config/runtime`, { cache: 'no-store' });
       const runtimeJson = await runtime.json().catch(() => ({}));
-      return String(runtimeJson?.config?.trackKey || '').trim();
+      return String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
     };
     const controlRequest = async (path, method = 'GET', body = undefined) => {
       const key = await getTrackKey();
@@ -442,7 +442,7 @@
         try {
           const runtime = await fetch(`${controlOrigin}/config/runtime`, { cache: 'no-store' });
           const runtimeJson = await runtime.json().catch(() => ({}));
-          const key = String(runtimeJson?.config?.trackKey || '').trim();
+          const key = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
           const response = await fetch(`${controlOrigin}/config/diagnostics/playback`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...(key ? { 'x-track-key': key } : {}) },
@@ -508,7 +508,7 @@
         const control = act === 'toggle' ? (before.active ? 'pause' : 'resume') : (act === 'play' ? 'resume' : act);
         const runtime = await fetch(`${controlOrigin}/config/runtime`, { cache: 'no-store' });
         const runtimeJson = await runtime.json().catch(() => ({}));
-        const key = String(runtimeJson?.config?.trackKey || '').trim();
+        const key = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
         const response = await fetch(`${controlOrigin}/config/diagnostics/playback`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...(key ? { 'x-track-key': key } : {}) },

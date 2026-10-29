@@ -1,8 +1,12 @@
 import path from 'node:path';
 import { loadConfigOrNull } from './config/load-config.mjs';
 import { normalizeMoodeBaseUrl } from './lib/moode-url.mjs';
+import { resolveWithin, runtimeStatePaths } from './lib/runtime-state-paths.mjs';
+import { loadProtectedLastfmEnvironment } from './lib/protected-runtime-secrets.mjs';
 
+export const RUNTIME_STATE_PATHS = runtimeStatePaths();
 export const MASTER_CONFIG = loadConfigOrNull();
+const PROTECTED_LASTFM = loadProtectedLastfmEnvironment({ statePaths: RUNTIME_STATE_PATHS });
 
 const apiNode = (MASTER_CONFIG?.nodes || []).find(n => n?.role === 'api' || n?.role === 'both') || null;
 const apiIp = String(apiNode?.ip || '').trim() || null;
@@ -12,6 +16,21 @@ const notificationsCfg = MASTER_CONFIG?.notifications || {};
 const mpdCfg = MASTER_CONFIG?.mpd || {};
 const moodeCfg = MASTER_CONFIG?.moode || {};
 const runtimeCfg = MASTER_CONFIG?.runtime || {};
+
+// Environment overrides are already resolved by runtime-state-paths. Config
+// values still need the same containment rule so immutable releases cannot
+// turn a relative cache/token path into a write below their read-only CWD.
+function configuredWritableStatePath(value, { fallback, root, label }) {
+  const configured = String(value || '').trim();
+  if (!configured) return fallback;
+  if (path.isAbsolute(configured)) return path.resolve(configured);
+  if (RUNTIME_STATE_PATHS.sharedStateEnabled) return resolveWithin(root, configured, label);
+  return path.resolve(RUNTIME_STATE_PATHS.releaseRoot, configured);
+}
+
+function legacyConfigSecret(value) {
+  return RUNTIME_STATE_PATHS.sharedStateEnabled ? '' : String(value || '').trim();
+}
 
 export const FFMPEG = process.env.FFMPEG || '/usr/bin/ffmpeg';
 export const CURL = process.env.CURL || '/usr/bin/curl';
@@ -49,12 +68,15 @@ export const PODCAST_ROOT = process.env.PODCAST_ROOT || MASTER_CONFIG?.paths?.po
 
 export const METAFLAC = process.env.METAFLAC || '/usr/bin/metaflac';
 
-export const TRACK_KEY = process.env.TRACK_KEY || MASTER_CONFIG?.trackKey || '1029384756';
-export const LASTFM_API_KEY = String(process.env.LASTFM_API_KEY || MASTER_CONFIG?.lastfm?.apiKey || '').trim();
-// Last.fm write credentials are deliberately environment-only. They must not
-// be placed in now-playing.config.json, API responses, diagnostics, or Git.
-export const LASTFM_API_SECRET = String(process.env.LASTFM_API_SECRET || '').trim();
-export const LASTFM_SESSION_KEY = String(process.env.LASTFM_SESSION_KEY || '').trim();
+// A deployment must supply its own operator credential through protected
+// environment material. Legacy config fallback remains only for a checkout
+// that has not opted into the immutable shared-state contract.
+export const TRACK_KEY = String(process.env.TRACK_KEY || legacyConfigSecret(MASTER_CONFIG?.trackKey) || '').trim();
+// Immutable releases read Last.fm values only from /etc/sonuvi (or a supplied
+// root-managed equivalent). They never fall back to mutable JSON config.
+export const LASTFM_API_KEY = String(process.env.LASTFM_API_KEY || PROTECTED_LASTFM.LASTFM_API_KEY || legacyConfigSecret(MASTER_CONFIG?.lastfm?.apiKey) || '').trim();
+export const LASTFM_API_SECRET = String(process.env.LASTFM_API_SECRET || PROTECTED_LASTFM.LASTFM_API_SECRET || '').trim();
+export const LASTFM_SESSION_KEY = String(process.env.LASTFM_SESSION_KEY || PROTECTED_LASTFM.LASTFM_SESSION_KEY || '').trim();
 export const LASTFM_MPD_MODE = ['disabled', 'shadow', 'active'].includes(String(process.env.LASTFM_MPD_MODE || '').trim().toLowerCase())
   ? String(process.env.LASTFM_MPD_MODE).trim().toLowerCase()
   : 'shadow';
@@ -63,7 +85,11 @@ export const ENABLE_ALEXA =
     ? String(process.env.ENABLE_ALEXA).trim() === '1'
     : Boolean(alexaEnabledFromConfig ?? true);
 export const TRANSCODE_TRACKS = String(process.env.TRANSCODE_TRACKS || '0').trim() === '1';
-export const TRACK_CACHE_DIR = process.env.TRACK_CACHE_DIR || runtimeCfg?.trackCacheDir || '/tmp/moode-track-cache';
+export const TRACK_CACHE_DIR = configuredWritableStatePath(runtimeCfg?.trackCacheDir, {
+  fallback: RUNTIME_STATE_PATHS.trackCacheDir,
+  root: RUNTIME_STATE_PATHS.cacheRoot,
+  label: 'runtime.trackCacheDir',
+});
 
 // Native iPhone/CarPlay POC surface. Disabled unless explicitly configured;
 // these credentials are intentionally separate from the Alexa TRACK_KEY.
@@ -72,7 +98,7 @@ export const MOBILE_API_SECRET = String(process.env.MOBILE_API_SECRET || '').tri
 export const MOBILE_TRACK_ID_SECRET = String(process.env.MOBILE_TRACK_ID_SECRET || '').trim();
 export const MOBILE_API_ENROLLMENT_CODE = String(process.env.MOBILE_API_ENROLLMENT_CODE || '').trim();
 export const MOBILE_PUBLIC_BASE_URL = String(process.env.MOBILE_PUBLIC_BASE_URL || '').trim();
-export const MOBILE_TRACK_CACHE_DIR = process.env.MOBILE_TRACK_CACHE_DIR || '/tmp/now-playing/mobile-track-cache';
+export const MOBILE_TRACK_CACHE_DIR = RUNTIME_STATE_PATHS.mobileTrackCacheDir;
 export const MOBILE_TRANSCODE_TRACKS =
   process.env.MOBILE_TRANSCODE_TRACKS != null
     ? /^(1|true|yes|on)$/i.test(String(process.env.MOBILE_TRANSCODE_TRACKS).trim())
@@ -80,12 +106,7 @@ export const MOBILE_TRANSCODE_TRACKS =
 export const MOBILE_VIDEO_ROOT = path.resolve(
   process.env.MOBILE_VIDEO_ROOT || PI4_MOUNT_BASE
 );
-const mobileVideoCatalogPath = String(
-  process.env.MOBILE_VIDEO_CATALOG_PATH || path.join(process.cwd(), 'var', 'mobile-video-catalog.json')
-).trim();
-export const MOBILE_VIDEO_CATALOG_PATH = path.isAbsolute(mobileVideoCatalogPath)
-  ? mobileVideoCatalogPath
-  : path.resolve(process.cwd(), mobileVideoCatalogPath);
+export const MOBILE_VIDEO_CATALOG_PATH = RUNTIME_STATE_PATHS.mobileVideoCatalogPath;
 
 export const FAVORITES_PLAYLIST_NAME = process.env.FAVORITES_PLAYLIST_NAME || 'Favorites';
 export const FAVORITES_REFRESH_MS = Number(process.env.FAVORITES_REFRESH_MS || '3000');
@@ -124,12 +145,16 @@ export const APPLE_MUSIC_KEY_ID = String(process.env.APPLE_MUSIC_KEY_ID || '').t
 export const APPLE_MUSIC_TEAM_ID = String(process.env.APPLE_MUSIC_TEAM_ID || '').trim();
 export const APPLE_MUSIC_PRIVATE_KEY_PATH = String(process.env.APPLE_MUSIC_PRIVATE_KEY_PATH || '').trim();
 
-export const ART_CACHE_DIR = process.env.ART_CACHE_DIR || runtimeCfg?.artCacheDir || '/tmp/now-playing/art-cache';
+export const ART_CACHE_DIR = configuredWritableStatePath(runtimeCfg?.artCacheDir, {
+  fallback: RUNTIME_STATE_PATHS.artCacheDir,
+  root: RUNTIME_STATE_PATHS.cacheRoot,
+  label: 'runtime.artCacheDir',
+});
 export const ART_CACHE_LIMIT = Number(process.env.ART_CACHE_LIMIT || runtimeCfg?.artCacheLimit || '250');
 
 export const ART_640_PATH = path.join(ART_CACHE_DIR, 'current_640.jpg');
 export const ART_BG_PATH = path.join(ART_CACHE_DIR, 'current_bg_640_blur.jpg');
-export const PODCAST_DL_LOG = process.env.PODCAST_DL_LOG || path.resolve(process.cwd(), 'var/podcasts/downloads.ndjson');
+export const PODCAST_DL_LOG = RUNTIME_STATE_PATHS.podcastDownloadLogPath;
 
 export const MOODE_SSH = process.env.MOODE_SSH || `${MOODE_SSH_USER}@${MOODE_SSH_HOST}`;
 export const FAVORITES_M3U = process.env.FAVORITES_M3U || '/var/lib/mpd/playlists/Favorites.m3u';
@@ -166,19 +191,16 @@ export const APNS_TOPIC = String(
 export const APNS_ENVIRONMENT = String(
   process.env.APNS_ENVIRONMENT || apnsCfg?.environment || 'auto'
 ).trim().toLowerCase();
-const mobilePushTokensPath = String(
-  process.env.MOBILE_PUSH_TOKENS_PATH
-    || apnsCfg?.tokensPath
-    || path.join(process.cwd(), 'var', 'mobile-push-tokens.json')
-).trim();
-export const MOBILE_PUSH_TOKENS_PATH = path.isAbsolute(mobilePushTokensPath)
-  ? mobilePushTokensPath
-  : path.resolve(process.cwd(), mobilePushTokensPath);
+export const MOBILE_PUSH_TOKENS_PATH = configuredWritableStatePath(apnsCfg?.tokensPath, {
+  fallback: RUNTIME_STATE_PATHS.mobilePushTokensPath,
+  root: RUNTIME_STATE_PATHS.protectedRoot,
+  label: 'notifications.apns.tokensPath',
+});
 
 export const PUSHOVER_TOKEN = String(
-  process.env.PUSHOVER_TOKEN || notificationsCfg?.pushover?.token || ''
+  process.env.PUSHOVER_TOKEN || legacyConfigSecret(notificationsCfg?.pushover?.token) || ''
 ).trim();
 
 export const PUSHOVER_USER_KEY = String(
-  process.env.PUSHOVER_USER_KEY || notificationsCfg?.pushover?.userKey || ''
+  process.env.PUSHOVER_USER_KEY || legacyConfigSecret(notificationsCfg?.pushover?.userKey) || ''
 ).trim();

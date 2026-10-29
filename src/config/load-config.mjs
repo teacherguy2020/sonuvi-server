@@ -1,9 +1,14 @@
 import fs from 'node:fs';
-import path from 'node:path';
+import { runtimeStatePaths } from '../lib/runtime-state-paths.mjs';
+import {
+  assertImmutableRuntimeConfig,
+  ImmutableConfigSchemaError,
+  SecretConfigFieldError,
+} from '../lib/runtime-config-security.mjs';
 
-const CONFIG_DIR = path.resolve(process.cwd(), 'config');
-const DEFAULT_CONFIG_PATH = path.join(CONFIG_DIR, 'now-playing.config.json');
-const EXAMPLE_CONFIG_PATH = path.join(CONFIG_DIR, 'now-playing.config.example.json');
+function configPaths() {
+  return runtimeStatePaths();
+}
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
@@ -31,21 +36,30 @@ function assertConfig(cfg) {
   return cfg;
 }
 
-export function loadConfig(customPath = process.env.NOW_PLAYING_CONFIG_PATH || DEFAULT_CONFIG_PATH) {
+export function loadConfig(customPath = configPaths().configPath) {
+  const paths = configPaths();
+  const { exampleConfigPath, configPath } = paths;
   if (!fs.existsSync(customPath)) {
     throw new Error(
-      `Config not found at ${customPath}. Copy ${EXAMPLE_CONFIG_PATH} to ${DEFAULT_CONFIG_PATH} and edit it.`
+      `Config not found at ${customPath}. Copy ${exampleConfigPath} to ${configPath} and edit it.`
     );
   }
 
   const cfg = readJson(customPath);
+  if (paths.sharedStateEnabled) {
+    assertImmutableRuntimeConfig(cfg, { context: 'immutable runtime configuration' });
+  }
   return assertConfig(cfg);
 }
 
 export function loadConfigOrNull(customPath) {
   try {
     return loadConfig(customPath);
-  } catch {
+  } catch (error) {
+    if (configPaths().sharedStateEnabled
+      && (error instanceof SecretConfigFieldError || error instanceof ImmutableConfigSchemaError)) {
+      throw error;
+    }
     return null;
   }
 }

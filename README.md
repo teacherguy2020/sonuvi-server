@@ -102,10 +102,10 @@ The native iOS app also supports selected device-local workflows without an acti
 For complete prerequisites, first-run steps, and troubleshooting, see [Getting Started](./docs/wiki-source/getting-started.md).
 
 > The legacy one-line installer and file-push helper are retired: they targeted
-> `/opt/now-playing` and the old services. This branch does not yet contain the
-> complete reviewed immutable-release tooling. A fresh main checkout is **not**
-> a supported one-command production installation. Do not use Config Save/Restart
-> as an installation or migration mechanism.
+> `/opt/now-playing` and the old services. Main now includes the accepted runtime,
+> immutable-release builder/verifiers, and current service templates. It is **not**
+> a one-command fresh installer. See the [current source baseline and tooling gaps](./docs/runbooks/sonuvi-source-baseline.md).
+> Config Save/Restart is maintenance, not installation or migration.
 
 ## moOde display integration
 

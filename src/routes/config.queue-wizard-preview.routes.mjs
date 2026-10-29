@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { MPD_HOST } from '../config.mjs';
 import { getBrowseIndex } from '../lib/browse-index.mjs';
+import { runtimeStatePaths } from '../lib/runtime-state-paths.mjs';
 
 const execFileP = promisify(execFile);
 
@@ -53,7 +54,7 @@ function pickVarietyTracks(candidates, maxTracks) {
 
 export function registerConfigQueueWizardPreviewRoute(app, deps) {
   const { requireTrackKey, getRatingForFile } = deps;
-  const configPath = process.env.NOW_PLAYING_CONFIG_PATH || `${process.cwd()}/config/now-playing.config.json`;
+  const configPath = runtimeStatePaths().configPath;
 
   async function isRatingsEnabled() {
     try {

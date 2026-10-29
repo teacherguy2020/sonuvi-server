@@ -1,9 +1,11 @@
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
+import { runtimeStatePaths } from '../lib/runtime-state-paths.mjs';
 
 export function registerPodcastSubscriptionRoutes(app, deps) {
   const {
+    capabilities,
     normUrl,
     readSubs,
     writeSubs,
@@ -15,6 +17,7 @@ export function registerPodcastSubscriptionRoutes(app, deps) {
     musicLibraryRoot,
     podcastRoot,
   } = deps;
+  const assertMutation = (capability) => capabilities?.assertExternalMutation(`podcasts.${capability}`);
 
   const parseAutoDownload = (value, fallback = false) => {
     if (value === undefined || value === null) return !!fallback;
@@ -81,6 +84,7 @@ export function registerPodcastSubscriptionRoutes(app, deps) {
     logp('BEGIN', { body: req.body });
 
     try {
+      assertMutation('subscribe');
       const rss = normUrl(req.body?.rss);
       if (!rss) return res.status(400).json({ ok: false, error: 'Missing/invalid rss' });
 
@@ -88,7 +92,7 @@ export function registerPodcastSubscriptionRoutes(app, deps) {
       const downloadCount = Math.max(0, Math.min(50, Number(req.body?.download ?? 5)));
 
       const id = makePodcastId(rss);
-      const podcastMapDir = process.env.PODCAST_MAP_DIR || path.join(path.dirname(process.env.PODCAST_DL_LOG || '/tmp/now-playing/podcasts/downloads.ndjson'), 'maps');
+      const podcastMapDir = runtimeStatePaths().podcastMapDir;
       await fsp.mkdir(podcastMapDir, { recursive: true });
       const outM3u = path.join(podcastMapDir, `${id}.m3u`);
       const mapJson = path.join(podcastMapDir, `${id}.json`);
@@ -336,6 +340,7 @@ export function registerPodcastSubscriptionRoutes(app, deps) {
   });
 
   app.post('/podcasts/subscription/settings', async (req, res) => {
+    assertMutation('subscription-settings');
     const rss = normUrl(req.body?.rss);
     if (!rss) return res.status(400).json({ ok: false, error: 'rss required' });
 
@@ -356,6 +361,7 @@ export function registerPodcastSubscriptionRoutes(app, deps) {
   });
 
   app.post('/podcasts/unsubscribe', async (req, res) => {
+    assertMutation('unsubscribe');
     const rss = normUrl(req.body?.rss);
     if (!rss) return res.status(400).json({ ok: false, error: 'rss required' });
 

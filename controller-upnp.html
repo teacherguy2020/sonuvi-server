@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
+  <script src="scripts/runtime-auth.js?v=20261024-h2"></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <title>Music Sources</title>
@@ -247,7 +248,7 @@
         if (trackKey) return trackKey;
         if (keyRequest) return keyRequest;
         keyRequest = fetchBounded(apiPath('/config/runtime'), { cache:'no-store' }).then((r) => r.json().catch(() => ({}))).then((j) => {
-          trackKey = String(j?.config?.trackKey || '').trim();
+          trackKey = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
           return trackKey;
         }).catch(() => '').finally(() => { keyRequest = null; });
         return keyRequest;

@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
+  <script src="scripts/runtime-auth.js?v=20261024-h2"></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <title>Live Queue</title>
@@ -503,7 +504,7 @@
       if (runtimeTrackKey) return runtimeTrackKey;
       const { r, j } = await fetchJsonWithTimeout(`${base}/config/runtime`, { cache:'no-store' }, 4500);
       if (!r.ok) return '';
-      runtimeTrackKey = String(j?.config?.trackKey || '').trim();
+      runtimeTrackKey = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
       return runtimeTrackKey;
     }
 

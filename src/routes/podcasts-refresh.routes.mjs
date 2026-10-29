@@ -1,10 +1,12 @@
 import fsp from 'node:fs/promises';
 
 export function registerPodcastRefreshRoutes(app, deps) {
-  const { readSubs, normUrl, buildPodcastMap, writeSubs } = deps;
+  const { capabilities, readSubs, normUrl, buildPodcastMap, writeSubs } = deps;
+  const assertMutation = (capability) => capabilities?.assertExternalMutation(`podcasts.${capability}`);
 
   app.post('/podcasts/refresh', async (req, res) => {
     try {
+      assertMutation('refresh');
       const items = readSubs();
       const results = [];
 
@@ -48,6 +50,7 @@ export function registerPodcastRefreshRoutes(app, deps) {
 
   app.get('/podcasts/refresh', async (req, res) => {
     try {
+      assertMutation('refresh-legacy-get');
       const items = readSubs();
 
       const next = await Promise.all(items.map(async (s) => {
@@ -80,6 +83,7 @@ export function registerPodcastRefreshRoutes(app, deps) {
 
   app.post('/podcasts/refresh-one', async (req, res) => {
     try {
+      assertMutation('refresh-one');
       const items = readSubs();
 
       const rssIn = normUrl(req.body?.rss || req.query?.rss);
@@ -130,6 +134,7 @@ export function registerPodcastRefreshRoutes(app, deps) {
 
   app.get('/podcasts/refresh-one', async (req, res) => {
     try {
+      assertMutation('refresh-one-legacy-get');
       const outM3u = String(req.query.outM3u || '').trim();
       if (!outM3u) {
         return res.status(400).json({ ok: false, error: 'Missing outM3u', rss: null, outM3u: null });

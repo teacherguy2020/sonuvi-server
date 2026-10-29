@@ -373,7 +373,7 @@ async function ensureRuntimeTrackKey() {
   try {
     const r = await fetch(`${API_BASE}/config/runtime`, { cache: 'no-store' });
     const j = await r.json().catch(() => ({}));
-    const k = String(j?.config?.trackKey || '').trim();
+    const k = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
     if (k) runtimeTrackKeyAuth = k;
   } catch {}
   return runtimeTrackKeyAuth;
@@ -1414,7 +1414,7 @@ async function currentPlaylistHeaders(json = false) {
     try {
       const r = await fetch(`${API_BASE}/config/runtime`, { cache: 'no-store' });
       const j = await r.json().catch(() => ({}));
-      currentPlaylistKey = String(j?.config?.trackKey || '').trim();
+      currentPlaylistKey = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
     } catch {}
   }
   return Object.assign(json ? { 'Content-Type': 'application/json' } : {}, currentPlaylistKey ? { 'x-track-key': currentPlaylistKey } : {});

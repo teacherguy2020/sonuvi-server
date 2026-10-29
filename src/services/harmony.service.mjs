@@ -1,4 +1,5 @@
 import WebSocket from 'ws';
+import { runtimeCapabilities } from '../lib/runtime-capabilities.mjs';
 
 const HARMONY_ENGINE = 'vnd.logitech.harmony/vnd.logitech.harmony.engine?';
 
@@ -30,6 +31,7 @@ export class HarmonyHubClient {
     hubId = process.env.HARMONY_HUB_ID || '',
     connectTimeoutMs = 10000,
     maxRetries = 2,
+    capabilities = runtimeCapabilities(),
   } = {}) {
     this.host = String(host).trim();
     this.port = Number(port);
@@ -40,6 +42,7 @@ export class HarmonyHubClient {
       : '';
     this.connectTimeoutMs = connectTimeoutMs;
     this.maxRetries = maxRetries;
+    this.capabilities = capabilities;
     this.socket = null;
     this.connecting = null;
     this.nextId = 1;
@@ -52,6 +55,7 @@ export class HarmonyHubClient {
   async connect() {
     required(this.host, 'HARMONY_HOST');
     required(this.hubId, 'HARMONY_HUB_ID');
+    this.capabilities.assertExternalRead('harmony.websocket-connect');
     if (this.isOpen()) return this;
     if (this.connecting) return this.connecting;
 
@@ -94,6 +98,7 @@ export class HarmonyHubClient {
   }
 
   async sendWithoutResponse(command, params = {}) {
+    this.capabilities.assertExternalMutation('harmony.websocket-command');
     let lastError;
     for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
       try {

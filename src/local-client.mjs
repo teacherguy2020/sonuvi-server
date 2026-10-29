@@ -1,4 +1,5 @@
 import net from 'node:net';
+import { runtimeCapabilities } from './lib/runtime-capabilities.mjs';
 
 import {
   LOCAL_SOCKET_PATH,
@@ -48,6 +49,7 @@ export function createLocalPibuzBridgeClient({
   socketPath = LOCAL_SOCKET_PATH,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   connectRequest = defaultConnectRequest,
+  capabilities = runtimeCapabilities(),
 } = {}) {
   if (socketPath !== LOCAL_SOCKET_PATH) throw new Error('local bridge socket path is fixed');
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 5_000 || timeoutMs > 30_000) {
@@ -81,12 +83,15 @@ export function createLocalPibuzBridgeClient({
 
   return {
     loadSavedQueue(request) {
+      capabilities.assertExternalMutation('pibuz.saved-queue-load');
       return invoke(request);
     },
     getStatus(operationId) {
+      capabilities.assertExternalRead('pibuz.saved-queue-status');
       return invoke({ kind: 'get_status', protocol_version: 1, operation_id: operationId });
     },
     getOwnership() {
+      capabilities.assertExternalRead('pibuz.saved-queue-ownership');
       return invokeOwnership();
     },
     socketPathForTest() {

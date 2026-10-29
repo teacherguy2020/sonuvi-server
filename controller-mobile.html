@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
+  <script src="scripts/runtime-auth.js?v=20261024-h2"></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#000000" />
@@ -773,7 +774,7 @@
       try {
         const r=await fetch(`${base}/config/runtime`,{cache:'no-store'});
         const j=await r.json().catch(()=>({}));
-        runtimeTrackKey = String(j?.config?.trackKey||'').trim();
+        runtimeTrackKey = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
         runtimeMoodeHost = String(j?.config?.mpd?.host || j?.config?.nodes?.moode || j?.config?.mpd?.hostname || runtimeMoodeHost).trim() || runtimeMoodeHost;
       } catch {}
       return runtimeTrackKey;

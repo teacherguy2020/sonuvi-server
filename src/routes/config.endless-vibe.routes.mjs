@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
-import path from 'node:path';
+import { runtimeStatePaths } from '../lib/runtime-state-paths.mjs';
+import { writeJsonAtomically } from '../lib/atomic-file.mjs';
 
 const DEFAULT_ENABLED = false;
 
@@ -23,7 +24,7 @@ export function registerConfigEndlessVibeRoutes(app, deps = {}) {
   const requireTrackKey = deps.requireTrackKey;
   const settingsPath = deps.settingsPath
     || process.env.NOW_PLAYING_ENDLESS_VIBE_PATH
-    || path.resolve(process.cwd(), 'data/endless-vibe.json');
+    || runtimeStatePaths().endlessVibePath;
 
   app.get('/config/endless-vibe', async (_req, res) => {
     try {
@@ -41,11 +42,10 @@ export function registerConfigEndlessVibeRoutes(app, deps = {}) {
         return res.status(400).json({ ok: false, error: 'enabled must be boolean' });
       }
 
-      await fs.mkdir(path.dirname(settingsPath), { recursive: true });
-      await fs.writeFile(settingsPath, `${JSON.stringify({
+      await writeJsonAtomically(settingsPath, {
         enabled: req.body.enabled,
         updatedAt: new Date().toISOString(),
-      }, null, 2)}\n`, 'utf8');
+      });
       return res.json({ ok: true, enabled: req.body.enabled, configured: true });
     } catch (error) {
       return res.status(500).json({ ok: false, error: error?.message || String(error) });

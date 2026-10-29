@@ -1,9 +1,10 @@
 import fs from 'node:fs/promises';
-import path from 'node:path';
+import { runtimeStatePaths } from '../lib/runtime-state-paths.mjs';
+import { writeJsonAtomically } from '../lib/atomic-file.mjs';
 
 export function registerConfigAlexaAliasRoutes(app, deps) {
   const { requireTrackKey } = deps;
-  const configPath = process.env.NOW_PLAYING_CONFIG_PATH || path.resolve(process.cwd(), 'config/now-playing.config.json');
+  const configPath = runtimeStatePaths().configPath;
 
   async function handleArtistAliasSuggestion(req, res) {
     try {
@@ -50,7 +51,7 @@ export function registerConfigAlexaAliasRoutes(app, deps) {
         },
       };
 
-      await fs.writeFile(configPath, JSON.stringify(next, null, 2) + '\n', 'utf8');
+      await writeJsonAtomically(configPath, next);
       return res.json({ ok: true, queued: artist, total: unresolved.slice(0, 200).length });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e?.message || String(e) });
@@ -82,7 +83,7 @@ export function registerConfigAlexaAliasRoutes(app, deps) {
         },
       };
 
-      await fs.writeFile(configPath, JSON.stringify(next, null, 2) + '\n', 'utf8');
+      await writeJsonAtomically(configPath, next);
       return res.json({ ok: true, logged: artist, total: heard.slice(0, 400).length });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e?.message || String(e) });
@@ -119,7 +120,7 @@ export function registerConfigAlexaAliasRoutes(app, deps) {
         },
       };
 
-      await fs.writeFile(configPath, JSON.stringify(next, null, 2) + '\n', 'utf8');
+      await writeJsonAtomically(configPath, next);
       return res.json({ ok: true, queued: album, total: unresolved.slice(0, 200).length });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e?.message || String(e) });
@@ -152,7 +153,7 @@ export function registerConfigAlexaAliasRoutes(app, deps) {
         },
       };
 
-      await fs.writeFile(configPath, JSON.stringify(next, null, 2) + '\n', 'utf8');
+      await writeJsonAtomically(configPath, next);
       return res.json({ ok: true, logged: album, total: heard.slice(0, 400).length });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e?.message || String(e) });
@@ -189,7 +190,7 @@ export function registerConfigAlexaAliasRoutes(app, deps) {
         },
       };
 
-      await fs.writeFile(configPath, JSON.stringify(next, null, 2) + '\n', 'utf8');
+      await writeJsonAtomically(configPath, next);
       return res.json({ ok: true, queued: playlist, total: unresolved.slice(0, 200).length });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e?.message || String(e) });
@@ -222,7 +223,7 @@ export function registerConfigAlexaAliasRoutes(app, deps) {
         },
       };
 
-      await fs.writeFile(configPath, JSON.stringify(next, null, 2) + '\n', 'utf8');
+      await writeJsonAtomically(configPath, next);
       return res.json({ ok: true, logged: playlist, total: heard.slice(0, 400).length });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e?.message || String(e) });

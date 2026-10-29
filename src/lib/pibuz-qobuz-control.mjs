@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { runtimeCapabilities } from './runtime-capabilities.mjs';
 
 const DEFAULT_TIMEOUT_MS = 1200;
 const DEFAULT_VERIFY_MS = 4000;
@@ -122,6 +123,7 @@ function sleep(ms) {
 export function createPibuzQobuzControlAdapter({
   adapter,
   fetchImpl = globalThis.fetch,
+  capabilities = runtimeCapabilities(),
   timeoutMs = DEFAULT_TIMEOUT_MS,
   verifyMs = DEFAULT_VERIFY_MS,
   pollMs = DEFAULT_POLL_MS,
@@ -155,6 +157,7 @@ export function createPibuzQobuzControlAdapter({
   }
 
   async function postControl(route, body) {
+    capabilities.assertExternalMutation('pibuz.qobuz-control');
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
     let response;

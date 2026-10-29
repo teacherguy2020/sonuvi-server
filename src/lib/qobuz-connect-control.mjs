@@ -1,5 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { assertMoodeRemoteTransport, resolveMoodeSshProfile } from './moode-ssh-profile.mjs';
+import { runtimeCapabilities } from './runtime-capabilities.mjs';
 
 const execFileP = promisify(execFile);
 const DEFAULT_TIMEOUT_MS = 35_000;
@@ -13,7 +15,10 @@ function shQuoteArg(value) {
   return `'${raw.replace(/'/g, `\'"'"'`)}'`;
 }
 
-function sshArgsFor(user, host, script) {
+function sshArgsFor(user, host, script, profile) {
+  if (profile?.immutable) {
+    return [...profile.argsFor(host), 'bash', '-lc', shQuoteArg(script)];
+  }
   return [
     '-o', 'BatchMode=yes',
     '-o', 'ConnectTimeout=6',
@@ -77,6 +82,8 @@ export function createQobuzConnectController({
   sshUser = 'moode',
   sshHost = '',
   runCommand = defaultRunCommand,
+  capabilities = runtimeCapabilities(),
+  env = process.env,
   timeoutMs = DEFAULT_TIMEOUT_MS,
 } = {}) {
   const user = text(sshUser);
@@ -89,9 +96,17 @@ export function createQobuzConnectController({
 
     inFlight = (async () => {
       if (!user || !host) throw new Error('Qobuz renderer SSH target is unavailable');
+      const profile = resolveMoodeSshProfile({
+        env: {
+          ...env,
+          MOODE_SSH_USER: user,
+          MOODE_SSH_HOST: host,
+        },
+      });
+      assertMoodeRemoteTransport('qobuz-renderer-release', { capabilities, profile });
       let result;
       try {
-        result = await runCommand('ssh', sshArgsFor(user, host, RELEASE_SCRIPT), {
+        result = await runCommand('ssh', sshArgsFor(user, host, RELEASE_SCRIPT, profile), {
           timeout: maxTimeMs,
           maxBuffer: 64 * 1024,
         });

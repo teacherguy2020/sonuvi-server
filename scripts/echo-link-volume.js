@@ -55,7 +55,7 @@
     try {
       const response = await fetch(`${apiOrigin}/config/runtime`, { cache: 'no-store' });
       const json = await response.json().catch(() => ({}));
-      trackKey = String(json?.config?.trackKey || '').trim();
+      trackKey = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
     } catch {}
     return trackKey;
   }

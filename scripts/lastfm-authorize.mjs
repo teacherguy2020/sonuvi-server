@@ -6,6 +6,8 @@ import path from 'node:path';
 import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 
+import { runtimeStatePaths } from '../src/lib/runtime-state-paths.mjs';
+
 const ENDPOINT = 'https://ws.audioscrobbler.com/2.0/';
 const AUTH_ENDPOINT = 'https://www.last.fm/api/auth/';
 
@@ -75,19 +77,38 @@ export async function exchangeLastfmToken({ apiKey, apiSecret, token, fetchImpl 
   };
 }
 
-async function readEnvValue(envPath, key) {
-  if (text(process.env[key])) return text(process.env[key]);
+async function readEnvValue(envPath, key, env = process.env) {
+  if (text(env?.[key])) return text(env[key]);
   const raw = await fs.readFile(envPath, 'utf8').catch(() => '');
   const line = raw.split(/\r?\n/).find((entry) => entry.startsWith(key + '='));
   return text(line ? line.slice(key.length + 1) : '');
 }
 
-export async function resolveLastfmCredentials({ envPath } = {}) {
-  const resolvedEnvPath = text(envPath)
-    || text(process.env.LASTFM_ENV_FILE)
-    || path.resolve(process.cwd(), '.env');
-  const apiKey = await readEnvValue(resolvedEnvPath, 'LASTFM_API_KEY');
-  const apiSecret = await readEnvValue(resolvedEnvPath, 'LASTFM_API_SECRET');
+export function resolveLastfmEnvPath({ envPath, cwd = process.cwd(), env = process.env } = {}) {
+  const statePaths = runtimeStatePaths({ cwd, env });
+  const explicit = text(envPath);
+  if (explicit && !statePaths.sharedStateEnabled) return explicit;
+  if (explicit) {
+    if (!path.isAbsolute(explicit)) {
+      throw new Error('Last.fm authorization path must be an absolute path beneath SONUVI_SECRETS_ROOT');
+    }
+    const resolved = path.resolve(explicit);
+    const relative = path.relative(statePaths.secretsRoot, resolved);
+    if (relative === '..' || path.isAbsolute(relative) || relative.startsWith(`..${path.sep}`)) {
+      throw new Error('Last.fm authorization path must remain beneath SONUVI_SECRETS_ROOT');
+    }
+    return resolved;
+  }
+  // runtime-state-paths preserves legacy checkout behavior when shared roots
+  // are unset, while requiring immutable overrides to remain beneath the
+  // external root-managed secrets root.
+  return statePaths.lastfmEnvPath;
+}
+
+export async function resolveLastfmCredentials({ envPath, cwd, env = process.env } = {}) {
+  const resolvedEnvPath = resolveLastfmEnvPath({ envPath, cwd, env });
+  const apiKey = await readEnvValue(resolvedEnvPath, 'LASTFM_API_KEY', env);
+  const apiSecret = await readEnvValue(resolvedEnvPath, 'LASTFM_API_SECRET', env);
   return { apiKey, apiSecret, envPath: resolvedEnvPath };
 }
 

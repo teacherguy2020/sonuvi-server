@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { runtimeCapabilities } from './runtime-capabilities.mjs';
 
 const DEFAULT_TIMEOUT_MS = 1200;
 const DEFAULT_STALE_MS = 8000;
@@ -361,6 +362,7 @@ export function createPibuzQobuzAdapter({
   port = 8182,
   baseUrl = '',
   fetchImpl = globalThis.fetch,
+  capabilities = runtimeCapabilities(),
   timeoutMs = DEFAULT_TIMEOUT_MS,
   staleMs = DEFAULT_STALE_MS,
   maxJsonBytes = DEFAULT_MAX_JSON_BYTES,
@@ -443,6 +445,7 @@ export function createPibuzQobuzAdapter({
   async function request(pathname, { accept = 'application/json', signal, retainSignal = false } = {}) {
     const allowedPath = ['/api/status', '/api/now-playing', '/api/queue', '/api/events'].includes(pathname);
     if (!allowedPath) throw new Error('PiBuZ endpoint is not allowed');
+    capabilities.assertExternalRead('pibuz.read');
     const controller = new AbortController();
     let timedOut = false;
     const timer = setTimeout(() => {
@@ -845,6 +848,7 @@ export function createPibuzQobuzAdapter({
   }
 
   async function requestArtwork(url) {
+    capabilities.assertExternalRead('pibuz.artwork');
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
     try {

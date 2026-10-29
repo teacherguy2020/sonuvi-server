@@ -4,6 +4,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { runtimeStatePaths } from './runtime-state-paths.mjs';
 
 const execFileP = promisify(execFile);
 const REGISTRY_VERSION = 1;
@@ -91,7 +92,7 @@ export function createMobileVideoCatalog({
   runThumbnail,
 } = {}) {
   const configuredRoot = path.resolve(String(root || ''));
-  const configuredRegistry = path.resolve(String(registryPath || path.join(process.cwd(), 'var', 'mobile-video-catalog.json')));
+  const configuredRegistry = path.resolve(String(registryPath || runtimeStatePaths().mobileVideoCatalogPath));
   let registry = null;
   let operation = Promise.resolve();
 

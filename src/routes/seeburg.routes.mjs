@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { runtimeStatePaths } from '../lib/runtime-state-paths.mjs';
 
 const MIN_SELECTION = 1;
 const MAX_SELECTION = 100;
@@ -33,9 +34,9 @@ export function withJukeboxMutation(task) {
 const isTestRuntime = Boolean(process.env.NODE_TEST_CONTEXT) || process.argv.includes('--test');
 const defaultJukeboxStatePath = isTestRuntime
   ? null
-  : path.resolve(process.cwd(), 'data/jukebox-entries.json');
+  : runtimeStatePaths().jukeboxStatePath;
 
-export function loadJukeboxState(statePath = path.resolve(process.cwd(), 'data/jukebox-entries.json')) {
+export function loadJukeboxState(statePath = runtimeStatePaths().jukeboxStatePath) {
   if (!statePath) return;
   const resolvedPath = path.resolve(statePath);
   if (loadedStatePath === resolvedPath) return;
@@ -66,7 +67,7 @@ export function loadJukeboxState(statePath = path.resolve(process.cwd(), 'data/j
   }
 }
 
-export function persistJukeboxState(statePath = loadedStatePath || path.resolve(process.cwd(), 'data/jukebox-entries.json')) {
+export function persistJukeboxState(statePath = loadedStatePath || runtimeStatePaths().jukeboxStatePath) {
   if (!statePath) return;
   const resolvedPath = path.resolve(statePath);
   fs.mkdirSync(path.dirname(resolvedPath), { recursive: true });

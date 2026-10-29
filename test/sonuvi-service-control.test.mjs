@@ -2,85 +2,94 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
-import { queueSonuviRestart, registerSonuviRestartRoutes } from '../src/lib/sonuvi-service-control.mjs';
+import { EventEmitter } from 'node:events';
+import { checkSonuviRestart, registerSonuviRestartRoutes, SONUVI_SERVICES, SONUVI_RESTART_POLICY } from '../src/lib/sonuvi-service-control.mjs';
 
 const services = ['sonuvi-api.service', 'sonuvi-web.service'];
+const policyFor = () => SONUVI_RESTART_POLICY;
+const active = 'LoadState=loaded\nActiveState=active\n';
 
-test('queues the coupled Sonuvi units only, and does not claim completed restart', async () => {
+test('restart availability checks only the coupled units and does not execute a restart', async () => {
   const calls = [];
-  const result = await queueSonuviRestart(async (...args) => {
-    calls.push(args);
-    return { stdout: 'loaded\n' };
-  });
-  assert.deepEqual(calls.slice(0, 2).map(c => c[1][1]), services);
-  assert.deepEqual(calls[2], ['sudo', ['-n', 'systemctl', '--no-block', 'restart', ...services], { timeout: 5000 }]);
-  assert.equal(result.restartQueued, true);
-  assert.equal(result.restarted, false);
-  assert.deepEqual(result.services, services);
-  assert.equal(calls.length, 3);
+  const result = await checkSonuviRestart(async (...args) => {
+    calls.push(args); return { stdout: active };
+  }, policyFor);
+  assert.deepEqual(SONUVI_SERVICES, services);
+  assert.deepEqual(calls.map(c => c[1][1]), services);
+  assert.ok(calls.every(c => c[0] === '/usr/bin/systemctl' && c[1][0] === 'show'));
+  assert.equal(result.available, true);
+  assert.equal(result.permissionProbe, 'not-performed');
+  assert.equal(calls.length, 2);
 });
 
 for (const absent of services) {
   test(`missing ${absent} fails before any restart`, async () => {
     const calls = [];
-    await assert.rejects(queueSonuviRestart(async (cmd, args) => {
-      calls.push(cmd);
-      return { stdout: args[1] === absent ? 'not-found\n' : 'loaded\n' };
-    }), /not installed/);
-    assert.ok(calls.every(c => c === 'systemctl'));
+    await assert.rejects(checkSonuviRestart(async (cmd, args) => {
+      calls.push([cmd,args]);
+      return { stdout: args[1] === absent ? 'LoadState=not-found\nActiveState=inactive' : active };
+    }, policyFor), /unavailable/);
+    assert.ok(calls.every(([cmd,args]) => cmd === '/usr/bin/systemctl' && args[0] === 'show'));
   });
 }
 
-test('missing systemctl fails without PM2 or legacy fallback', async () => {
+test('missing systemctl fails without sudo, PM2 or legacy fallback', async () => {
   let count = 0;
-  await assert.rejects(queueSonuviRestart(async () => {
+  await assert.rejects(checkSonuviRestart(async () => {
     count += 1; throw new Error('ENOENT');
-  }), /ENOENT/);
+  }, policyFor), /ENOENT/);
   assert.equal(count, 1);
 });
 
-test('permission failure produces no retry or fallback', async () => {
-  const calls = [];
-  await assert.rejects(queueSonuviRestart(async (cmd, args) => {
-    calls.push([cmd, args]);
-    if (cmd === 'sudo') throw new Error('not permitted');
-    return { stdout: 'loaded' };
-  }), /not permitted/);
-  assert.equal(calls.length, 3);
-  assert.ok(!JSON.stringify(calls).includes('now-playing'));
-  assert.ok(!JSON.stringify(calls).includes('pm2'));
+test('missing operator policy fails before any command', async () => {
+  let count = 0;
+  await assert.rejects(checkSonuviRestart(async () => { count++; }, () => ''), /unavailable/);
+  assert.equal(count, 0);
 });
 
 for (const route of ['/config/restart-api', '/config/restart-services']) {
-  for (const scenario of ['unauthorized', 'queued', 'denied']) {
+  for (const scenario of ['unauthorized', 'accepted', 'denied', 'systemd-denied']) {
     test(`${route}: ${scenario}`, async () => {
-      const routes = new Map();
-      let commands = 0;
-      const res = { code: 200, status(code) { this.code = code; return this; }, json(body) { this.body = body; return this; } };
-      registerSonuviRestartRoutes({ post(p, h) { routes.set(p, h); } }, {
+      const routes = new Map(), calls = [], logs = [];
+      const res = Object.assign(new EventEmitter(), {
+        code: 200, status(code) { this.code = code; return this; },
+        json(body) { this.body = body; return this; },
+      });
+      registerSonuviRestartRoutes({ get(p,h) { routes.set(p,h); }, post(p,h) { routes.set(p,h); } }, {
         requireTrackKey(req, response) {
           if (scenario !== 'unauthorized') return true;
           response.status(403).json({ ok: false }); return false;
         },
-        async execFileP(cmd) {
-          commands += 1;
-          if (cmd === 'sudo' && scenario === 'denied') throw new Error('private subprocess output');
-          return { stdout: 'loaded' };
+        policyFor: () => scenario === 'denied' ? '' : SONUVI_RESTART_POLICY,
+        log: { error: m => logs.push(m) },
+        async execFileP(cmd,args) {
+          calls.push([cmd,args]);
+          if (args.includes('restart') && scenario === 'systemd-denied') throw new Error('private subprocess output');
+          return { stdout: active };
         },
       });
-      await routes.get(route)({}, res);
-      assert.equal(res.code, { unauthorized: 403, queued: 202, denied: 503 }[scenario]);
-      assert.equal(commands, scenario === 'unauthorized' ? 0 : 3);
-      assert.ok(!JSON.stringify(res.body).includes('private subprocess output'));
-      if (scenario === 'queued') assert.equal(res.body.restartQueued, true);
-      if (scenario === 'denied') assert.equal(res.body.restartQueued, false);
+      await routes.get(route)({body:{}}, res);
+      assert.equal(res.code, { unauthorized:403, accepted:202, denied:503, 'systemd-denied':202 }[scenario]);
+      assert.ok(calls.every(([,args]) => !args.includes('restart')));
+      if (res.code === 202) {
+        assert.equal(res.body.restartAccepted, true);
+        assert.equal(res.body.restartQueued, false);
+        assert.equal(res.body.restarted, false);
+        res.emit('finish');
+        await new Promise(resolve => setImmediate(resolve));
+        assert.deepEqual(calls.at(-1), ['/usr/bin/systemctl', ['--no-ask-password','--no-block','restart',...services]]);
+        assert.equal(calls.length, 3);
+      } else assert.equal(calls.length, 0);
+      assert.equal(logs.length, scenario === 'systemd-denied' ? 1 : 0);
+      assert.doesNotMatch(JSON.stringify({body:res.body,logs}), /private subprocess output/);
+      assert.doesNotMatch(JSON.stringify(calls), /sudo|pm2|now-playing/);
     });
   }
 }
 
-test('runtime-admin registers only the shared Sonuvi restart routes', async () => {
+test('runtime-admin registers the shared Sonuvi restart routes exactly once', async () => {
   const source = await readFile(new URL('../src/routes/config.runtime-admin.routes.mjs', import.meta.url), 'utf8');
-  assert.match(source, /registerSonuviRestartRoutes\(app, \{ requireTrackKey, execFileP \}\)/);
+  assert.equal((source.match(/registerSonuviRestartRoutes\(app, \{ requireTrackKey, execFileP, log \}\)/g) || []).length, 1);
   assert.doesNotMatch(source, /now-playing(?:-web)?\.service|execFileP\('pm2'/);
 });
 

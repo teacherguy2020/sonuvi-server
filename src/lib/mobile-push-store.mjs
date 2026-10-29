@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { runtimeStatePaths } from './runtime-state-paths.mjs';
 
 const STORE_VERSION = 1;
 const TOKEN_PATTERN = /^[A-Fa-f0-9]{32,512}$/;
@@ -43,7 +44,7 @@ function normalizeRecord(value) {
 }
 
 export function createMobilePushTokenStore({ filePath } = {}) {
-  const targetPath = path.resolve(String(filePath || path.join(process.cwd(), 'var', 'mobile-push-tokens.json')));
+  const targetPath = path.resolve(String(filePath || runtimeStatePaths().mobilePushTokensPath));
   let records = null;
   let operation = Promise.resolve();
 

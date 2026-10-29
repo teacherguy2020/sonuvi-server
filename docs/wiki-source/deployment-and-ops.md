@@ -84,6 +84,9 @@ Use approved immutable artifacts, `/opt/sonuvi/current`, and
 [Sonuvi Server operations](../runbooks/sonuvi-server-operations.md).
 The old installer and `scripts/deploy-pi5-files.sh` now refuse mutations; copying
 individual files into a release would invalidate its manifest.
+Main now contains the accepted production application/runtime source plus the
+newer service/deployment safeguards. See the [source baseline](../runbooks/sonuvi-source-baseline.md)
+for reconciliation scope, release tooling and deliberately unfinished features.
 
 - Frontend changes also require a verified release artifact; browser refresh alone
   does not deploy source changes.

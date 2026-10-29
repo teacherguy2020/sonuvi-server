@@ -109,7 +109,7 @@
     try {
       const r = await fetch(`${apiBase}/config/runtime`, { cache: 'no-store' });
       const j = await r.json().catch(() => ({}));
-      const k = String(j?.config?.trackKey || '').trim();
+      const k = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
       if (k) runtimeTrackKey = k;
     } catch {}
   }

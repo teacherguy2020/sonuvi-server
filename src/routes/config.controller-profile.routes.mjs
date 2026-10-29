@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
-import path from 'node:path';
+import { runtimeStatePaths } from '../lib/runtime-state-paths.mjs';
+import { writeJsonAtomically } from '../lib/atomic-file.mjs';
 
 const DEFAULT_PROFILE = {
   devicePreset: 'mobile',
@@ -66,7 +67,7 @@ function sanitizeProfile(input = {}) {
 
 export function registerConfigControllerProfileRoutes(app, deps) {
   const { requireTrackKey } = deps;
-  const profilePath = process.env.NOW_PLAYING_CONTROLLER_PROFILE_PATH || path.resolve(process.cwd(), 'data/controller-profile.json');
+  const profilePath = runtimeStatePaths().controllerProfilePath;
 
   app.get('/config/controller-profile', async (_req, res) => {
     try {
@@ -82,8 +83,7 @@ export function registerConfigControllerProfileRoutes(app, deps) {
     try {
       if (!requireTrackKey(req, res)) return;
       const profile = sanitizeProfile(req.body?.profile || req.body || {});
-      await fs.mkdir(path.dirname(profilePath), { recursive: true });
-      await fs.writeFile(profilePath, JSON.stringify(profile, null, 2), 'utf8');
+      await writeJsonAtomically(profilePath, profile);
       return res.json({ ok: true, profile });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e?.message || String(e) });

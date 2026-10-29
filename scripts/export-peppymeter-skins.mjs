@@ -2,9 +2,15 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import { runtimeStatePaths } from '../src/lib/runtime-state-paths.mjs';
+
 const root = process.cwd();
 const skinsDir = path.join(root, 'skins');
-const outDir = path.join(root, 'exports', 'peppymeter', '1280x400');
+const configuredOutDir = String(process.env.SONUVI_PEPPY_EXPORT_ROOT || '').trim();
+if (configuredOutDir && !path.isAbsolute(configuredOutDir)) {
+  throw new Error('SONUVI_PEPPY_EXPORT_ROOT must be an absolute path when configured');
+}
+const outDir = configuredOutDir || runtimeStatePaths({ cwd: root }).peppyExportDir;
 await fs.mkdir(outDir, { recursive: true });
 
 const entries = await fs.readdir(skinsDir, { withFileTypes: true });

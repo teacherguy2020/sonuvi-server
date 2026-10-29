@@ -170,3 +170,94 @@ test('diagnostics playback selects exact MPD repeat modes and reads them back', 
   assert.equal(invalid.body.code, 'REPEAT_MODE_INVALID');
   assert.equal(calls.length, beforeInvalid);
 });
+
+test('immutable Alexa diagnostics uses the protected environment without serializing its webhook', async (t) => {
+  const app = createApp();
+  const previousStateRoot = process.env.SONUVI_STATE_ROOT;
+  const previousWebhook = process.env.ALEXA_ROUTE_WEBHOOK_URL;
+  const protectedWebhook = 'https://private.example.invalid/alexa-start';
+  process.env.SONUVI_STATE_ROOT = '/synthetic/sonuvi/shared';
+  process.env.ALEXA_ROUTE_WEBHOOK_URL = protectedWebhook;
+  t.after(() => {
+    if (previousStateRoot === undefined) delete process.env.SONUVI_STATE_ROOT;
+    else process.env.SONUVI_STATE_ROOT = previousStateRoot;
+    if (previousWebhook === undefined) delete process.env.ALEXA_ROUTE_WEBHOOK_URL;
+    else process.env.ALEXA_ROUTE_WEBHOOK_URL = previousWebhook;
+  });
+
+  registerConfigDiagnosticsRoutes(app, {
+    requireTrackKey: () => true,
+    getRatingForFile: async () => null,
+    setRatingForFile: async () => {},
+    getAlexaWasPlaying: () => null,
+    clearAlexaWasPlayingState: async () => {},
+    setAlexaModeState: async () => null,
+    getYoutubeNowPlayingHint: () => null,
+    getYoutubeQueueHint: () => null,
+  });
+
+  const originalFetch = globalThis.fetch;
+  let requestedUrl = '';
+  globalThis.fetch = async (url) => {
+    requestedUrl = String(url);
+    return new Response('ok', { status: 200 });
+  };
+  try {
+    const response = createResponse();
+    await app.routes.get('POST /config/diagnostics/playback')?.({
+      headers: {}, body: { action: 'routealexa' }, query: {},
+    }, response);
+    assert.equal(requestedUrl, protectedWebhook);
+    assert.equal(response.body.webhookConfigured, true);
+    assert.equal(JSON.stringify(response.body).includes(protectedWebhook), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('diagnostics adapter denies a protected Alexa write in rehearsal before fetch', async (t) => {
+  const app = createApp();
+  const previousMode = process.env.SONUVI_EXECUTION_MODE;
+  const previousStateRoot = process.env.SONUVI_STATE_ROOT;
+  const previousWebhook = process.env.ALEXA_ROUTE_WEBHOOK_URL;
+  process.env.SONUVI_EXECUTION_MODE = 'rehearsal';
+  process.env.SONUVI_STATE_ROOT = '/synthetic/sonuvi/shared';
+  process.env.ALEXA_ROUTE_WEBHOOK_URL = 'https://private.example.invalid/alexa-start';
+  t.after(() => {
+    if (previousMode === undefined) delete process.env.SONUVI_EXECUTION_MODE;
+    else process.env.SONUVI_EXECUTION_MODE = previousMode;
+    if (previousStateRoot === undefined) delete process.env.SONUVI_STATE_ROOT;
+    else process.env.SONUVI_STATE_ROOT = previousStateRoot;
+    if (previousWebhook === undefined) delete process.env.ALEXA_ROUTE_WEBHOOK_URL;
+    else process.env.ALEXA_ROUTE_WEBHOOK_URL = previousWebhook;
+  });
+
+  registerConfigDiagnosticsRoutes(app, {
+    requireTrackKey: () => true,
+    getRatingForFile: async () => null,
+    setRatingForFile: async () => {},
+    getAlexaWasPlaying: () => null,
+    clearAlexaWasPlayingState: async () => {},
+    setAlexaModeState: async () => null,
+    getYoutubeNowPlayingHint: () => null,
+    getYoutubeQueueHint: () => null,
+  });
+
+  const originalFetch = globalThis.fetch;
+  let fetchCalls = 0;
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    return new Response('unexpected', { status: 200 });
+  };
+  try {
+    const response = createResponse();
+    await app.routes.get('POST /config/diagnostics/playback')?.({
+      headers: {}, body: { action: 'routealexa' }, query: {},
+    }, response);
+    assert.equal(response.statusCode, 500);
+    assert.equal(fetchCalls, 0);
+    assert.equal(response.body.error, 'This operation is disabled in Sonuvi rehearsal mode');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

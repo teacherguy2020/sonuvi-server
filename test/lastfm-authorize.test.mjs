@@ -10,6 +10,7 @@ import {
   lastfmAuthorizationUrl,
   requestLastfmToken,
   resolveLastfmCredentials,
+  resolveLastfmEnvPath,
 } from '../scripts/lastfm-authorize.mjs';
 
 test('authorization URL uses the existing API key without including the secret', () => {
@@ -70,6 +71,52 @@ test('clean authorization resolution loads Sonuvi credentials from .env without 
     else process.env.LASTFM_API_SECRET = previousSecret;
     await fs.rm(directory, { recursive: true, force: true });
   }
+});
+
+test('Last.fm authorization follows the root-managed secret boundary in immutable mode', () => {
+  const env = {
+    SONUVI_STATE_ROOT: '/srv/sonuvi/shared',
+    SONUVI_CONFIG_ROOT: '/srv/sonuvi/shared/config',
+  };
+  assert.equal(
+    resolveLastfmEnvPath({ cwd: '/opt/sonuvi/releases/candidate', env }),
+    '/etc/sonuvi/lastfm.env',
+  );
+  assert.equal(
+    resolveLastfmEnvPath({
+      cwd: '/opt/sonuvi/releases/candidate',
+      env: {
+        ...env,
+        SONUVI_SECRETS_ROOT: '/srv/sonuvi/secrets',
+        LASTFM_ENV_FILE: '/srv/sonuvi/secrets/credentials.env',
+      },
+    }),
+    '/srv/sonuvi/secrets/credentials.env',
+  );
+  assert.throws(
+    () => resolveLastfmEnvPath({ cwd: '/opt/sonuvi/releases/candidate', env: { ...env, LASTFM_ENV_FILE: 'credentials.env' } }),
+    /LASTFM_ENV_FILE must be an absolute path/,
+  );
+  assert.throws(
+    () => resolveLastfmEnvPath({ cwd: '/opt/sonuvi/releases/candidate', env: { ...env, LASTFM_ENV_FILE: '/tmp/outside.env' } }),
+    /LASTFM_ENV_FILE must remain beneath SONUVI_SECRETS_ROOT/,
+  );
+  assert.equal(
+    resolveLastfmEnvPath({
+      cwd: '/opt/sonuvi/releases/candidate',
+      env: { ...env, SONUVI_SECRETS_ROOT: '/srv/sonuvi/secrets' },
+      envPath: '/srv/sonuvi/secrets/alternate-lastfm.env',
+    }),
+    '/srv/sonuvi/secrets/alternate-lastfm.env',
+  );
+  assert.throws(
+    () => resolveLastfmEnvPath({
+      cwd: '/opt/sonuvi/releases/candidate',
+      env,
+      envPath: '/tmp/outside.env',
+    }),
+    /Last.fm authorization path must remain beneath SONUVI_SECRETS_ROOT/,
+  );
 });
 
 test('Last.fm auth signature and token exchange return only the session identity', async () => {

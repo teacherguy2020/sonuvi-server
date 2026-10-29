@@ -4,12 +4,14 @@ import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { MPD_HOST } from '../config.mjs';
+import { runtimeStatePaths } from '../lib/runtime-state-paths.mjs';
 
 const execFileP = promisify(execFile);
 
-const CACHE_FILE = path.resolve(process.cwd(), 'data', 'animated-art-cache.json');
-const DISCOVERY_FILE = path.resolve(process.cwd(), 'data', 'animated-art-discovery.json');
-const H264_DIR = path.resolve(process.cwd(), 'data', 'animated-art-h264');
+const STATE_PATHS = runtimeStatePaths();
+const CACHE_FILE = STATE_PATHS.animatedArtCachePath;
+const DISCOVERY_FILE = STATE_PATHS.animatedArtDiscoveryPath;
+const H264_DIR = STATE_PATHS.animatedArtH264Dir;
 const H264_MAX_FILES = Math.max(1, Number(process.env.ANIMATED_ART_H264_MAX_FILES || '250'));
 const H264_MAX_BYTES = Math.max(1, Number(process.env.ANIMATED_ART_H264_MAX_BYTES || String(2 * 1024 * 1024 * 1024)));
 

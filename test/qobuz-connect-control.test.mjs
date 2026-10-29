@@ -93,3 +93,25 @@ test('Qobuz release controller does not confirm until the restarted receiver is 
 
   assert.deepEqual(await controller.release(), { accepted: true, confirmed: false });
 });
+
+test('Qobuz release controller fails closed in immutable mode before a remote command starts', async () => {
+  let calls = 0;
+  const controller = createQobuzConnectController({
+    sshUser: 'sonuvi-moode',
+    sshHost: 'moode.example.invalid',
+    env: {
+      SONUVI_STATE_ROOT: '/opt/sonuvi/shared',
+      SONUVI_SECRETS_ROOT: '/etc/sonuvi',
+    },
+    runCommand: async () => {
+      calls += 1;
+      return { stdout: 'unexpected' };
+    },
+  });
+
+  await assert.rejects(
+    () => controller.release(),
+    (error) => error?.code === 'SONUVI_SSH_TRANSPORT_UNAUTHORIZED',
+  );
+  assert.equal(calls, 0);
+});

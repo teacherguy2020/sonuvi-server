@@ -3,6 +3,8 @@ import fs from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { MPD_HOST, MOODE_SSH_HOST, MOODE_SSH_USER } from '../config.mjs';
+import { runtimeStatePaths } from '../lib/runtime-state-paths.mjs';
+import { saveStoredPlaylist } from '../lib/mpd-stored-playlist.mjs';
 
 const execFileP = promisify(execFile);
 
@@ -13,7 +15,7 @@ function safePlaylistName(name = '') {
 }
 
 export function registerConfigQueueWizardApplyRoute(app, deps) {
-  const { requireTrackKey } = deps;
+  const { requireTrackKey, mpdQueryRaw } = deps;
 
   app.post('/config/queue-wizard/add-to-playlist', async (req, res) => {
     try {
@@ -81,6 +83,7 @@ export function registerConfigQueueWizardApplyRoute(app, deps) {
       const trackMeta = Array.isArray(req.body?.trackMeta) ? req.body.trackMeta : [];
 
       const playlistName = String(req.body?.playlistName || '').trim();
+      if (saveOnly && !playlistName) return res.status(400).json({ ok: false, playlistSaved: false, error: 'playlistName is required' });
       if (!tracks.length) return res.status(400).json({ ok: false, error: 'tracks[] is required' });
 
       const mpdHost = String(MPD_HOST || 'moode.local');
@@ -163,7 +166,7 @@ export function registerConfigQueueWizardApplyRoute(app, deps) {
             .map((f) => ({ file: f, ...(metaByFile.get(f) || {}) }))
             .filter((x) => x.file && (x.stationName || x.genre));
           if (entries.length) {
-            const outPath = path.resolve(process.cwd(), 'data', 'radio-queue-map.json');
+            const outPath = runtimeStatePaths().radioQueueMapPath;
             await fs.mkdir(path.dirname(outPath), { recursive: true });
             await fs.writeFile(outPath, JSON.stringify({ ts: Date.now(), entries }, null, 2), 'utf8');
           }
@@ -194,28 +197,22 @@ export function registerConfigQueueWizardApplyRoute(app, deps) {
 
       let playlistSaved = false;
       let playlistError = '';
+      let playlistWarnings = [];
+      let recoveryPlaylists = [];
       if (playlistName) {
         if (saveOnly) {
           try {
-            if (/[\/\\]/.test(String(playlistName || ''))) throw new Error('playlistName cannot contain / or \\');
-            const moodeUser = String(MOODE_SSH_USER || 'moode');
-            const moodeHost = String(MOODE_SSH_HOST || MPD_HOST || 'moode.local');
-            const localTmp = path.join('/tmp', `qw-saveonly-${process.pid}-${Date.now()}.m3u`);
-            const remoteTmp = `/tmp/qw-saveonly-${process.pid}-${Date.now()}.m3u`;
-            const remoteDst = `/var/lib/mpd/playlists/${String(playlistName || '').trim()}.m3u`;
-            await fs.writeFile(localTmp, `${tracks.join('\n')}\n`, 'utf8');
-            await execFileP('scp', ['-q', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=6', localTmp, `${moodeUser}@${moodeHost}:${remoteTmp}`], { timeout: 20000 });
-            const sudoCmd = `sudo -n bash -lc 'set -euo pipefail; mkdir -p /var/lib/mpd/playlists; mv -f -- ${JSON.stringify(remoteTmp)} ${JSON.stringify(remoteDst)}; chown mpd:audio -- ${JSON.stringify(remoteDst)} 2>/dev/null || true; chmod 0664 -- ${JSON.stringify(remoteDst)} 2>/dev/null || true'`;
-            const nonSudoCmd = `bash -lc 'set -euo pipefail; mkdir -p /var/lib/mpd/playlists; mv -f -- ${JSON.stringify(remoteTmp)} ${JSON.stringify(remoteDst)}; chmod 0664 -- ${JSON.stringify(remoteDst)} 2>/dev/null || true'`;
-            try {
-              await execFileP('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=6', `${moodeUser}@${moodeHost}`, sudoCmd], { timeout: 20000 });
-            } catch {
-              await execFileP('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=6', `${moodeUser}@${moodeHost}`, nonSudoCmd], { timeout: 20000 });
-            }
-            await fs.unlink(localTmp).catch(() => {});
-            playlistSaved = true;
+            const result = await saveStoredPlaylist({ query: mpdQueryRaw, playlistName, tracks });
+            playlistSaved = result.playlistSaved;
+            playlistWarnings = result.warnings;
+            recoveryPlaylists = result.recoveryPlaylists;
           } catch (e) {
-            playlistError = e?.message || String(e);
+            return res.status(e.status || 502).json({
+              ok: false, playlistSaved: false, playlistError: e.message,
+              error: e.message, code: e.code || 'PLAYLIST_SAVE_FAILED',
+              recoveryPlaylists: e.recoveryPlaylists || [],
+              added: 0, playStarted: false, didCrop: false, didClear: false,
+            });
           }
         } else {
           try {
@@ -232,7 +229,10 @@ export function registerConfigQueueWizardApplyRoute(app, deps) {
 
       let collageGenerated = false;
       let collageError = '';
-      if (generateCollage && playlistName && playlistSaved) {
+      if (saveOnly && generateCollage && playlistSaved) {
+        collageError = 'Playlist saved; remote cover upload is unavailable. The existing cover was left unchanged.';
+      }
+      if (!saveOnly && generateCollage && playlistName && playlistSaved) {
         const moodeUser = String(MOODE_SSH_USER || 'moode');
         const moodeHost = String(MOODE_SSH_HOST || MPD_HOST || 'moode.local');
         const coverDir = String(process.env.MOODE_PLAYLIST_COVER_DIR || '/var/local/www/imagesw/playlist-covers');
@@ -323,6 +323,8 @@ export function registerConfigQueueWizardApplyRoute(app, deps) {
         playStarted,
         playlistSaved,
         playlistError,
+        playlistWarnings,
+        recoveryPlaylists,
         collageGenerated,
         collageError,
       });

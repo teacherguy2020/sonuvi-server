@@ -192,7 +192,7 @@
     motionCache.runtimeKeyPromise = fetch(`${api}/config/runtime`, { cache: 'no-store' })
       .then((r) => r.json().catch(() => ({})))
       .then((j) => {
-        motionCache.runtimeKey = String(j?.config?.trackKey || '').trim();
+        motionCache.runtimeKey = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
         return motionCache.runtimeKey;
       })
       .catch(() => '')

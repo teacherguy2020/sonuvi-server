@@ -6,21 +6,19 @@ import { MPD_HOST, MOODE_SSH_HOST, MOODE_SSH, MPD_PLAYLIST_DIR } from '../config
 import { getBrowseIndex } from '../lib/browse-index.mjs';
 import { radioDisplayName } from '../lib/radio-display.mjs';
 import { isPodcastPlaylist } from '../lib/playlist-classification.mjs';
+import { runtimeStatePaths } from '../lib/runtime-state-paths.mjs';
+import { readMoodeRadioCatalog, filterRadioCatalog } from '../lib/moode-radio-catalog.mjs';
 
 const execFileP = promisify(execFile);
 const RADIO_DB_SEP = '__NPSEP__';
-const RADIO_PRESETS_PATH = path.resolve(process.cwd(), 'data/radio-queue-presets.json');
-const PLAYLISTS_CACHE_PATH = path.resolve(process.cwd(), 'data/playlists-index.json');
+const STATE_PATHS = runtimeStatePaths();
+const RADIO_PRESETS_PATH = STATE_PATHS.radioQueuePresetsPath;
+const PLAYLISTS_CACHE_PATH = STATE_PATHS.playlistIndexPath;
 
 const OPTIONS_CACHE_TTL_MS = 5 * 60_000;
 const PLAYLISTS_CACHE_TTL_MS = 45_000;
 let optionsCache = { ts: 0, host: '', payload: null, inflight: null };
 let playlistsCache = { ts: 0, host: '', payload: null, inflight: null, diskLoaded: false };
-
-function sqlQuoteLike(v = '') {
-  const s = String(v || '').replace(/'/g, "''");
-  return `'%${s}%'`;
-}
 
 function shQuoteArg(s) {
   const v = String(s ?? '');
@@ -396,7 +394,7 @@ async function saveMoodeRadioLogo({ stationName, faviconUrl }) {
   if (!name || !fav) return { ok: false, reason: 'missing name or favicon' };
 
   const host = String(MOODE_SSH_HOST || MPD_HOST || 'moode.local');
-  const localTmpDir = path.resolve(process.cwd(), 'tmp');
+  const localTmpDir = runtimeStatePaths().temporaryDir;
   await fs.mkdir(localTmpDir, { recursive: true });
 
   const base = `rb_logo_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -453,7 +451,8 @@ async function saveMoodeRadioLogo({ stationName, faviconUrl }) {
 }
 
 export function registerConfigQueueWizardBasicRoutes(app, deps) {
-  const { requireTrackKey } = deps;
+  const { requireTrackKey, readRadioCatalog = readMoodeRadioCatalog } = deps;
+  const catalogUnavailable = res => res.status(503).json({ ok: false, code: 'RADIO_CATALOG_UNAVAILABLE', error: 'Radio catalog unavailable. Check the moOde connection and retry.' });
 
   // --- queue wizard options (artists/genres) ---
   app.get('/config/queue-wizard/options', async (req, res) => {
@@ -781,21 +780,9 @@ export function registerConfigQueueWizardBasicRoutes(app, deps) {
         .filter((s) => !hqOnly || isHq(s.codec, s.bitrate));
 
       if (excludeExisting) {
-        const rawExisting = await queryMoodeRadioDb('select station,name from cfg_radio;');
-        const existingRows = String(rawExisting || '')
-          .split(/\r?\n/)
-          .map((ln) => String(ln || '').trim())
-          .filter(Boolean)
-          .map((ln) => {
-            const [st = '', nm = ''] = ln.split(RADIO_DB_SEP);
-            return {
-              station: String(st || '').trim(),
-              name: String(nm || '').trim().toLowerCase(),
-              key: stationKey(st),
-              host: stationHost(st),
-            };
-          })
-          .filter((r) => r.station);
+        const existingRows = (await readRadioCatalog()).map(({ station, name }) => ({
+          station: station.trim(), name: name.trim().toLowerCase(), key: stationKey(station), host: stationHost(station),
+        }));
 
         const keySet = new Set(existingRows.map((r) => r.key).filter(Boolean));
         const hostNameSet = new Set(existingRows.map((r) => `${r.host}::${r.name}`).filter((x) => !x.startsWith('::')));
@@ -813,6 +800,7 @@ export function registerConfigQueueWizardBasicRoutes(app, deps) {
       stations = stations.slice(0, limit);
       return res.json({ ok: true, count: stations.length, stations });
     } catch (e) {
+      if (e?.code === 'RADIO_CATALOG_UNAVAILABLE') return catalogUnavailable(res);
       return res.status(500).json({ ok: false, error: e?.message || String(e) });
     }
   });
@@ -988,10 +976,10 @@ export function registerConfigQueueWizardBasicRoutes(app, deps) {
   app.get('/config/queue-wizard/radio-options', async (req, res) => {
     try {
       if (!requireTrackKey(req, res)) return;
-      const raw = await queryMoodeRadioDb('select genre from cfg_radio order by genre;');
+      const catalog = await readRadioCatalog();
       const genresByKey = new Map();
-      for (const ln of String(raw || '').split(/\r?\n/)) {
-        const gRaw = String(ln || '').trim();
+      for (const row of catalog) {
+        const gRaw = row.genre.trim();
         if (!gRaw) continue;
         for (const g of gRaw.split(/[;,|/]/).map((x) => String(x || '').trim()).filter(Boolean)) {
           const key = String(g || '').toLowerCase();
@@ -1004,16 +992,14 @@ export function registerConfigQueueWizardBasicRoutes(app, deps) {
         genres: Array.from(genresByKey.values()).sort((a,b)=>a.localeCompare(b, undefined, { sensitivity:'base'})),
       });
     } catch (e) {
-      return res.status(500).json({ ok: false, error: e?.message || String(e) });
+      return catalogUnavailable(res);
     }
   });
 
   app.get('/config/queue-wizard/radio-favorites', async (req, res) => {
     try {
       if (!requireTrackKey(req, res)) return;
-      const out = await queryMoodeRadioDb("select station,name,genre,bitrate,format,type from cfg_radio where type='f' order by name;");
-      const favorites = String(out || '').split(/\r?\n/).map((ln)=>String(ln||'').trim()).filter(Boolean).map((ln)=>{
-        const [station='', name='', genre='', bitrate='', format='', type=''] = ln.split(RADIO_DB_SEP);
+      const favorites = (await readRadioCatalog()).filter(row => row.type.toLowerCase() === 'f').map(({ station, name, genre, bitrate, format, type }) => {
         return {
           file: String(station || '').trim(),
           stationName: radioDisplayName(name),
@@ -1025,7 +1011,7 @@ export function registerConfigQueueWizardBasicRoutes(app, deps) {
       }).filter((x)=>x.file);
       return res.json({ ok: true, count: favorites.length, favorites });
     } catch (e) {
-      return res.status(500).json({ ok: false, error: e?.message || String(e) });
+      return catalogUnavailable(res);
     }
   });
 
@@ -1114,36 +1100,10 @@ export function registerConfigQueueWizardBasicRoutes(app, deps) {
       const hqOnly = !!req.body?.hqOnly;
       const maxStations = Math.max(1, Math.min(2000, Number(req.body?.maxStations || 500)));
 
-      const where = [];
-      if (favoritesOnly) where.push("type='f'");
-      if (hqOnly) {
-        // Keep "High quality" strict and codec-aware:
-        // - Lossless codecs always qualify
-        // - Opus qualifies at >=128 kbps
-        // - MP3/AAC (and unknown fallback) require >=320 kbps
-        const br = "cast(replace(replace(lower(bitrate),'kbps',''),' ','') as integer)";
-        const fmt = "upper(coalesce(format,''))";
-        where.push(`(
-          ${fmt} like '%FLAC%' OR ${fmt} like '%ALAC%' OR ${fmt} like '%WAV%' OR ${fmt} like '%AIFF%' OR ${fmt} like '%PCM%'
-          OR (${fmt} like '%OPUS%' AND ${br} >= 128)
-          OR (((${fmt} like '%MP3%') OR (${fmt} like '%AAC%') OR ${fmt} = '') AND ${br} >= 320)
-        )`);
-      }
-      if (genres.length) {
-        const likes = genres.map((g) => `genre like ${sqlQuoteLike(g)}`).join(' OR ');
-        where.push(`(${likes})`);
-      }
       const favoriteStations = Array.isArray(req.body?.favoriteStations)
-        ? req.body.favoriteStations.map((x)=>String(x||'').trim()).filter(Boolean)
-        : [];
-      if (favoriteStations.length) {
-        const ors = favoriteStations.map((u) => `station=${shQuoteArg(u)}`).join(' OR ');
-        where.push(`(${ors})`);
-      }
-      const sql = `select station,name,genre,bitrate,format,type from cfg_radio ${where.length ? 'where ' + where.join(' AND ') : ''} order by name limit ${maxStations};`;
-      const out = await queryMoodeRadioDb(sql);
-      const tracks = String(out || '').split(/\r?\n/).map((ln)=>String(ln||'').trim()).filter(Boolean).map((ln)=>{
-        const [station='', name='', genre='', bitrate='', format='', type=''] = ln.split(RADIO_DB_SEP);
+        ? req.body.favoriteStations.map(x => String(x || '').trim()).filter(Boolean) : [];
+      const catalog = filterRadioCatalog(await readRadioCatalog(), { genres, favoritesOnly, hqOnly, favoriteStations, maxStations });
+      const tracks = catalog.map(({ station, name, genre, bitrate, format, type }) => {
         const logoName = String(name || '').trim();
         const stationName = radioDisplayName(logoName) || 'Radio Station';
         const file = String(station || '').trim();
@@ -1168,7 +1128,7 @@ export function registerConfigQueueWizardBasicRoutes(app, deps) {
 
       return res.json({ ok: true, count: tracks.length, tracks });
     } catch (e) {
-      return res.status(500).json({ ok: false, error: e?.message || String(e) });
+      return catalogUnavailable(res);
     }
   });
 

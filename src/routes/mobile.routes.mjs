@@ -5,6 +5,7 @@ import QRCode from 'qrcode';
 
 import { getBrowseIndex } from '../lib/browse-index.mjs';
 import { log } from '../lib/log.mjs';
+import { runtimeStatePaths } from '../lib/runtime-state-paths.mjs';
 import {
   createMobileMediaTicket,
   createMobileRadioTicket,
@@ -578,7 +579,7 @@ export function registerMobileRoutes(app, deps = {}) {
   const enrollmentCode = text(deps.enrollmentCode);
   const mpdHost = text(deps.mpdHost) || 'moode.local';
   const mobileBaseUrl = text(deps.mobileBaseUrl);
-  const mobileTrackCacheDir = text(deps.mobileTrackCacheDir) || '/tmp/now-playing/mobile-track-cache';
+  const mobileTrackCacheDir = text(deps.mobileTrackCacheDir) || runtimeStatePaths().mobileTrackCacheDir;
   const transcodeTracks = deps.transcodeTracks !== false;
   const musicLibraryRoot = text(deps.musicLibraryRoot) ? path.resolve(text(deps.musicLibraryRoot)) : '';
   const videoCatalog = deps.videoCatalog
@@ -2008,8 +2009,11 @@ export function registerMobileRoutes(app, deps = {}) {
         hqOnly: Boolean(hqOnly),
         maxStations: 2000,
       },
-    });
-    const tracks = Array.isArray(result?.json?.tracks) ? result.json.tracks : [];
+    }).catch(() => ({ ok: false }));
+    if (result?.ok === false || result?.json?.ok === false || !Array.isArray(result?.json?.tracks)) {
+      const error = new Error('Radio catalog unavailable. Please retry.'); error.code = 'RADIO_CATALOG_UNAVAILABLE'; throw error;
+    }
+    const tracks = result.json.tracks;
     return tracks.map((station) => {
       const file = text(station?.file);
       if (!file) return null;
@@ -2033,7 +2037,7 @@ export function registerMobileRoutes(app, deps = {}) {
         isHighQuality: hq,
         // The preview already came from moOde's station catalog, so its logo
         // name is more reliable than asking the artwork endpoint to reverse
-        // resolve the stream URL through a second SSH-backed catalog lookup.
+        // resolve the stream URL through a second catalog lookup.
         // Keep the stream URL opaque for playback, and use the catalog spelling
         // for artwork (including provider prefixes omitted from display text).
         artworkUrl: artworkUrlFor(req, {
@@ -2294,6 +2298,7 @@ export function registerMobileRoutes(app, deps = {}) {
     try {
       return await handler(req, res);
     } catch (error) {
+      if (error?.code === 'RADIO_CATALOG_UNAVAILABLE') return errorResponse(res, 503, 'Radio catalog unavailable. Please retry.', error.code);
       log.error('[mobile-api] request failed', {
         method: text(req?.method) || 'UNKNOWN',
         path: text(req?.originalUrl || req?.url) || '/',
@@ -2891,7 +2896,8 @@ export function registerMobileRoutes(app, deps = {}) {
 
   app.get('/v1/mobile/radio/options', asyncRoute(async (req, res) => {
     if (!requireSession(req, res)) return;
-    const result = await internalFeatureRequest('/config/queue-wizard/radio-options');
+    const result = await internalFeatureRequest('/config/queue-wizard/radio-options').catch(() => ({ ok: false }));
+    if (result?.ok === false || result?.json?.ok === false || !Array.isArray(result?.json?.genres)) return errorResponse(res, 503, 'Radio catalog unavailable. Please retry.', 'RADIO_CATALOG_UNAVAILABLE');
     return res.json({ ok: true, genres: Array.isArray(result?.json?.genres) ? result.json.genres.map(text).filter(Boolean) : [] });
   }));
 
@@ -3268,7 +3274,14 @@ export function registerMobileRoutes(app, deps = {}) {
         previewCoverMimeType: text(req?.body?.previewCoverMimeType) || 'image/jpeg',
       },
     });
-    if (result?.ok === false) return errorResponse(res, Number(result.status) || 502, result?.json?.error || 'queue wizard apply failed');
+    if (result?.ok === false) {
+      if (req?.body?.saveOnly) return res.status(Number(result.status) || 502).json({
+        ok: false, error: result?.json?.error || 'playlist save failed',
+        code: result?.json?.code || 'PLAYLIST_SAVE_FAILED',
+        recoveryPlaylists: Array.isArray(result?.json?.recoveryPlaylists) ? result.json.recoveryPlaylists : [],
+      });
+      return errorResponse(res, Number(result.status) || 502, result?.json?.error || 'queue wizard apply failed');
+    }
     return res.json({
       ok: true,
       mode: result?.json?.mode || req?.body?.mode || 'replace',
@@ -3277,6 +3290,8 @@ export function registerMobileRoutes(app, deps = {}) {
       playStarted: Boolean(result?.json?.playStarted),
       playlistSaved: Boolean(result?.json?.playlistSaved),
       playlistError: text(result?.json?.playlistError),
+      playlistWarnings: Array.isArray(result?.json?.playlistWarnings) ? result.json.playlistWarnings : [],
+      recoveryPlaylists: Array.isArray(result?.json?.recoveryPlaylists) ? result.json.recoveryPlaylists : [],
       collageGenerated: Boolean(result?.json?.collageGenerated),
       collageError: text(result?.json?.collageError),
     });

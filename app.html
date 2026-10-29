@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
+  <script src="scripts/runtime-auth.js?v=20261024-h2"></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -1120,7 +1121,7 @@
         if (!runtimeTrackKey) {
           const rr = await fetch(`${base}/config/runtime`, { cache:'no-store' });
           const rj = await rr.json().catch(() => ({}));
-          runtimeTrackKey = String(rj?.config?.trackKey || '').trim();
+          runtimeTrackKey = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
         }
         const payload = Object.assign({ action }, extra || {});
         const r = await fetch(`${base}/config/diagnostics/playback`, {
@@ -1212,7 +1213,7 @@
           if (!runtimeTrackKey) {
             const rr = await fetch(`${base}/config/runtime`, { cache:'no-store' });
             const rj = await rr.json().catch(() => ({}));
-            runtimeTrackKey = String(rj?.config?.trackKey || '').trim();
+            runtimeTrackKey = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
           }
           const r = await fetch(`${base}/config/queue-wizard/radio-presets`, {
             method: 'POST',
@@ -1255,7 +1256,7 @@
           if (!runtimeTrackKey) {
             const rr = await fetch(`${base}/config/runtime`, { cache:'no-store' });
             const rj = await rr.json().catch(() => ({}));
-            runtimeTrackKey = String(rj?.config?.trackKey || '').trim();
+            runtimeTrackKey = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
           }
 
           const headers = runtimeTrackKey ? { 'x-track-key': runtimeTrackKey } : {};
@@ -1910,7 +1911,7 @@
           if (!runtimeTrackKey) {
             const rr = await fetch(`${base}/config/runtime`, { cache:'no-store' });
             const rj = await rr.json().catch(() => ({}));
-            runtimeTrackKey = String(rj?.config?.trackKey || '').trim();
+            runtimeTrackKey = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
           }
           const { r, j } = await fetchJsonWithTimeout(`${base}/config/runtime`, {
             method: 'POST',
@@ -1945,7 +1946,7 @@
           if (!runtimeTrackKey) {
             const rr = await fetch(`${base}/config/runtime`, { cache:'no-store' });
             const rj = await rr.json().catch(() => ({}));
-            runtimeTrackKey = String(rj?.config?.trackKey || '').trim();
+            runtimeTrackKey = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
           }
           const { r, j } = await fetchJsonWithTimeout(`${base}/config/moode/display/status`, {
             headers: { ...(runtimeTrackKey ? { 'x-track-key': runtimeTrackKey } : {}) },
@@ -1969,7 +1970,7 @@
           if (!runtimeTrackKey) {
             const rr = await fetch(`${base}/config/runtime`, { cache:'no-store' });
             const rj = await rr.json().catch(() => ({}));
-            runtimeTrackKey = String(rj?.config?.trackKey || '').trim();
+            runtimeTrackKey = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
           }
           const [{ r, j }, meter] = await Promise.all([
             fetchJsonWithTimeout(`${base}/config/moode/peppyalsa/status`, {
@@ -2018,7 +2019,7 @@
           if (!runtimeTrackKey) {
             const rr = await fetch(`${base}/config/runtime`, { cache:'no-store' });
             const rj = await rr.json().catch(() => ({}));
-            runtimeTrackKey = String(rj?.config?.trackKey || '').trim();
+            runtimeTrackKey = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
           }
           await fetchJsonWithTimeout(`${base}/config/moode/peppyalsa/ensure`, {
             method: 'POST',
@@ -2042,7 +2043,7 @@
           if (!runtimeTrackKey) {
             const rr = await fetch(`${base}/config/runtime`, { cache:'no-store' });
             const rj = await rr.json().catch(() => ({}));
-            runtimeTrackKey = String(rj?.config?.trackKey || '').trim();
+            runtimeTrackKey = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
           }
           const { r, j } = await fetchJsonWithTimeout(`${base}/config/moode/display`, {
             method: 'POST',
@@ -2095,7 +2096,7 @@
           if (!runtimeTrackKey) {
             const rr = await fetch(`${base}/config/runtime`, { cache:'no-store' });
             const rj = await rr.json().catch(() => ({}));
-            runtimeTrackKey = String(rj?.config?.trackKey || '').trim();
+            runtimeTrackKey = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
           }
           const { r, j } = await fetchJsonWithTimeout(`${base}/config/moode/browser`, {
             method: 'POST',
@@ -2277,7 +2278,7 @@
           if (!runtimeTrackKey) {
             const rr = await fetch(`${base}/config/runtime`, { cache:'no-store' });
             const rj = await rr.json().catch(() => ({}));
-            runtimeTrackKey = String(rj?.config?.trackKey || '').trim();
+            runtimeTrackKey = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
           }
           // Persist last pushed profile explicitly (for bare /peppy.html?kiosk=1 resolution).
           await fetchJsonWithTimeout(`${base}/peppy/last-profile`, {
@@ -2359,7 +2360,7 @@
           if (!runtimeTrackKey) {
             const rr = await fetch(`${base}/config/runtime`, { cache:'no-store' });
             const rj = await rr.json().catch(() => ({}));
-            runtimeTrackKey = String(rj?.config?.trackKey || '').trim();
+            runtimeTrackKey = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
           }
           const { r, j } = await fetchJsonWithTimeout(`${base}/config/moode/browser-url/status`, {
             headers: { ...(runtimeTrackKey ? { 'x-track-key': runtimeTrackKey } : {}) },
@@ -2403,7 +2404,7 @@
         if (!runtimeTrackKey) {
           const rr = await fetch(`${base}/config/runtime`, { cache:'no-store' });
           const rj = await rr.json().catch(() => ({}));
-          runtimeTrackKey = String(rj?.config?.trackKey || '').trim();
+          runtimeTrackKey = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
         }
         await fetchJsonWithTimeout(`${base}/peppy/last-profile`, {
           method: 'POST',
@@ -2446,7 +2447,7 @@
           if (!runtimeTrackKey) {
             const rr = await fetch(`${base}/config/runtime`, { cache:'no-store' });
             const rj = await rr.json().catch(() => ({}));
-            runtimeTrackKey = String(rj?.config?.trackKey || '').trim();
+            runtimeTrackKey = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
           }
           const { r, j } = await fetchJsonWithTimeout(`${base}/config/restart-api`, {
             method: 'POST',
@@ -2475,7 +2476,7 @@
           if (!runtimeTrackKey) {
             const rr = await fetch(`${base}/config/runtime`, { cache:'no-store' });
             const rj = await rr.json().catch(() => ({}));
-            runtimeTrackKey = String(rj?.config?.trackKey || '').trim();
+            runtimeTrackKey = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
           }
           const { r, j } = await fetchJsonWithTimeout(`${base}/config/runtime`, {
             method: 'POST',
@@ -2512,7 +2513,7 @@
           if (!runtimeTrackKey) {
             const rr = await fetch(`${base}/config/runtime`, { cache:'no-store' });
             const rj = await rr.json().catch(() => ({}));
-            runtimeTrackKey = String(rj?.config?.trackKey || '').trim();
+            runtimeTrackKey = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
           }
           const { r, j } = await fetchJsonWithTimeout(`${base}/config/moode/reboot`, {
             method: 'POST',
@@ -2542,7 +2543,7 @@
           if (!runtimeTrackKey) {
             const rr = await fetch(`${base}/config/runtime`, { cache:'no-store' });
             const rj = await rr.json().catch(() => ({}));
-            runtimeTrackKey = String(rj?.config?.trackKey || '').trim();
+            runtimeTrackKey = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
           }
           const { r, j } = await fetchJsonWithTimeout(`${base}/config/restart-services`, {
             method: 'POST',
@@ -2754,7 +2755,7 @@
           if (!runtimeTrackKey) {
             const rr = await fetch(`${base}/config/runtime`, { cache:'no-store' });
             const rj = await rr.json().catch(() => ({}));
-            runtimeTrackKey = String(rj?.config?.trackKey || '').trim();
+            runtimeTrackKey = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
           }
           const headers = runtimeTrackKey ? { 'x-track-key': runtimeTrackKey } : {};
           const [optR, plR] = await Promise.all([
@@ -2887,7 +2888,7 @@
         if (!runtimeTrackKey) {
           const rr = await fetch(`${base}/config/runtime`, { cache:'no-store' });
           const rj = await rr.json().catch(() => ({}));
-          runtimeTrackKey = String(rj?.config?.trackKey || '').trim();
+          runtimeTrackKey = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
         }
         let tracks = [];
         if (String(type || '') === 'Track') {
@@ -2915,7 +2916,7 @@
           if (!runtimeTrackKey) {
             const rr = await fetch(`${base}/config/runtime`, { cache:'no-store' });
             const rj = await rr.json().catch(() => ({}));
-            runtimeTrackKey = String(rj?.config?.trackKey || '').trim();
+            runtimeTrackKey = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
           }
           const headers = { 'Content-Type': 'application/json', ...(runtimeTrackKey ? { 'x-track-key': runtimeTrackKey } : {}) };
           const tracks = await resolveHeroQuickTracks(type, value);
@@ -3321,7 +3322,7 @@
           if (!runtimeTrackKey) {
             const rr = await fetch(`${base}/config/runtime`, { cache:'no-store' });
             const rj = await rr.json().catch(() => ({}));
-            runtimeTrackKey = String(rj?.config?.trackKey || '').trim();
+            runtimeTrackKey = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
           }
           await fetchJsonWithTimeout(`${base}/config/moode/native-peppy`, {
             method: 'POST',
@@ -3406,7 +3407,7 @@
         if (runtimeTrackKey) return runtimeTrackKey;
         const rr = await fetch(`${base}/config/runtime`, { cache:'no-store' });
         const rj = await rr.json().catch(() => ({}));
-        runtimeTrackKey = String(rj?.config?.trackKey || '').trim();
+        runtimeTrackKey = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
         return runtimeTrackKey;
       }
 
@@ -4243,7 +4244,7 @@
           if (!runtimeTrackKey) {
             const rr = await fetch(`${base}/config/runtime`, { cache:'no-store' });
             const rj = await rr.json().catch(() => ({}));
-            runtimeTrackKey = String(rj?.config?.trackKey || '').trim();
+            runtimeTrackKey = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
           }
           const r = await fetch(`${base}/config/diagnostics/queue`, {
             cache:'no-store',
@@ -4504,7 +4505,7 @@
         try {
           const rt = await fetch(`${base}/config/runtime`, { cache:'no-store' });
           const rj = await rt.json().catch(()=>({}));
-          const rk = String(rj?.config?.trackKey || '').trim();
+          const rk = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
           const h = rk ? { 'x-track-key': rk } : {};
           await fetch(`${base}/config/browse/stats`, { cache:'no-store', headers: h }).catch(()=>null);
           await fetch(`${base}/config/browse/artists?offset=0&limit=120`, { cache:'no-store', headers: h }).catch(()=>null);

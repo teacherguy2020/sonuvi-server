@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 
 export function registerPodcastEpisodeRoutes(app, deps) {
   const {
+    capabilities,
     normUrl,
     readSubs,
     rebuildPodcastLocalIndex,
@@ -14,9 +15,12 @@ export function registerPodcastEpisodeRoutes(app, deps) {
     stripQueryHash,
     yyyyMmDd,
   } = deps;
+  const assertMutation = (capability) => capabilities?.assertExternalMutation(`podcasts.${capability}`);
+  const assertRead = (capability) => capabilities?.assertExternalRead(`podcasts.${capability}`);
 
   app.post('/podcasts/_debug/rebuild-local', async (req, res) => {
     try {
+      assertMutation('rebuild-local');
       const rss = normUrl(req.body?.rss);
       if (!rss) return res.status(400).json({ ok: false, error: 'Missing/invalid rss' });
 
@@ -34,6 +38,7 @@ export function registerPodcastEpisodeRoutes(app, deps) {
 
   app.get('/podcasts/episodes/status', async (req, res) => {
     try {
+      assertMutation('episode-status');
       const rss = normUrl(req.query?.rss);
       const limit = Math.max(1, Math.min(200, Number(req.query?.limit || 100)));
 
@@ -93,6 +98,7 @@ export function registerPodcastEpisodeRoutes(app, deps) {
 
   app.post('/podcasts/episodes/list', async (req, res) => {
     try {
+      assertRead('episode-list');
       const rss = normUrl(req.body?.rss);
       if (!rss) return res.status(400).json({ ok: false, error: 'Missing/invalid rss' });
 
@@ -286,6 +292,7 @@ export function registerPodcastEpisodeRoutes(app, deps) {
     const errp = (...a) => console.error(`[episodes/delete][${reqId}]`, ...a);
 
     try {
+      assertMutation('episode-delete');
       const { rss, episodeUrls } = req.body || {};
       if (!rss || !Array.isArray(episodeUrls) || episodeUrls.length === 0) {
         return res.status(400).json({ ok: false, error: 'Missing rss or episodeUrls[]' });

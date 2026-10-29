@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { runtimeCapabilities } from './runtime-capabilities.mjs';
 
 const DEFAULT_META_TIMEOUT_MS = 1200;
 const DEFAULT_STALE_MS = 15000;
@@ -158,6 +159,7 @@ function inactive(reason, { suppressMpdHistory = false } = {}) {
 export function createQobuzConnectSource({
   metaUrl,
   fetchImpl = globalThis.fetch,
+  capabilities = runtimeCapabilities(),
   timeoutMs = DEFAULT_META_TIMEOUT_MS,
   staleMs = DEFAULT_STALE_MS,
   now = () => Date.now(),
@@ -173,6 +175,7 @@ export function createQobuzConnectSource({
 
     try {
       if (!endpoint || typeof fetchImpl !== 'function') throw new Error('Qobuz metadata endpoint is unavailable');
+      capabilities.assertExternalRead('qobuz.metadata');
 
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), requestTimeoutMs);

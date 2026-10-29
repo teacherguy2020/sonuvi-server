@@ -1,0 +1,38 @@
+# H4A.1 candidate only. Do not install or enable without a separate H4 review.
+[Unit]
+Description=Sonuvi public web server (immutable release)
+After=network-online.target now-playing.service
+Wants=network-online.target
+Requires=now-playing.service
+ConditionPathExists=/opt/sonuvi/current/public/release.json
+
+[Service]
+Type=simple
+User=sonuvi
+Group=sonuvi
+WorkingDirectory=/opt/sonuvi/current
+Environment=SONUVI_PUBLIC_WEB_ROOT=/opt/sonuvi/current/public
+Environment=SONUVI_RELEASE_MANIFEST=/opt/sonuvi/current/release-manifest.json
+Environment=SONUVI_ACTIVATION_STATE=/opt/sonuvi/shared/checkpoints/release-activation-state.json
+Environment=SONUVI_WEB_PORT=8101
+ExecStartPre=/usr/bin/node /opt/sonuvi/current/scripts/verify-current-release.mjs
+ExecStart=/usr/bin/node /opt/sonuvi/current/scripts/serve-public-web.mjs
+Restart=on-failure
+RestartSec=3
+UMask=0077
+
+# The server has no write requirement. It serves only the generated H2 public
+# root and rejects dotfiles, traversal, directories, and non-allowlisted paths.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadOnlyPaths=/opt/sonuvi/current /opt/sonuvi/shared/checkpoints
+
+[Install]
+WantedBy=multi-user.target

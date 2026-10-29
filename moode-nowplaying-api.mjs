@@ -21,13 +21,17 @@
 // =========================
 // Imports (ESM / Node 16+)
 // =========================
+// Must remain the first local import: it installs rehearsal-only process,
+// network, and state-write boundaries before legacy route modules capture
+// Node built-in helpers.
+import './src/lib/rehearsal-runtime-boundary.mjs';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import http from 'node:http';
 import https from 'node:https';
 import crypto from 'node:crypto';
-import { exec, execFile, spawn } from 'node:child_process';
+import { exec, execFile, spawn as spawnNative } from 'node:child_process';
 import { promisify } from 'node:util';
 import { XMLParser } from 'fast-xml-parser';
 import os from "node:os";
@@ -163,6 +167,7 @@ function applyRadioMetadataHoldback({ stationKey = '', stationName = '', artist 
 
 async function appendRadioMetaEval(entry = {}) {
   if (!RADIO_META_EVAL_ENABLED) return;
+  mainRuntimeCapabilities?.assertBackgroundMutation('radio-metadata-eval');
   const station = String(entry?.stationName || '').trim().toLowerCase();
   const title = String(entry?.raw?.title || '').trim().toLowerCase();
   const artist = String(entry?.raw?.artist || '').trim().toLowerCase();
@@ -185,7 +190,34 @@ let _podOps;
 import express from 'express';
 import cors from 'cors';
 import sharp from 'sharp';
-const execFileP = promisify(execFile);
+let mainRuntimeCapabilities = null;
+const nativeExecFileP = promisify(execFile);
+
+// This is a process/network boundary for the monolithic API's remaining
+// legacy helpers. Rehearsal is deliberately stricter than production: unknown
+// child-process launches are treated as mutations, while direct fetches are
+// classified by HTTP method. Adapter-specific guards remain in place too.
+const execFileP = (...args) => {
+  const command = path.basename(String(args[0] || 'external-command'));
+  mainRuntimeCapabilities?.assertExternalMutation(`process.${command}`);
+  return nativeExecFileP(...args);
+};
+
+const spawn = (...args) => {
+  const command = path.basename(String(args[0] || 'external-command'));
+  mainRuntimeCapabilities?.assertExternalMutation(`process.${command}`);
+  return spawnNative(...args);
+};
+
+function fetch(input, init = {}) {
+  const method = String(init?.method || input?.method || 'GET').toUpperCase();
+  if (['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+    mainRuntimeCapabilities?.assertExternalRead('network.fetch');
+  } else {
+    mainRuntimeCapabilities?.assertExternalMutation('network.fetch');
+  }
+  return globalThis.fetch(input, init);
+}
 
 
 // ---- MUST BE BEFORE importing undici ----
@@ -217,11 +249,15 @@ import {
   APNS_ENVIRONMENT, MOBILE_PUSH_TOKENS_PATH,
   PUSHOVER_TOKEN, PUSHOVER_USER_KEY,
   HARMONY_HOST, HARMONY_PORT, HARMONY_DOMAIN, HARMONY_HUB_ID,
-  HARMONY_DENON_DEVICE_ID, HARMONY_INPUT_PHONO, HARMONY_INPUT_AUX1
+  HARMONY_DENON_DEVICE_ID, HARMONY_INPUT_PHONO, HARMONY_INPUT_AUX1,
+  RUNTIME_STATE_PATHS
 } from './src/config.mjs';
 import { log } from './src/lib/log.mjs';
 import { handleMobileJsonError } from './src/lib/mobile-http.mjs';
 import { execFileStrict } from './src/lib/exec.mjs';
+import { createRuntimeCapabilities, rehearsalReadOnlyMiddleware } from './src/lib/runtime-capabilities.mjs';
+import { publicRuntimeReleaseIdentity, resolveRuntimePublicWebRoot, resolveRuntimeReleaseIdentity } from './src/lib/release-runtime.mjs';
+import { hasConfiguredTrackKey, isAuthorizedTrackKey } from './src/lib/track-key-auth.mjs';
 import { radioDisplayName, radioStationNameForFile } from './src/lib/radio-display.mjs';
 import {
   isAirplayCurrentSong,
@@ -285,6 +321,9 @@ import { createAppleAboutService } from './src/services/apple-about.service.mjs'
 import { createAppleMusicTokenProvider } from './src/lib/apple-music-token.mjs';
 import { ABOUT_STATUS, createAboutResolver } from './src/services/about.service.mjs';
 
+const RUNTIME_CAPABILITIES = createRuntimeCapabilities();
+mainRuntimeCapabilities = RUNTIME_CAPABILITIES;
+
 const qobuzCacheConnect = createQobuzConnectSource({
   metaUrl: String(
     process.env.QOBUZ_META_URL
@@ -292,6 +331,7 @@ const qobuzCacheConnect = createQobuzConnectSource({
   ).trim(),
   timeoutMs: process.env.QOBUZ_META_TIMEOUT_MS || qobuzConnectDefaults.metaTimeoutMs,
   staleMs: process.env.QOBUZ_META_STALE_MS || qobuzConnectDefaults.staleMs,
+  capabilities: RUNTIME_CAPABILITIES,
 });
 
 // PiBuZ is the authoritative read-only source while the receiver owns an
@@ -303,23 +343,27 @@ const pibuzQobuzReadOnly = createPibuzQobuzAdapter({
   port: process.env.PIBUZ_PORT || 8182,
   timeoutMs: process.env.PIBUZ_TIMEOUT_MS || pibuzQobuzDefaults.timeoutMs,
   staleMs: process.env.PIBUZ_STALE_MS || pibuzQobuzDefaults.staleMs,
+  capabilities: RUNTIME_CAPABILITIES,
 });
 
 const pibuzQobuz = createPibuzQobuzControlAdapter({
   adapter: pibuzQobuzReadOnly,
+  capabilities: RUNTIME_CAPABILITIES,
   timeoutMs: process.env.PIBUZ_CONTROL_TIMEOUT_MS || 1200,
   verifyMs: process.env.PIBUZ_CONTROL_VERIFY_MS || 4000,
   pollMs: process.env.PIBUZ_CONTROL_POLL_MS || 150,
 });
 
 const savedQobuzQueueStore = createSavedQobuzQueueStore({
-  directory: process.env.SAVED_QOBUZ_QUEUE_DIR || '/var/lib/sonuvi/saved-qobuz-queues',
+  directory: RUNTIME_STATE_PATHS.savedQobuzQueueDir,
 });
 const savedQobuzQueueService = createNamedQobuzQueueService({
   store: savedQobuzQueueStore,
   getQobuzSnapshot: (options) => pibuzQobuz.getSnapshot(options),
 });
-const savedQobuzBridge = createLocalPibuzBridgeClient();
+const savedQobuzBridge = createLocalPibuzBridgeClient({
+  capabilities: RUNTIME_CAPABILITIES,
+});
 const savedQobuzQueuePlayService = createSavedQueuePlayService({
   savedQueueStore: savedQobuzQueueStore,
   adapter: savedQobuzBridge,
@@ -352,7 +396,7 @@ const qobuzConnect = {
 // The event stream is a bounded, read-only cache invalidation/observability
 // channel. Normal API reads still fetch the current PiBuZ snapshot, so an SSE
 // outage cannot make playback state appear fresher than it is.
-pibuzQobuz.startEvents();
+if (!RUNTIME_CAPABILITIES.rehearsal) pibuzQobuz.startEvents();
 
 let pibuzShutdownPromise = null;
 async function stopPibuzEventsForShutdown(signal) {
@@ -383,12 +427,15 @@ const qobuzConnectController = createQobuzConnectController({
   sshUser: MOODE_SSH_USER,
   sshHost: MOODE_SSH_HOST,
   runCommand: execFileP,
+  capabilities: RUNTIME_CAPABILITIES,
 });
 
 // UPnP discovery/browsing and the separately gated single-track session layer.
 // The session layer still stops before live playback unless its authenticated
 // mutation routes are explicitly used after an operator preflight approval.
-const upnpControlPoint = new UpnpControlPoint();
+const upnpControlPoint = new UpnpControlPoint({
+  capabilities: RUNTIME_CAPABILITIES,
+});
 let upnpPlaybackSession = null;
 let upnpPlaybackQueue = null;
 
@@ -424,6 +471,7 @@ const millsHarmonyClient = new HarmonyHubClient({
   port: HARMONY_PORT,
   domain: HARMONY_DOMAIN,
   hubId: HARMONY_HUB_ID,
+  capabilities: RUNTIME_CAPABILITIES,
 });
 
 const nonMpdScrobbler = createLastfmScrobbler({
@@ -431,6 +479,7 @@ const nonMpdScrobbler = createLastfmScrobbler({
   apiSecret: LASTFM_API_SECRET,
   sessionKey: LASTFM_SESSION_KEY,
   log,
+  capabilities: RUNTIME_CAPABILITIES,
 });
 const listeningHistory = createListeningHistoryStore({
   log,
@@ -466,6 +515,7 @@ const apnsProvider = createApnsProvider({
   privateKey: APNS_PRIVATE_KEY,
   topic: APNS_TOPIC,
   environment: APNS_ENVIRONMENT,
+  capabilities: RUNTIME_CAPABILITIES,
 });
 
 log.info('[apns] provider initialized', {
@@ -697,13 +747,20 @@ async function fetchMotherEarthMeta(entry) {
  * ========================= */
 
 const app = express();
+const RELEASE_IDENTITY = resolveRuntimeReleaseIdentity();
+const PUBLIC_WEB_ROOT = resolveRuntimePublicWebRoot();
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(handleMobileJsonError);
-// Serve controller/static UI assets from repo root on the same API port.
-app.use(express.static(path.resolve('.')));
+app.use(rehearsalReadOnlyMiddleware({ capabilities: RUNTIME_CAPABILITIES }));
+// Immutable releases set SONUVI_PUBLIC_WEB_ROOT to the generated H2 public
+// root. Legacy checkouts retain their historical root until they opt in.
+app.use(express.static(PUBLIC_WEB_ROOT, { dotfiles: 'deny', index: false }));
+app.get('/health', (_req, res) => {
+  res.json({ contract: 'sonuvi.health.v1', ok: true, release: publicRuntimeReleaseIdentity(RELEASE_IDENTITY) });
+});
 app.get('/', (_req, res) => {
-  res.sendFile(path.resolve('controller.html'));
+  res.sendFile(path.join(PUBLIC_WEB_ROOT, 'controller.html'));
 });
 
 // PeppyMeter bridge (HTTP level data -> app API)
@@ -842,7 +899,7 @@ function agentForUrl(url) {
 
 
 
-const PODCAST_MAP_DIR = process.env.PODCAST_MAP_DIR || path.join(path.dirname(PODCAST_DL_LOG), 'maps');
+const PODCAST_MAP_DIR = RUNTIME_STATE_PATHS.podcastMapDir;
 
 let _podcastCache = { loadedAt: 0, maps: [] };
 const PODCAST_CACHE_MS = 60_000; // refresh once a minute
@@ -851,7 +908,7 @@ const youtubeQueueHints = new Map();
 const youtubeProxyHints = new Map();
 const youtubeProxyWorkers = new Map(); // id -> { ytdlp, ff, startedAt }
 const YT_PROXY_MAX_WORKERS = 2;
-const YOUTUBE_HINTS_PATH = process.env.YOUTUBE_HINTS_PATH || path.join(path.dirname(PODCAST_DL_LOG), 'youtube-hints.json');
+const YOUTUBE_HINTS_PATH = RUNTIME_STATE_PATHS.youtubeHintsPath;
 function youtubeStreamKey(url) {
   const s = String(url || '').trim();
   if (!s) return '';
@@ -922,6 +979,7 @@ async function loadYoutubeHintsFromDisk() {
 
 let youtubeHintsSaveTimer = null;
 function scheduleSaveYoutubeHints() {
+  if (mainRuntimeCapabilities?.rehearsal) return;
   try { if (youtubeHintsSaveTimer) clearTimeout(youtubeHintsSaveTimer); } catch {}
   youtubeHintsSaveTimer = setTimeout(async () => {
     youtubeHintsSaveTimer = null;
@@ -936,7 +994,9 @@ function scheduleSaveYoutubeHints() {
 }
 
 loadYoutubeHintsFromDisk().catch(() => {});
-setInterval(() => { try { pruneYoutubeProxyWorkers(); } catch {} }, 15000);
+if (!RUNTIME_CAPABILITIES.rehearsal) {
+  setInterval(() => { try { pruneYoutubeProxyWorkers(); } catch {} }, 15000);
+}
 
 async function loadPodcastMaps() {
   const now = Date.now();
@@ -1522,6 +1582,7 @@ function shQuote(s) {
 }
 
 async function pushPlaylistCoverToMoode(sub) {
+  RUNTIME_CAPABILITIES.assertExternalMutation('ssh.playlist-cover');
   const showTitle = String(sub?.title || 'Podcast').trim() || 'Podcast';
 
   // Source is the cover you already downloaded into the show folder (on moOde's filesystem)
@@ -2453,9 +2514,16 @@ function extractYear(str) {
 }
 
 function requireTrackKey(req, res) {
-  if (!TRACK_KEY) return true;
+  if (!hasConfiguredTrackKey(TRACK_KEY)) {
+    // Do not silently run an immutable release with its privileged endpoints
+    // unauthenticated. Legacy checkouts retain their historical open behavior
+    // only until an operator migrates them to the release model.
+    if (RELEASE_IDENTITY.mode !== 'immutable-release') return true;
+    res.status(503).send('Operator authentication is unavailable');
+    return false;
+  }
   const k = String(req.query.k || '') || String(req.headers['x-track-key'] || '');
-  if (k !== TRACK_KEY) {
+  if (!isAuthorizedTrackKey(TRACK_KEY, k)) {
     res.status(403).send('Forbidden');
     return false;
   }
@@ -2811,6 +2879,7 @@ function shQ(s) {
 async function favoritesSetViaSsh(file, want) {
   const f = String(file || '').trim();
   if (!f) return { changed: false, isFavorite: false };
+  RUNTIME_CAPABILITIES.assertExternalMutation('ssh.playlist-write');
 
   // This runs on moOde:
   // - ensures file exists
@@ -3561,6 +3630,7 @@ async function selectNotificationTrack() {
 async function sendPushoverTrackNotification(track) {
   if (!PUSHOVER_TOKEN || !PUSHOVER_USER_KEY) return false;
   if (!track || !track.file) return false;
+  RUNTIME_CAPABILITIES.assertExternalMutation('push.pushover');
 
   const title = String(track.title || '').trim() || (track.file.split('/').pop() || 'Now Playing');
   const artist = String(track.artist || '').trim();
@@ -3863,7 +3933,7 @@ async function trackNotificationTick() {
   }
 }
 
-if (TRACK_NOTIFY_ENABLED) {
+if (TRACK_NOTIFY_ENABLED && !RUNTIME_CAPABILITIES.rehearsal) {
   setInterval(() => { trackNotificationTick().catch(() => {}); }, TRACK_NOTIFY_POLL_MS_SAFE);
 }
 
@@ -4183,7 +4253,7 @@ const sourceAudioProbe = createSourceAudioProbe({
     const localPath = mpdFileToLocalPath(file);
     return localPath && safeIsFile(localPath) ? localPath : '';
   },
-  cachePath: path.join(process.cwd(), 'var', 'mobile-source-audio.json'),
+  cachePath: RUNTIME_STATE_PATHS.sourceAudioCachePath,
 });
 
 async function runCmdQuiet(cmd, args) {
@@ -4553,7 +4623,7 @@ function isHolidayLikeTrackMeta(block) {
   return /(christmas|xmas|holiday|noel|yuletide|silent\s+night|jingle|santa|sleigh|winter\s+wonderland|merry\s+christmas|a\s+christmas\s+song)/i.test(blob);
 }
 
-const RUNTIME_CONFIG_PATH = process.env.NOW_PLAYING_CONFIG_PATH || path.resolve(process.cwd(), 'config/now-playing.config.json');
+const RUNTIME_CONFIG_PATH = RUNTIME_STATE_PATHS.configPath;
 function normalizeAliasKey(v) {
   return String(v || '')
     .toLowerCase()
@@ -6580,6 +6650,7 @@ app.post('/mpd/play-album-folder', async (req, res) => {
 });
 
 registerPodcastEpisodeRoutes(app, {
+  capabilities: RUNTIME_CAPABILITIES,
   normUrl,
   readSubs,
   rebuildPodcastLocalIndex,
@@ -6591,6 +6662,7 @@ registerPodcastEpisodeRoutes(app, {
 });
 
 registerPodcastDownloadRoutes(app, {
+  capabilities: RUNTIME_CAPABILITIES,
   normUrl,
   readSubs,
   makePodcastId,
@@ -6619,7 +6691,12 @@ const LEGACY_SUBS_FILE = '/home/brianwis/album_art/podcasts/subscriptions.json';
 
 function readSubs() {
   try {
-    const src = fs.existsSync(SUBS_FILE) ? SUBS_FILE : LEGACY_SUBS_FILE;
+    // Immutable releases must not fall back into a private legacy home when
+    // their shared podcast map is absent. Legacy checkout mode retains that
+    // compatibility read until its state root is explicitly enabled.
+    const src = fs.existsSync(SUBS_FILE) || RUNTIME_STATE_PATHS.sharedStateEnabled
+      ? SUBS_FILE
+      : LEGACY_SUBS_FILE;
     const raw = fs.readFileSync(src, "utf8");
     const j = JSON.parse(raw);
     const items = Array.isArray(j.items) ? j.items : [];
@@ -6639,6 +6716,7 @@ function readSubs() {
 }
 
 function writeSubs(items) {
+  RUNTIME_CAPABILITIES.assertStateWrite(SUBS_FILE);
   fs.mkdirSync(path.dirname(SUBS_FILE), { recursive: true });
   fs.writeFileSync(SUBS_FILE, JSON.stringify({ items }, null, 2));
 }
@@ -6658,6 +6736,7 @@ function makePodcastId(rss) {
 }
 
 registerPodcastSubscriptionRoutes(app, {
+  capabilities: RUNTIME_CAPABILITIES,
   normUrl,
   readSubs,
   writeSubs,
@@ -6671,6 +6750,7 @@ registerPodcastSubscriptionRoutes(app, {
 });
 
 registerPodcastRefreshRoutes(app, {
+  capabilities: RUNTIME_CAPABILITIES,
   readSubs,
   normUrl,
   buildPodcastMap,
@@ -9233,12 +9313,12 @@ registerUpnpRoutes(app, {
 });
 
 const UPNP_QUEUE_POLL_MS = Math.max(500, Number(process.env.UPNP_QUEUE_POLL_MS || 1000) || 1000);
-const upnpQueuePoller = setInterval(() => {
+const upnpQueuePoller = RUNTIME_CAPABILITIES.rehearsal ? null : setInterval(() => {
   upnpPlaybackQueue.tick().catch((error) => {
     log.debug?.('[upnp] queue poll failed:', error?.message || String(error));
   });
 }, UPNP_QUEUE_POLL_MS);
-upnpQueuePoller.unref?.();
+upnpQueuePoller?.unref?.();
 
 // MPD normally keeps completed playlist items unless `consume` is enabled.
 // Do not enable consume globally: house queues should retain their existing
@@ -9299,7 +9379,9 @@ async function priorityCompletionTick() {
   }
 }
 
-setInterval(() => { priorityCompletionTick().catch(() => {}); }, PRIORITY_COMPLETION_POLL_MS);
+if (!RUNTIME_CAPABILITIES.rehearsal) {
+  setInterval(() => { priorityCompletionTick().catch(() => {}); }, PRIORITY_COMPLETION_POLL_MS);
+}
 
 // Keep a server-side listening history independent of browser/controller
 // polling.  Last.fm remains an optional enrichment provider; this local
@@ -9397,8 +9479,10 @@ async function listeningHistoryTick() {
   }
 }
 
-setInterval(() => { listeningHistoryTick().catch(() => {}); }, LISTENING_HISTORY_POLL_MS);
-listeningHistoryTick().catch(() => {});
+if (!RUNTIME_CAPABILITIES.rehearsal) {
+  setInterval(() => { listeningHistoryTick().catch(() => {}); }, LISTENING_HISTORY_POLL_MS);
+  listeningHistoryTick().catch(() => {});
+}
 
 const configRouteHandles = registerAllConfigRoutes(app, {
   requireTrackKey,

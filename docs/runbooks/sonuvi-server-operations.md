@@ -24,12 +24,13 @@ Ports 3101/8101 are plain HTTP upstreams, not independent HTTPS listeners.
 
 ## Installation and publication boundary
 
-The reviewed immutable-release builder, verifier, public-only server and runtime
-state support currently live in the approved release lineage, not all in this
-main checkout. **These templates are not a complete fresh installer.** Obtain a
-reviewed artifact and its exact manifest/revision/hash before deployment. Never
-substitute a main checkout, invoke the retired installer, run the legacy
-uninstaller, or patch individual files into an immutable release.
+Main now includes the accepted immutable runtime, ARM64 dependency preparation,
+release builder/verifiers, public-only server and shared-state support. The
+current service templates remain authoritative. **This is not a complete fresh
+installer or a general host activation CLI.** See [source baseline and remaining
+tooling gaps](sonuvi-source-baseline.md). Obtain a reviewed clean-source artifact
+and exact manifest/revision/hash before deployment. Never invoke the retired
+installer, run the legacy uninstaller, or patch files into a live release.
 
 Use the existing approved artifact-publication and backup/rollback procedure:
 verify the artifact and required runtime assets/dependencies; publish root-owned
@@ -109,12 +110,17 @@ acceptance is claimed until a separately authorized reboot and functional test.
 
 ## Maintenance and manual rollback
 
-Config Save has unresolved protected-field incompatibilities on the deployed
-immutable release. Do not use it as a migration/config conversion tool. The
-repository restart handlers target the Sonuvi pair only, report queued rather
-than completed restart, and do not grant privileges or fall back to legacy/PM2.
-NoNewPrivileges on the reference units can require administrator action.
-Those source changes do not change a deployed artifact.
+Config Save now submits only changed editable settings, rejects protected fields,
+and lets an authenticated administrator read back four ordinary media paths.
+Credentials and environment-managed settings remain protected. A no-op does not
+rewrite configuration. Do not use Save as a migration/config-conversion tool.
+
+Restart targets only the Sonuvi pair and flushes HTTP202 before requesting the
+operation. It never claims that acceptance proves a completed restart and never
+falls back to legacy units, PM2 or sudo. The optional operator-installed Polkit
+rule and root-managed policy opt-in are described in
+[Config maintenance](sonuvi-config-maintenance.md); the sandbox stays hardened.
+A source push does not change the running artifact.
 
 For a separately authorized restart, restart both units together (web depends on
 API), then verify service and application health. Do not weaken the sandbox to

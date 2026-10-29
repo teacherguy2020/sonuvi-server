@@ -1,10 +1,22 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { execFile, spawn } from 'node:child_process';
+import { execFile, spawn as spawnNative } from 'node:child_process';
 import { promisify } from 'node:util';
 import { MPD_HOST } from '../config.mjs';
+import { runtimeCapabilities } from '../lib/runtime-capabilities.mjs';
+import { runtimeStatePaths } from '../lib/runtime-state-paths.mjs';
 
-const execFileP = promisify(execFile);
+const nativeExecFileP = promisify(execFile);
+const execFileP = (...args) => {
+  const command = path.basename(String(args[0] || 'external-command'));
+  runtimeCapabilities().assertExternalMutation(`process.${command}`);
+  return nativeExecFileP(...args);
+};
+const spawn = (...args) => {
+  const command = path.basename(String(args[0] || 'external-command'));
+  runtimeCapabilities().assertExternalMutation(`process.${command}`);
+  return spawnNative(...args);
+};
 
 function makeVibeJobId() {
   return `vibe-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -20,10 +32,13 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
     parseMpdFirstBlock,
     log,
   } = deps;
+  const capabilities = runtimeCapabilities();
+  const statePaths = runtimeStatePaths();
+  const releaseRoot = statePaths.releaseRoot;
   const vibeJobs = new Map();
-  const configPath = process.env.NOW_PLAYING_CONFIG_PATH || path.resolve(process.cwd(), 'config/now-playing.config.json');
+  const configPath = statePaths.configPath;
   const endlessVibeSettingsPath = process.env.NOW_PLAYING_ENDLESS_VIBE_PATH
-    || path.resolve(process.cwd(), 'data/endless-vibe.json');
+    || statePaths.endlessVibePath;
   const endlessVibePollMs = Math.max(5000, Number(process.env.ENDLESS_VIBE_POLL_MS || 15000) || 15000);
   const endlessVibeRetryMs = Math.max(endlessVibePollMs, Number(process.env.ENDLESS_VIBE_RETRY_MS || 60000) || 60000);
   let endlessVibeTickBusy = false;
@@ -31,9 +46,23 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
   let endlessVibeLastSeedKey = '';
   let endlessVibeLastAttemptAt = 0;
 
+  function releaseScript(name) {
+    return path.join(releaseRoot, name);
+  }
+
+  function vibeProcessEnvironment() {
+    return { ...process.env, VIBE_LOG: statePaths.vibePythonLogPath };
+  }
+
+  async function createVibeTemporaryJson(prefix) {
+    await fs.mkdir(statePaths.temporaryDir, { recursive: true });
+    return path.join(statePaths.temporaryDir, `${prefix}-${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 10)}.json`);
+  }
+
   async function resolveLastfmApiKey() {
     const envKey = String(process.env.LASTFM_API_KEY || '').trim();
     if (envKey) return envKey;
+    if (statePaths.sharedStateEnabled) return '';
     try {
       const cfg = JSON.parse(await fs.readFile(configPath, 'utf8'));
       return String(cfg?.lastfm?.apiKey || '').trim();
@@ -43,19 +72,17 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
   }
 
   async function resolveVibeIndexPath() {
-    const candidates = [
-      String(process.env.MOODE_LIBRARY_INDEX || '').trim(),
-      path.resolve(process.cwd(), 'moode_library_index.json'),
-      '/opt/now-playing/moode_library_index.json',
-      '/home/moode/moode_library_index.json',
-    ].filter(Boolean);
+    const configured = String(process.env.MOODE_LIBRARY_INDEX || '').trim();
+    if (configured) return configured;
+    if (statePaths.sharedStateEnabled) return statePaths.vibeLibraryIndexPath;
+    const candidates = [statePaths.vibeLibraryIndexPath, '/opt/now-playing/moode_library_index.json', '/home/moode/moode_library_index.json'];
     for (const p of candidates) {
       try { await fs.access(p); return p; } catch {}
     }
-    return path.resolve(process.cwd(), 'moode_library_index.json');
+    return statePaths.vibeLibraryIndexPath;
   }
 
-  const vibeLogDir = path.resolve(process.cwd(), 'logs/vibe');
+  const vibeLogDir = statePaths.vibeLogDir;
   async function appendVibeJobLog(job, event, detail = {}) {
     try {
       const rec = {
@@ -85,7 +112,7 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
 
     job.phase = 'creating index file please wait';
     job.updatedAt = Date.now();
-    const buildPy = path.resolve(process.cwd(), 'build_moode_index.py');
+    const buildPy = releaseScript('build_moode_index.py');
     job.logs.push(`[index] building local index: ${vibeIndexPath}`);
     appendVibeJobLog(job, 'index-build-start', { vibeIndexPath, mpdHost, buildPy }).catch(() => {});
 
@@ -96,6 +123,7 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
           INDEX_PATH: vibeIndexPath,
           MPD_HOST: String(mpdHost || 'moode.local'),
           MPD_PORT: '6600',
+          VIBE_LOG: statePaths.vibePythonLogPath,
         },
       });
       const out = String(stdout || '').trim();
@@ -231,8 +259,8 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
       if (!lastfmApiKey) return res.status(400).json({ ok: false, error: 'Last.fm API key is not configured' });
 
       const jobId = makeVibeJobId();
-      const pyPath = path.resolve(process.cwd(), 'lastfm_vibe_radio.py');
-      const jsonTmp = `/tmp/${jobId}.json`;
+      const pyPath = releaseScript('lastfm_vibe_radio.py');
+      const jsonTmp = await createVibeTemporaryJson(jobId);
       const vibeIndexPath = await resolveVibeIndexPath();
 
       const isSmallQueue = targetQueue <= 15;
@@ -322,6 +350,7 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
 
       const child = spawn('python3', [pyPath, ...pyArgs], {
         stdio: ['ignore', 'pipe', 'pipe'],
+        env: vibeProcessEnvironment(),
       });
       job.proc = child;
       appendVibeJobLog(job, 'run', {
@@ -626,10 +655,10 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
       if (!artist || !title) return res.status(404).json({ ok: false, error: 'No current track (artist/title empty)' });
       const lastfmApiKey = await resolveLastfmApiKey();
       if (!lastfmApiKey) return res.status(400).json({ ok: false, error: 'Last.fm API key is not configured' });
-      const pyPath = path.resolve(process.cwd(), 'lastfm_vibe_radio.py');
-      const jsonTmp = `/tmp/vibe-np-${Date.now()}-${process.pid}.json`;
+      const pyPath = releaseScript('lastfm_vibe_radio.py');
+      const jsonTmp = await createVibeTemporaryJson('vibe-np');
       const vibeIndexPath = await resolveVibeIndexPath();
-      await execFileP('python3', [pyPath, '--api-key', lastfmApiKey, '--index', vibeIndexPath, '--seed-artist', artist, '--seed-title', title, '--target-queue', String(targetQueue), '--json-out', jsonTmp, '--mode', 'load', '--host', mpdHost, '--port', '6600', '--dry-run', '--debug-trace']);
+      await execFileP('python3', [pyPath, '--api-key', lastfmApiKey, '--index', vibeIndexPath, '--seed-artist', artist, '--seed-title', title, '--target-queue', String(targetQueue), '--json-out', jsonTmp, '--mode', 'load', '--host', mpdHost, '--port', '6600', '--dry-run', '--debug-trace'], { env: vibeProcessEnvironment() });
       const data = JSON.parse(await fs.readFile(jsonTmp, 'utf8'));
       await fs.unlink(jsonTmp).catch(() => {});
       return res.json({ ok: true, tracks: data?.tracks || [], summary: data, targetQueue, seedArtist: artist, seedTitle: title });
@@ -649,10 +678,10 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
       if (!artist || !title) return res.status(404).json({ ok: false, error: 'No current track (artist/title empty)' });
       const lastfmApiKey = await resolveLastfmApiKey();
       if (!lastfmApiKey) return res.status(400).json({ ok: false, error: 'Last.fm API key is not configured' });
-      const pyPath = path.resolve(process.cwd(), 'lastfm_vibe_radio.py');
-      const jsonTmp = `/tmp/vibe-np-${Date.now()}-${process.pid}.json`;
+      const pyPath = releaseScript('lastfm_vibe_radio.py');
+      const jsonTmp = await createVibeTemporaryJson('vibe-np');
       const vibeIndexPath = await resolveVibeIndexPath();
-      await execFileP('python3', [pyPath, '--api-key', lastfmApiKey, '--index', vibeIndexPath, '--seed-artist', artist, '--seed-title', title, '--target-queue', String(targetQueue), '--json-out', jsonTmp, '--mode', 'load', '--host', mpdHost, '--port', '6600', '--dry-run', '--debug-trace']);
+      await execFileP('python3', [pyPath, '--api-key', lastfmApiKey, '--index', vibeIndexPath, '--seed-artist', artist, '--seed-title', title, '--target-queue', String(targetQueue), '--json-out', jsonTmp, '--mode', 'load', '--host', mpdHost, '--port', '6600', '--dry-run', '--debug-trace'], { env: vibeProcessEnvironment() });
       const data = JSON.parse(await fs.readFile(jsonTmp, 'utf8'));
       await fs.unlink(jsonTmp).catch(() => {});
       return res.json({ ok: true, tracks: data?.tracks || [], summary: data, targetQueue, seedArtist: artist, seedTitle: title });
@@ -671,7 +700,7 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
     if (!lastfmApiKey) throw new Error('Last.fm API key is not configured');
 
     const mpdHost = String(MPD_HOST || 'moode.local');
-    const pyPath = path.resolve(process.cwd(), 'lastfm_vibe_radio.py');
+    const pyPath = releaseScript('lastfm_vibe_radio.py');
     const jobId = makeVibeJobId();
 
     // Ensure deterministic queue order for seeded vibe starts.
@@ -755,6 +784,7 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
       child = spawn('python3', pyArgs, {
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: false,
+        env: vibeProcessEnvironment(),
       });
     } catch (error) {
       const message = error?.message || String(error);
@@ -973,7 +1003,7 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
     }
   }
 
-  if (typeof mpdQueryRaw === 'function') {
+  if (!capabilities.rehearsal && typeof mpdQueryRaw === 'function') {
     const initialTick = setTimeout(() => { endlessVibeTick().catch(() => {}); }, 2000);
     initialTick.unref?.();
     const endlessVibeTimer = setInterval(() => { endlessVibeTick().catch(() => {}); }, endlessVibePollMs);
@@ -993,10 +1023,10 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
       if (!lastfmApiKey) return res.status(400).json({ ok: false, error: 'Last.fm API key is not configured' });
 
       const mpdHost = String(MPD_HOST || 'moode.local');
-      const pyPath = path.resolve(process.cwd(), 'lastfm_vibe_radio.py');
-      const jsonTmp = `/tmp/vibe-seed-${Date.now()}-${process.pid}.json`;
+      const pyPath = releaseScript('lastfm_vibe_radio.py');
+      const jsonTmp = await createVibeTemporaryJson('vibe-seed');
       const vibeIndexPath = await resolveVibeIndexPath();
-      await execFileP('python3', [pyPath, '--api-key', lastfmApiKey, '--index', vibeIndexPath, '--seed-artist', seedArtist, '--seed-title', seedTitle, '--target-queue', String(targetQueue), '--json-out', jsonTmp, '--mode', 'load', '--host', mpdHost, '--port', '6600', '--dry-run', '--debug-trace']);
+      await execFileP('python3', [pyPath, '--api-key', lastfmApiKey, '--index', vibeIndexPath, '--seed-artist', seedArtist, '--seed-title', seedTitle, '--target-queue', String(targetQueue), '--json-out', jsonTmp, '--mode', 'load', '--host', mpdHost, '--port', '6600', '--dry-run', '--debug-trace'], { env: vibeProcessEnvironment() });
       const data = JSON.parse(await fs.readFile(jsonTmp, 'utf8'));
       await fs.unlink(jsonTmp).catch(() => {});
       return res.json({ ok: true, tracks: data?.tracks || [], summary: data, targetQueue, seedArtist, seedTitle });

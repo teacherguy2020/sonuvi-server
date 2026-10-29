@@ -3,6 +3,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { MPD_HOST, MOODE_SSH_HOST, MOODE_SSH_USER } from '../config.mjs';
+import { runtimeStatePaths } from '../lib/runtime-state-paths.mjs';
 
 const execFileP = promisify(execFile);
 
@@ -18,6 +19,17 @@ function sshArgsFor(user, host, extra = []) {
 function shQuoteArg(s) {
   const v = String(s ?? '');
   return `'${v.replace(/'/g, `'"'"'`)}'`;
+}
+
+export function resolveStickerBackupDirectory({ env = process.env, statePaths = runtimeStatePaths({ env }) } = {}) {
+  const configured = String(env.MPD_STICKER_BACKUP_DIR || '').trim();
+  if (configured) {
+    if (!path.isAbsolute(configured)) throw new Error('MPD_STICKER_BACKUP_DIR must be an absolute path');
+    return path.resolve(configured);
+  }
+  return statePaths.sharedStateEnabled
+    ? path.join(statePaths.protectedRoot, 'sticker-backups')
+    : '/home/brianwis/backups/sticker-backups';
 }
 
 async function sshBashLc({ user, host, script, timeoutMs = 20000, maxBuffer = 10 * 1024 * 1024 }) {
@@ -65,7 +77,7 @@ export function registerConfigRatingsStickerRoutes(app, deps) {
       const sshUser = String(MOODE_SSH_USER || 'moode');
       const sshHost = String(MOODE_SSH_HOST || MPD_HOST || 'moode.local');
       const stickerPath = String(process.env.MPD_STICKER_PATH || '/var/lib/mpd/sticker.sql');
-      const backupDir = String(process.env.MPD_STICKER_BACKUP_DIR || '/home/brianwis/backups/sticker-backups');
+      const backupDir = resolveStickerBackupDirectory();
       const ts = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
       const backupPath = path.join(backupDir, `sticker-${ts}.sql`);
 
@@ -96,7 +108,7 @@ export function registerConfigRatingsStickerRoutes(app, deps) {
   app.get('/config/ratings/sticker-backups', async (req, res) => {
     try {
       if (!requireTrackKey(req, res)) return;
-      const backupDir = String(process.env.MPD_STICKER_BACKUP_DIR || '/home/brianwis/backups/sticker-backups');
+      const backupDir = resolveStickerBackupDirectory();
       await fs.mkdir(backupDir, { recursive: true });
       const names = (await fs.readdir(backupDir).catch(() => [])).filter((n) => /\.sql$/i.test(n));
       const stats = await Promise.all(names.map(async (n) => {

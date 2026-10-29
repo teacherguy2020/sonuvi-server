@@ -1,0 +1,59 @@
+# Historical staging template, not the current production unit.
+# Use ops/systemd/sonuvi-api.service.in for the current release layout.
+# H4A.1 candidate only. Do not install or enable without a separate H4 review.
+# The activation adapter closes the Caddy traffic gate, switches `current`,
+# restarts this service and the web service, verifies both release identities,
+# then reopens traffic. It does not assume a local MPD daemon.
+[Unit]
+Description=Sonuvi Now Playing API (immutable release)
+After=network-online.target remote-fs.target
+Wants=network-online.target
+RequiresMountsFor=@MUSIC_LIBRARY_ROOT@
+ConditionPathExists=/opt/sonuvi/current/release-manifest.json
+
+[Service]
+Type=simple
+User=sonuvi
+Group=sonuvi
+WorkingDirectory=/opt/sonuvi/current
+Environment=SONUVI_STATE_ROOT=/opt/sonuvi/shared
+Environment=SONUVI_CONFIG_ROOT=/opt/sonuvi/shared/config
+Environment=SONUVI_SECRETS_ROOT=/etc/sonuvi
+Environment=LASTFM_ENV_FILE=/etc/sonuvi/lastfm.env
+Environment=SONUVI_PUBLIC_WEB_ROOT=/opt/sonuvi/current/public
+Environment=SONUVI_RELEASE_MANIFEST=/opt/sonuvi/current/release-manifest.json
+Environment=SONUVI_ACTIVATION_STATE=/opt/sonuvi/shared/checkpoints/release-activation-state.json
+# Pi5 uses remote moOde/MPD and its CIFS/autofs music mount, not a local MPD
+# data directory. MPD/MOODE host and credential settings remain protected in
+# /etc/sonuvi/now-playing.env or the shared runtime configuration.
+Environment=MUSIC_LIBRARY_ROOT=@MUSIC_LIBRARY_ROOT@
+Environment=PI4_MOUNT_BASE=@MUSIC_LIBRARY_ROOT@
+Environment=HOME=/opt/sonuvi/shared/protected/ssh-home
+EnvironmentFile=-/etc/sonuvi/now-playing.env
+# Root owns this optional file. systemd reads it before dropping to sonuvi;
+# application code can also resolve the same protected path without consulting
+# mutable shared configuration.
+EnvironmentFile=-/etc/sonuvi/lastfm.env
+ExecStartPre=/usr/bin/node /opt/sonuvi/current/scripts/verify-current-release.mjs
+ExecStart=/usr/bin/node /opt/sonuvi/current/moode-nowplaying-api.mjs
+Restart=on-failure
+RestartSec=3
+UMask=0077
+
+# Candidate least-privilege profile. Validate remote MPD playlist operations,
+# source-audio probes, SSH to moOde, PiBuZ/Qobuz, UPnP, AirPlay, Alexa, Last.fm,
+# Seeburg, Multiphone, and CIFS music reads before enabling this on a live host.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadOnlyPaths=/opt/sonuvi/current @MUSIC_LIBRARY_ROOT@ /etc/sonuvi
+ReadWritePaths=/opt/sonuvi/shared
+
+[Install]
+WantedBy=multi-user.target

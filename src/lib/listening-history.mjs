@@ -1,11 +1,11 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { runtimeStatePaths } from './runtime-state-paths.mjs';
 
-const DEFAULT_EVENT_PATH = process.env.LISTENING_HISTORY_PATH
-  || path.resolve(process.cwd(), 'data/listening-history.jsonl');
-const DEFAULT_STATE_PATH = process.env.LISTENING_HISTORY_STATE_PATH
-  || path.resolve(process.cwd(), 'data/listening-history.state.json');
+const STATE_PATHS = runtimeStatePaths();
+const DEFAULT_EVENT_PATH = STATE_PATHS.listeningHistoryPath;
+const DEFAULT_STATE_PATH = STATE_PATHS.listeningHistoryStatePath;
 
 function text(value) {
   return String(value ?? '').trim();

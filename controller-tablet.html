@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
+  <script src="scripts/runtime-auth.js?v=20261024-h2"></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#000000" />
@@ -1314,14 +1315,15 @@
   let quickIndex = [];
   let ensureKeyInFlight = null;
   async function ensureKey() {
-    var _a6, _b, _c, _d, _e, _f, _g;
+    var _b, _c, _d, _e, _f, _g;
     if (runtimeTrackKey) return runtimeTrackKey;
     if (ensureKeyInFlight) return ensureKeyInFlight;
     ensureKeyInFlight = (async () => {
       try {
-        const rt = await fetchJsonWithTimeout("".concat(base, "/config/runtime"), { cache: "no-store" }, 3500);
+        runtimeTrackKey = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || "").trim();
+        if (!runtimeTrackKey) return runtimeTrackKey;
+        const rt = await fetchJsonWithTimeout("".concat(base, "/config/runtime/admin"), { cache: "no-store", headers: { "x-track-key": runtimeTrackKey } }, 3500);
         const j = (rt == null ? void 0 : rt.ok) ? rt.json || {} : {};
-        runtimeTrackKey = String(((_a6 = j == null ? void 0 : j.config) == null ? void 0 : _a6.trackKey) || "").trim();
         runtimeMoodeHost = String(((_c = (_b = j == null ? void 0 : j.config) == null ? void 0 : _b.mpd) == null ? void 0 : _c.host) || ((_e = (_d = j == null ? void 0 : j.config) == null ? void 0 : _d.nodes) == null ? void 0 : _e.moode) || ((_g = (_f = j == null ? void 0 : j.config) == null ? void 0 : _f.mpd) == null ? void 0 : _g.hostname) || runtimeMoodeHost).trim() || runtimeMoodeHost;
       } catch {
       } finally {
@@ -2503,8 +2505,9 @@
     const now = Date.now();
     if (now - Number(recentLastfmPrefCache.ts || 0) < 5e3) return recentLastfmPrefCache;
     try {
-      const rr = await fetchJsonWithTimeout("".concat(base, "/config/runtime"), { cache: "no-store", headers: reqHeaders(false) }, 2400);
-      const cfg = rr.ok && rr.json && rr.json.fullConfig ? rr.json.fullConfig : {};
+      await ensureKey();
+      const rr = await fetchJsonWithTimeout("".concat(base, "/config/runtime/admin"), { cache: "no-store", headers: reqHeaders(false) }, 2400);
+      const cfg = rr.ok && rr.json && rr.json.config ? rr.json.config : {};
       const enabled = !!(cfg == null ? void 0 : cfg.lastfm) && !!cfg.lastfm.recentsReplaceRadio;
       const m = String((cfg == null ? void 0 : cfg.lastfm) && cfg.lastfm.recentsMode || "toptracks").toLowerCase();
       const mode = m === "topartists" || m === "topalbums" || m === "recenttracks" ? m : "toptracks";

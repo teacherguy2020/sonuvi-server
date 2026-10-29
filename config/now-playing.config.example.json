@@ -21,10 +21,7 @@
   "alexa": {
     "enabled": false,
     "publicDomain": "",
-    "skillId": "",
-    "webhookPath": "/alexa",
-    "routeWebhookUrl": "",
-    "stopWebhookUrl": ""
+    "webhookPath": "/alexa"
   },
   "display": {
     "idleBrandLine": "Clem’s Place",
@@ -49,10 +46,7 @@
       "dedupeMs": 15000,
       "alexaMaxAgeMs": 21600000
     },
-    "pushover": {
-      "token": "",
-      "userKey": ""
-    },
+    "pushover": {},
     "apns": {
       "topic": "com.brianwis.sonuvi",
       "environment": "auto",

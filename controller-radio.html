@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
+  <script src="scripts/runtime-auth.js?v=20261024-h2"></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <title>Radio</title>
@@ -91,6 +92,7 @@
       <option value="">Load Presets</option>
     </select>
   </div>
+  <div id="catalogError" role="alert" hidden><p id="catalogErrorText"></p><button id="retryCatalog" type="button">Retry catalog</button></div>
   <div id="host" class="grid"></div>
   <div id="alpha" class="alpha"></div>
 
@@ -220,10 +222,11 @@
     const STATE_KEY='np.controller.radio.menu.v1';
     let state={view:'grid',sort:'az',filter:'all'};
     let stations=[];
+    let catalogState='loading';
     let selected = new Set();
     let presets=[];
 
-    async function ensureKey(){ if(key) return key; const r=await fetch(`${base}/config/runtime`,{cache:'no-store'}); const j=await r.json().catch(()=>({})); key=String(j?.config?.trackKey||'').trim(); return key; }
+    async function ensureKey(){ if(key) return key; const r=await fetch(`${base}/config/runtime`,{cache:'no-store'}); const j=await r.json().catch(()=>({})); key=String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim(); return key; }
     function isHq(s){ const t=String(s||'').toLowerCase(); return /flac|alac|lossless|\b320\b|aac\b/.test(t); }
     function coverFor(name){ return `${base}/art/radio-logo.jpg?name=${encodeURIComponent(name||'Radio')}`; }
 
@@ -236,6 +239,10 @@
     }
 
     async function loadStations(){
+      catalogState='loading';
+      document.getElementById('meta').textContent='Loading stations…';
+      document.getElementById('catalogError').hidden=true;
+      try {
       await ensureKey();
       const headers = { 'Content-Type':'application/json', ...(key?{'x-track-key':key}:{}) };
       const r = await fetch(`${base}/config/queue-wizard/radio-preview`, {
@@ -245,7 +252,8 @@
         body: JSON.stringify({ favoritesOnly:false, hqOnly:false, genres:[], maxStations: 4000 })
       });
       const j = await r.json().catch(()=>({}));
-      const tracks = Array.isArray(j?.tracks) ? j.tracks : [];
+      if (!r.ok || j?.ok !== true || !Array.isArray(j.tracks)) throw new Error(r.status === 403 ? 'Server access is required. Verify the access key in Config, then retry.' : 'The radio catalog could not be loaded. Please retry.');
+      const tracks = j.tracks;
       const map = new Map();
       tracks.forEach((t)=>{
         const name = String(t?.stationName || t?.artist || t?.album || '').trim();
@@ -265,7 +273,17 @@
         presets = (pr.ok && pj?.ok && Array.isArray(pj.presets)) ? pj.presets : [];
       } catch { presets = []; }
       renderPresetSelect();
+      catalogState='ready';
       render();
+      } catch (error) {
+        catalogState='error';
+        document.getElementById('meta').textContent='Catalog unavailable';
+        document.getElementById('catalogErrorText').textContent=error.message || 'The radio catalog could not be loaded. Please retry.';
+        document.getElementById('catalogError').hidden=false;
+        document.getElementById('host').replaceChildren();
+        document.getElementById('alpha').replaceChildren();
+        document.getElementById('sendQueueBtn').disabled=true;
+      }
     }
 
     function filteredSorted(){
@@ -314,6 +332,7 @@
     }
 
     function render(){
+      if (catalogState !== 'ready') return;
       const list = filteredSorted();
       const host=document.getElementById('host');
       host.className = state.view==='list' ? 'list' : 'grid';
@@ -450,6 +469,7 @@
 
     loadMenuState();
     syncMenuState();
+    document.getElementById('retryCatalog').addEventListener('click', loadStations);
     loadStations();
   
     // Pull-to-refresh (controller pages)

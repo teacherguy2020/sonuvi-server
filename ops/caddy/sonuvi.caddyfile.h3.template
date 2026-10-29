@@ -1,0 +1,30 @@
+# H4A.1 candidate only. This is a review template, not a live Caddy change.
+# The file gate is closed by removing public-traffic-open.json before a pointer
+# switch, and opened only after API /health and web /release.json report the
+# same release ID. Caddy needs only path traversal/stat access to this
+# non-secret sentinel; activation state and lock files remain private.
+
+{$SONUVI_CADDY_HOSTNAME:sonuvi.local} {
+	encode zstd gzip
+
+	route {
+		@private path_regexp private (^|/)\.
+		respond @private 404
+
+		@public_traffic_open file /opt/sonuvi/shared/checkpoints/public-traffic-open.json
+		handle @public_traffic_open {
+			# Explicitly preserve the public API matcher from the legacy Caddyfile,
+			# plus the non-secret H4 health route. Do not turn this into a catch-all:
+			# administrative and internal-only endpoints stay unavailable through Caddy.
+			@api path /now-playing /next-up /health /favorites/toggle /queue/advance* /queue/play_item* /queue/mix* /mpd/* /track /track/* /art/* /alexa/* /podcasts* /rating* /config* /v1/mobile* /upnp* /recent*
+			reverse_proxy @api 127.0.0.1:3101
+
+			# The static process is rooted at /opt/sonuvi/current/public and does its
+			# own positive-allowlist resolution. Caddy never roots a file server at a
+			# checkout, shared state directory, or release parent.
+			reverse_proxy 127.0.0.1:8101
+		}
+
+		respond "Sonuvi release activation in progress" 503
+	}
+}

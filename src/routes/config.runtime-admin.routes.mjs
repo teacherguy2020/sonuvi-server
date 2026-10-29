@@ -1,9 +1,10 @@
 import fs from 'node:fs/promises';
-import crypto from 'node:crypto';
 import path from 'node:path';
 import { lookup as dnsLookup } from 'node:dns/promises';
 import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { promisify, isDeepStrictEqual } from 'node:util';
+import { registerSonuviRestartRoutes } from '../lib/sonuvi-service-control.mjs';
+import { runtimeDiagnostics, SSH_RESTRICTED } from '../lib/config-runtime-diagnostics.mjs';
 import {
   APNS_ENVIRONMENT,
   APNS_KEY_ID,
@@ -17,16 +18,21 @@ import {
 } from '../config.mjs';
 import { createLastfmIndexResolver } from '../lib/lastfm-library-match.mjs';
 import { normalizeMoodeBaseUrl } from '../lib/moode-url.mjs';
-import { registerSonuviRestartRoutes } from '../lib/sonuvi-service-control.mjs';
+import { runtimeStatePaths } from '../lib/runtime-state-paths.mjs';
+import { resolveMoodeSshProfile, assertMoodeRemoteTransport } from '../lib/moode-ssh-profile.mjs';
+import { runtimeCapabilities } from '../lib/runtime-capabilities.mjs';
+import { assertImmutableRuntimeConfig } from '../lib/runtime-config-security.mjs';
+import { writeJsonAtomically } from '../lib/atomic-file.mjs';
+import {
+  mergeRuntimeConfig,
+  projectRuntimeAdminConfig,
+  projectRuntimePublicConfig,
+  sanitizeRuntimeConfigUpdate,
+} from '../lib/runtime-config-projection.mjs';
 import { exchangeLastfmToken, lastfmAuthorizationUrl, requestLastfmToken } from '../../scripts/lastfm-authorize.mjs';
 
 const execFileP = promisify(execFile);
 let pendingLastfmAuthorization = null;
-
-function lastfmFingerprint(value) {
-  const raw = String(value || '');
-  return raw ? crypto.createHash('sha256').update(raw).digest('hex').slice(0, 12) : '';
-}
 
 async function readEnvFileValues(envPath) {
   const raw = await fs.readFile(envPath, 'utf8').catch(() => '');
@@ -70,140 +76,19 @@ function currentLastfmCredentials(envValues) {
   };
 }
 
-function pickPublicConfig(cfg) {
-  const c = cfg || {};
-  const n = c.notifications || {};
-  const tn = n.trackNotify || {};
-  const po = n.pushover || {};
-  const apns = n.apns || {};
-  const apnsTopic = String(apns.topic || APNS_TOPIC || 'com.brianwis.sonuvi').trim();
-  const apnsEnvironment = String(apns.environment || APNS_ENVIRONMENT || 'auto').trim().toLowerCase();
-  const apnsConfigured = Boolean(
-    APNS_KEY_ID
-    && APNS_TEAM_ID
-    && (APNS_PRIVATE_KEY || APNS_PRIVATE_KEY_PATH)
-    && apnsTopic
-  );
-
-  const cfgLastfm = String(c.lastfm?.apiKey || '').trim();
-  const envLastfm = String(process.env.LASTFM_API_KEY || '').trim();
-  const moodeHost = String(c.moode?.sshHost || c.mpd?.host || MOODE_SSH_HOST || MPD_HOST || 'moode.local').trim();
-  const moodeBaseRaw = String(c.moode?.baseUrl || '').trim();
-
+function runtimeProjectionOptions() {
   return {
-    projectName: c.projectName || 'now-playing',
-    trackKey: String(process.env.TRACK_KEY || c.trackKey || '1029384756'),
-    environment: c.environment || 'home',
-    timezone: c.timezone || 'America/Chicago',
-    ports: c.ports || { api: 3101, ui: 8101 },
-    lastfm: {
-      configured: Boolean(envLastfm || cfgLastfm),
+    environment: process.env,
+    apnsCredentials: {
+      keyId: APNS_KEY_ID,
+      teamId: APNS_TEAM_ID,
+      privateKey: APNS_PRIVATE_KEY,
+      privateKeyPath: APNS_PRIVATE_KEY_PATH,
+      topic: APNS_TOPIC,
+      environment: APNS_ENVIRONMENT,
     },
-    alexa: {
-      enabled: Boolean(c.alexa?.enabled ?? true),
-      publicDomain: String(c.alexa?.publicDomain || ''),
-      skillId: String(c.alexa?.skillId || ''),
-      webhookPath: String(c.alexa?.webhookPath || '/alexa'),
-      routeWebhookUrl: String(c.alexa?.routeWebhookUrl || ''),
-      stopWebhookUrl: String(c.alexa?.stopWebhookUrl || ''),
-      artistAliases: c.alexa?.artistAliases || {},
-      albumAliases: c.alexa?.albumAliases || {},
-      playlistAliases: c.alexa?.playlistAliases || {},
-      unresolvedArtists: Array.isArray(c.alexa?.unresolvedArtists) ? c.alexa.unresolvedArtists : [],
-      heardArtists: Array.isArray(c.alexa?.heardArtists) ? c.alexa.heardArtists : [],
-      unresolvedAlbums: Array.isArray(c.alexa?.unresolvedAlbums) ? c.alexa.unresolvedAlbums : [],
-      heardAlbums: Array.isArray(c.alexa?.heardAlbums) ? c.alexa.heardAlbums : [],
-      unresolvedPlaylists: Array.isArray(c.alexa?.unresolvedPlaylists) ? c.alexa.unresolvedPlaylists : [],
-      heardPlaylists: Array.isArray(c.alexa?.heardPlaylists) ? c.alexa.heardPlaylists : [],
-    },
-    notifications: {
-      trackNotify: {
-        enabled: !!tn.enabled,
-        pollMs: Number(tn.pollMs || 3000),
-        dedupeMs: Number(tn.dedupeMs || 15000),
-        alexaMaxAgeMs: Number(tn.alexaMaxAgeMs || 21600000),
-      },
-      pushover: {
-        token: String(po.token || ''),
-        userKey: String(po.userKey || ''),
-      },
-      apns: {
-        configured: apnsConfigured,
-        topic: apnsTopic,
-        environment: apnsEnvironment,
-      },
-    },
-    paths: c.paths || {},
-    mpd: {
-      host: String(c.mpd?.host || ''),
-      port: Number(c.mpd?.port || 6600),
-    },
-    moode: {
-      sshHost: String(c.moode?.sshHost || ''),
-      sshUser: String(c.moode?.sshUser || ''),
-      baseUrl: moodeBaseRaw ? normalizeMoodeBaseUrl(moodeBaseRaw, moodeHost) : '',
-    },
-    runtime: {
-      publicBaseUrl: String(c.runtime?.publicBaseUrl || ''),
-      trackCacheDir: String(c.runtime?.trackCacheDir || ''),
-      artCacheDir: String(c.runtime?.artCacheDir || ''),
-      artCacheLimit: Number(c.runtime?.artCacheLimit || 0),
-    },
-    display: {
-      idleBrandLine: String(c.display?.idleBrandLine || '').trim() || 'Clem’s Place',
-      idleMessageLine: String(c.display?.idleMessageLine || '').trim() || 'The record room is quiet',
-    },
-    features: {
-      podcasts: Boolean(c.features?.podcasts ?? true),
-      ratings: Boolean(c.features?.ratings ?? true),
-      radio: Boolean(c.features?.radio ?? true),
-      albumPersonnel: Boolean(c.features?.albumPersonnel ?? true),
-      mpdscribbleControl: Boolean(c.features?.mpdscribbleControl ?? false),
-      moodeDisplayTakeover: Boolean(c.features?.moodeDisplayTakeover ?? true),
-      lastfm: Boolean(c.features?.lastfm ?? false),
-    },
+    defaults: { moodeHost: MOODE_SSH_HOST || MPD_HOST || 'moode.local' },
   };
-}
-
-function withEnvOverrides(cfg) {
-  const out = pickPublicConfig(cfg);
-  const cfgLastfm = String((cfg || {}).lastfm?.apiKey || '').trim();
-  const envLastfm = String(process.env.LASTFM_API_KEY || '').trim();
-
-  if (process.env.TRACK_NOTIFY_ENABLED != null) {
-    out.notifications.trackNotify.enabled = /^(1|true|yes|on)$/i.test(String(process.env.TRACK_NOTIFY_ENABLED));
-  }
-  if (process.env.TRACK_NOTIFY_POLL_MS) {
-    out.notifications.trackNotify.pollMs =
-      Number(process.env.TRACK_NOTIFY_POLL_MS) || out.notifications.trackNotify.pollMs;
-  }
-  if (process.env.TRACK_NOTIFY_DEDUPE_MS) {
-    out.notifications.trackNotify.dedupeMs =
-      Number(process.env.TRACK_NOTIFY_DEDUPE_MS) || out.notifications.trackNotify.dedupeMs;
-  }
-  if (process.env.TRACK_NOTIFY_ALEXA_MAX_AGE_MS) {
-    out.notifications.trackNotify.alexaMaxAgeMs =
-      Number(process.env.TRACK_NOTIFY_ALEXA_MAX_AGE_MS) || out.notifications.trackNotify.alexaMaxAgeMs;
-  }
-
-  if (process.env.PUSHOVER_TOKEN) out.notifications.pushover.token = String(process.env.PUSHOVER_TOKEN);
-  if (process.env.PUSHOVER_USER_KEY) out.notifications.pushover.userKey = String(process.env.PUSHOVER_USER_KEY);
-
-  if (process.env.MPD_HOST) out.mpd.host = String(process.env.MPD_HOST);
-  if (process.env.MPD_PORT) out.mpd.port = Number(process.env.MPD_PORT) || out.mpd.port;
-  if (process.env.MOODE_SSH_HOST) out.moode.sshHost = String(process.env.MOODE_SSH_HOST);
-  if (process.env.MOODE_SSH_USER) out.moode.sshUser = String(process.env.MOODE_SSH_USER);
-  if (process.env.MOODE_BASE_URL) {
-    out.moode.baseUrl = normalizeMoodeBaseUrl(
-      process.env.MOODE_BASE_URL,
-      out.moode.sshHost || out.mpd.host || MOODE_SSH_HOST || MPD_HOST || 'moode.local',
-    );
-  }
-  if (process.env.PUBLIC_BASE_URL) out.runtime.publicBaseUrl = String(process.env.PUBLIC_BASE_URL);
-
-  out.lastfm = { configured: Boolean(envLastfm || cfgLastfm) };
-
-  return out;
 }
 
 function validateConfigShape(cfg) {
@@ -232,8 +117,31 @@ function shQuoteArg(s) {
   return `'${v.replace(/'/g, `'"'"'`)}'`;
 }
 
-async function sshBashLc({ user, host, script, timeoutMs = 20000, maxBuffer = 10 * 1024 * 1024 }) {
-  return execFileP('ssh', [...sshArgsFor(user, host), 'bash', '-lc', shQuoteArg(String(script || ''))], {
+async function sshBashLc({
+  user,
+  host,
+  script,
+  commandId = '',
+  timeoutMs = 20000,
+  maxBuffer = 10 * 1024 * 1024,
+}) {
+  const capabilities = runtimeCapabilities();
+  capabilities.assertExternalRead('ssh.remote');
+  const profile = resolveMoodeSshProfile({
+    env: {
+      ...process.env,
+      MOODE_SSH_USER: user,
+      MOODE_SSH_HOST: host,
+    },
+  });
+  let args;
+  if (profile.immutable) {
+    assertMoodeRemoteTransport(commandId, { capabilities, profile });
+    args = [...profile.argsFor(host), 'bash', '-lc', shQuoteArg(String(script || ''))];
+  } else {
+    args = [...sshArgsFor(user, host), 'bash', '-lc', shQuoteArg(String(script || ''))];
+  }
+  return execFileP('ssh', args, {
     timeout: timeoutMs,
     maxBuffer,
   });
@@ -260,7 +168,7 @@ async function getMpdscribbleStatus({ user, host }) {
     'echo "ENABLED=$ENABLED"',
   ].join('; ');
 
-  const { stdout } = await sshBashLc({ user, host, script, timeoutMs: 12000 });
+  const { stdout } = await sshBashLc({ user, host, script, commandId: 'diagnostics', timeoutMs: 12000 });
   const kv = parseKvOutput(stdout);
   const installed = String(kv.INSTALLED || '0') === '1';
   const activeRaw = String(kv.ACTIVE || '').trim().toLowerCase();
@@ -283,9 +191,26 @@ async function getMpdscribbleStatus({ user, host }) {
 }
 
 export function registerConfigRuntimeAdminRoutes(app, deps) {
-  const { requireTrackKey, log, getLocalHistoryItems, trackKey = '' } = deps;
-  const configPath = process.env.NOW_PLAYING_CONFIG_PATH || path.resolve(process.cwd(), 'config/now-playing.config.json');
-  const peppyLastPushPath = path.resolve(process.cwd(), 'data/peppy-last-push.json');
+  const {
+    requireTrackKey: requireTrackKeyFromRequest,
+    log,
+    getLocalHistoryItems,
+    trackKey = '',
+  } = deps;
+  const statePaths = runtimeStatePaths();
+  const configPath = statePaths.configPath;
+  const peppyLastPushPath = statePaths.peppyLastPushPath;
+
+  // Runtime administration must never inherit the legacy "no key means open"
+  // behavior used by unrelated compatibility endpoints. A release without an
+  // operator credential is not an administrable release.
+  const requireTrackKey = (req, res) => {
+    if (!String(trackKey || '').trim()) {
+      res.status(503).json({ ok: false, error: 'Runtime administration is unavailable' });
+      return false;
+    }
+    return requireTrackKeyFromRequest(req, res);
+  };
 
   async function localHistoryFallback(req, { kind, limit, period = 'overall', windowDays = 0 } = {}) {
     if (typeof getLocalHistoryItems !== 'function') return null;
@@ -307,30 +232,64 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
     };
   }
 
+  const readConfig = async () => JSON.parse(await fs.readFile(configPath, 'utf8'));
+
+  // Compatibility route for existing browser surfaces. It remains readable
+  // without a track key, but now returns only a literal public projection.
   app.get('/config/runtime', async (req, res) => {
     try {
-      const raw = await fs.readFile(configPath, 'utf8');
-      const cfg = JSON.parse(raw);
-      return res.json({ ok: true, configPath, config: withEnvOverrides(cfg), fullConfig: cfg });
-    } catch (e) {
-      return res.status(500).json({ ok: false, error: e?.message || String(e) });
+      const cfg = await readConfig();
+      return res.json({ ok: true, config: projectRuntimePublicConfig(cfg, runtimeProjectionOptions()) });
+    } catch {
+      return res.status(500).json({ ok: false, error: 'Runtime configuration is unavailable' });
     }
   });
 
-  const lastfmEnvPath = () => process.env.LASTFM_ENV_FILE || path.resolve(process.cwd(), '.env');
+  app.get('/config/runtime/admin', async (req, res) => {
+    try {
+      if (!requireTrackKey(req, res)) return;
+      const cfg = await readConfig();
+      return res.json({ ok: true, config: projectRuntimeAdminConfig(cfg, runtimeProjectionOptions()) });
+    } catch {
+      return res.status(500).json({ ok: false, error: 'Runtime configuration is unavailable' });
+    }
+  });
+
+  const immutableRuntime = () => runtimeStatePaths().sharedStateEnabled;
+  const checkConfiguredRuntime = async (req, res) => {
+    if (!requireTrackKey(req, res)) return;
+    try { return res.json(await runtimeDiagnostics(await readConfig(), { execFileP })); }
+    catch { return res.status(503).json({ ok: false, error: 'Configured runtime diagnostics unavailable' }); }
+  };
+  app.get('/config/runtime/check-env', checkConfiguredRuntime);
+  for (const route of [
+    '/config/moode/browser-url/status', '/config/moode/peppy-vumeter-target/status',
+    '/config/moode/peppy-spectrum-target/status', '/config/moode/display/status',
+    '/config/ratings/sticker-status', '/config/ratings/sticker-backups',
+  ]) {
+    app.get(route, (req, res, next) => {
+      if (!immutableRuntime()) return next();
+      if (!requireTrackKey(req, res)) return;
+      return res.status(503).json(SSH_RESTRICTED);
+    });
+  }
+  const lastfmEnvPath = () => runtimeStatePaths().lastfmEnvPath;
+  const lastfmApiKeyFor = (cfg = {}) => String(
+    process.env.LASTFM_API_KEY
+      || (!immutableRuntime() ? cfg?.lastfm?.apiKey : '')
+      || '',
+  ).trim();
+  const rejectProtectedCredentialMutation = (res) => res.status(403).json({
+    ok: false,
+    error: 'Protected credentials are operator-managed in immutable releases',
+    code: 'SONUVI_PROTECTED_CREDENTIALS',
+  });
   const lastfmStatus = async () => {
     const values = await readEnvFileValues(lastfmEnvPath());
     const creds = currentLastfmCredentials(values);
-    let cfg = {};
-    try { cfg = JSON.parse(await fs.readFile(configPath, 'utf8')); } catch {}
-    const vibeKey = String(cfg?.lastfm?.apiKey || '').trim();
     return {
       apiKeyConfigured: Boolean(creds.apiKey), apiSecretConfigured: Boolean(creds.apiSecret),
       sessionConfigured: Boolean(creds.sessionKey), authorized: Boolean(creds.apiKey && creds.apiSecret && creds.sessionKey),
-      apiKeyLength: creds.apiKey.length, apiSecretLength: creds.apiSecret.length,
-      credentialsDistinct: Boolean(creds.apiKey && creds.apiSecret && creds.apiKey !== creds.apiSecret),
-      apiKeyFingerprint: lastfmFingerprint(creds.apiKey), vibeApiKeyConfigured: Boolean(vibeKey),
-      vibeApiKeyFingerprint: lastfmFingerprint(vibeKey), sameAsVibeKey: Boolean(creds.apiKey && vibeKey && creds.apiKey === vibeKey),
       mpdMode: String(process.env.LASTFM_MPD_MODE || 'shadow'),
     };
   };
@@ -343,6 +302,7 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
   app.post('/config/lastfm/credentials', async (req, res) => {
     try {
       if (!requireTrackKey(req, res)) return;
+      if (immutableRuntime()) return rejectProtectedCredentialMutation(res);
       const apiKey = String(req.body?.apiKey || ''), apiSecret = String(req.body?.apiSecret || '');
       if (!apiKey || !apiSecret) return res.status(400).json({ ok: false, error: 'API key and API secret are required' });
       if (/\s|["']/.test(apiKey) || /\s|["']/.test(apiSecret)) return res.status(400).json({ ok: false, error: 'Credentials must not contain whitespace or quote characters' });
@@ -351,30 +311,32 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
       process.env.LASTFM_API_KEY = apiKey; process.env.LASTFM_API_SECRET = apiSecret; delete process.env.LASTFM_SESSION_KEY;
       pendingLastfmAuthorization = null;
       return res.json({ ok: true, ...(await lastfmStatus()) });
-    } catch (e) { return res.status(500).json({ ok: false, error: e?.message || String(e) }); }
+    } catch { return res.status(500).json({ ok: false, error: 'Last.fm credential update failed' }); }
   });
 
   app.post('/config/lastfm/authorize/start', async (req, res) => {
     try {
       if (!requireTrackKey(req, res)) return;
+      if (immutableRuntime()) return rejectProtectedCredentialMutation(res);
       const creds = currentLastfmCredentials(await readEnvFileValues(lastfmEnvPath()));
       if (!creds.apiKey || !creds.apiSecret) return res.status(400).json({ ok: false, error: 'Sonuvi Last.fm API key and secret are not configured' });
       const token = await requestLastfmToken({ apiKey: creds.apiKey, apiSecret: creds.apiSecret });
       pendingLastfmAuthorization = { token, expiresAt: Date.now() + 600000 };
       return res.json({ ok: true, authorizationUrl: lastfmAuthorizationUrl(creds.apiKey, token), expiresInSeconds: 600 });
-    } catch (e) { return res.status(502).json({ ok: false, error: e?.message || String(e) }); }
+    } catch { return res.status(502).json({ ok: false, error: 'Last.fm authorization could not start' }); }
   });
 
   app.post('/config/lastfm/authorize/complete', async (req, res) => {
     try {
       if (!requireTrackKey(req, res)) return;
+      if (immutableRuntime()) return rejectProtectedCredentialMutation(res);
       if (!pendingLastfmAuthorization || pendingLastfmAuthorization.expiresAt < Date.now()) { pendingLastfmAuthorization = null; return res.status(400).json({ ok: false, error: 'No pending Last.fm authorization; start a new authorization' }); }
       const creds = currentLastfmCredentials(await readEnvFileValues(lastfmEnvPath()));
       const session = await exchangeLastfmToken({ apiKey: creds.apiKey, apiSecret: creds.apiSecret, token: pendingLastfmAuthorization.token });
       await writeEnvValues(lastfmEnvPath(), { LASTFM_SESSION_KEY: session.sessionKey });
       process.env.LASTFM_SESSION_KEY = session.sessionKey; pendingLastfmAuthorization = null;
       return res.json({ ok: true, authorized: true, username: session.username, ...(await lastfmStatus()) });
-    } catch (e) { return res.status(502).json({ ok: false, error: e?.message || String(e) }); }
+    } catch { return res.status(502).json({ ok: false, error: 'Last.fm authorization could not complete' }); }
   });
 
   app.get('/config/lastfm/top-tracks', async (req, res) => {
@@ -382,7 +344,7 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
       if (!requireTrackKey(req, res)) return;
       const raw = await fs.readFile(configPath, 'utf8');
       const cfg = JSON.parse(raw || '{}');
-      const apiKey = String(process.env.LASTFM_API_KEY || cfg?.lastfm?.apiKey || '').trim();
+      const apiKey = lastfmApiKeyFor(cfg);
       const username = String(cfg?.lastfm?.username || '').trim();
       if (!apiKey || !username) {
         const fallback = await localHistoryFallback(req, {
@@ -510,7 +472,7 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
       if (!requireTrackKey(req, res)) return;
       const raw = await fs.readFile(configPath, 'utf8');
       const cfg = JSON.parse(raw || '{}');
-      const apiKey = String(process.env.LASTFM_API_KEY || cfg?.lastfm?.apiKey || '').trim();
+      const apiKey = lastfmApiKeyFor(cfg);
       const username = String(cfg?.lastfm?.username || '').trim();
       if (!apiKey || !username) {
         const fallback = await localHistoryFallback(req, {
@@ -573,7 +535,7 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
       if (!requireTrackKey(req, res)) return;
       const raw = await fs.readFile(configPath, 'utf8');
       const cfg = JSON.parse(raw || '{}');
-      const apiKey = String(process.env.LASTFM_API_KEY || cfg?.lastfm?.apiKey || '').trim();
+      const apiKey = lastfmApiKeyFor(cfg);
       const username = String(cfg?.lastfm?.username || '').trim();
       if (!apiKey || !username) {
         const fallback = await localHistoryFallback(req, {
@@ -635,7 +597,7 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
       if (!requireTrackKey(req, res)) return;
       const raw = await fs.readFile(configPath, 'utf8');
       const cfg = JSON.parse(raw || '{}');
-      const apiKey = String(process.env.LASTFM_API_KEY || cfg?.lastfm?.apiKey || '').trim();
+      const apiKey = lastfmApiKeyFor(cfg);
       const username = String(cfg?.lastfm?.username || '').trim();
       if (!apiKey || !username) {
         const fallback = await localHistoryFallback(req, {
@@ -806,6 +768,7 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
   });
 
   app.post('/config/runtime/check-env', async (req, res) => {
+    if (immutableRuntime()) return checkConfiguredRuntime(req, res);
     try {
       if (!requireTrackKey(req, res)) return;
 
@@ -965,75 +928,22 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
     try {
       if (!requireTrackKey(req, res)) return;
 
-      const incoming = req.body?.config;
-      const fullIncoming = req.body?.fullConfig;
-      if ((!incoming || typeof incoming !== 'object') && (!fullIncoming || typeof fullIncoming !== 'object')) {
-        return res.status(400).json({ ok: false, error: 'Missing JSON body { config: {...} } or { fullConfig: {...} }' });
+      const rawIncoming = req.body?.config;
+      if (!rawIncoming || typeof rawIncoming !== 'object' || Array.isArray(rawIncoming)) {
+        return res.status(400).json({ ok: false, error: 'Missing JSON body { config: {...} }' });
       }
+      const incoming = sanitizeRuntimeConfigUpdate(rawIncoming);
 
       let current = {};
       try {
         current = JSON.parse(await fs.readFile(configPath, 'utf8'));
-      } catch {}
+      } catch {
+        return res.status(503).json({ ok: false, error: 'Existing configuration unavailable; nothing was written' });
+      }
 
-      const next = (fullIncoming && typeof fullIncoming === 'object')
-        ? fullIncoming
-        : {
-            ...current,
-            ...incoming,
-            alexa: {
-              ...(current.alexa || {}),
-              ...(incoming.alexa || {}),
-              artistAliases: (incoming?.alexa && Object.prototype.hasOwnProperty.call(incoming.alexa, 'artistAliases'))
-                ? (incoming.alexa.artistAliases || {})
-                : ((current.alexa || {}).artistAliases || {}),
-              albumAliases: (incoming?.alexa && Object.prototype.hasOwnProperty.call(incoming.alexa, 'albumAliases'))
-                ? (incoming.alexa.albumAliases || {})
-                : ((current.alexa || {}).albumAliases || {}),
-              playlistAliases: (incoming?.alexa && Object.prototype.hasOwnProperty.call(incoming.alexa, 'playlistAliases'))
-                ? (incoming.alexa.playlistAliases || {})
-                : ((current.alexa || {}).playlistAliases || {}),
-              unresolvedArtists: Array.isArray(incoming?.alexa?.unresolvedArtists)
-                ? incoming.alexa.unresolvedArtists
-                : ((current.alexa || {}).unresolvedArtists || []),
-              heardArtists: Array.isArray(incoming?.alexa?.heardArtists)
-                ? incoming.alexa.heardArtists
-                : ((current.alexa || {}).heardArtists || []),
-              unresolvedAlbums: Array.isArray(incoming?.alexa?.unresolvedAlbums)
-                ? incoming.alexa.unresolvedAlbums
-                : ((current.alexa || {}).unresolvedAlbums || []),
-              heardAlbums: Array.isArray(incoming?.alexa?.heardAlbums)
-                ? incoming.alexa.heardAlbums
-                : ((current.alexa || {}).heardAlbums || []),
-              unresolvedPlaylists: Array.isArray(incoming?.alexa?.unresolvedPlaylists)
-                ? incoming.alexa.unresolvedPlaylists
-                : ((current.alexa || {}).unresolvedPlaylists || []),
-              heardPlaylists: Array.isArray(incoming?.alexa?.heardPlaylists)
-                ? incoming.alexa.heardPlaylists
-                : ((current.alexa || {}).heardPlaylists || []),
-            },
-            ports: { ...(current.ports || {}), ...(incoming.ports || {}) },
-            paths: { ...(current.paths || {}), ...(incoming.paths || {}) },
-            display: { ...(current.display || {}), ...(incoming.display || {}) },
-            notifications: {
-              ...(current.notifications || {}),
-              ...(incoming.notifications || {}),
-              trackNotify: {
-                ...((current.notifications || {}).trackNotify || {}),
-                ...((incoming.notifications || {}).trackNotify || {}),
-              },
-              pushover: {
-                ...((current.notifications || {}).pushover || {}),
-                ...((incoming.notifications || {}).pushover || {}),
-              },
-              apns: {
-                ...((current.notifications || {}).apns || {}),
-                ...((incoming.notifications || {}).apns || {}),
-              },
-            },
-          };
+      const next = mergeRuntimeConfig(current, incoming);
 
-      if (next.moode && typeof next.moode === 'object') {
+      if (Object.hasOwn(incoming.moode || {}, 'baseUrl')) {
         const moodeHost = String(next.moode.sshHost || next.mpd?.host || next.mpd?.hostname || MOODE_SSH_HOST || MPD_HOST || 'moode.local').trim();
         const moodeBaseRaw = String(next.moode.baseUrl || '').trim();
         next.moode = {
@@ -1044,26 +954,32 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
 
       const errs = validateConfigShape(next);
       if (errs.length) return res.status(400).json({ ok: false, error: errs.join('; ') });
+      if (immutableRuntime()) assertImmutableRuntimeConfig(next, { context: 'immutable runtime configuration update' });
 
-      await fs.writeFile(configPath, JSON.stringify(next, null, 2) + '\n', 'utf8');
+      const changed = !isDeepStrictEqual(current, next);
+      if (changed) await writeJsonAtomically(configPath, next);
       log.debug('[config/runtime] updated', { configPath });
 
-      const cfgLastfm = String(next?.lastfm?.apiKey || '').trim();
-      if (cfgLastfm) process.env.LASTFM_API_KEY = cfgLastfm;
+      if (!immutableRuntime()) {
+        const cfgLastfm = String(next?.lastfm?.apiKey || '').trim();
+        if (cfgLastfm) process.env.LASTFM_API_KEY = cfgLastfm;
+      }
 
       return res.json({
         ok: true,
-        message: 'Config saved. Environment overrides still take precedence; an administrator may need to restart both Sonuvi services.',
-        config: withEnvOverrides(next),
-        fullConfig: next,
+        changed,
+        message: changed ? 'Editable settings saved. Restart the Sonuvi service pair to apply startup settings; protected environment overrides remain operator-managed.' : 'No editable settings changed; nothing was written.',
+        config: projectRuntimeAdminConfig(next, runtimeProjectionOptions()),
       });
-    } catch (e) {
-      return res.status(500).json({ ok: false, error: e?.message || String(e) });
+    } catch (error) {
+      if (error?.name === 'SecretConfigFieldError') {
+        return res.status(400).json({ ok: false, error: 'Protected credential fields are not editable', code: 'SONUVI_PROTECTED_CREDENTIALS' });
+      }
+      return res.status(500).json({ ok: false, error: 'Runtime configuration update failed' });
     }
   });
 
-  registerSonuviRestartRoutes(app, { requireTrackKey, execFileP });
-
+  registerSonuviRestartRoutes(app, { requireTrackKey, execFileP, log });
   app.get('/config/moode/display/status', async (req, res) => {
     try {
       if (!requireTrackKey(req, res)) return;
@@ -1574,7 +1490,10 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
   app.post('/config/peppy/skins/export', async (req, res) => {
     try {
       if (!requireTrackKey(req, res)) return;
-      const { stdout, stderr } = await execFileP('node', ['scripts/export-peppymeter-skins.mjs'], { cwd: process.cwd() });
+      const { stdout, stderr } = await execFileP('node', ['scripts/export-peppymeter-skins.mjs'], {
+        cwd: process.cwd(),
+        env: { ...process.env, SONUVI_PEPPY_EXPORT_ROOT: statePaths.peppyExportDir },
+      });
       return res.json({ ok: true, stdout: String(stdout || '').trim(), stderr: String(stderr || '').trim() });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e?.message || String(e) });
@@ -1608,5 +1527,6 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
       return res.status(500).json({ ok: false, error: e?.message || String(e) });
     }
   });
+
 
 }

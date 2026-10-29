@@ -4,16 +4,21 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { MPD_HOST, MPD_PORT, MOODE_SSH_HOST, MOODE_SSH_USER } from '../config.mjs';
+import { runtimeStatePaths } from '../lib/runtime-state-paths.mjs';
+import { writeJsonAtomically } from '../lib/atomic-file.mjs';
 
 export function registerPodcastDownloadRoutes(app, deps) {
-  const NIGHTLY_STATE_PATH = process.env.PODCASTS_NIGHTLY_STATE_PATH || '/tmp/now-playing-podcasts-nightly.json';
+  const { capabilities } = deps;
+  const assertMutation = (capability) => capabilities?.assertExternalMutation(`podcasts.${capability}`);
+  const NIGHTLY_STATE_PATH = runtimeStatePaths().podcastsNightlyStatePath;
   const readNightlyState = async () => {
     try { return JSON.parse(await fsp.readFile(NIGHTLY_STATE_PATH, 'utf8')); } catch { return {}; }
   };
   const writeNightlyState = async (patch) => {
+    capabilities?.assertStateWrite(NIGHTLY_STATE_PATH);
     const prev = await readNightlyState();
     const next = { ...prev, ...patch, updatedAt: new Date().toISOString() };
-    await fsp.writeFile(NIGHTLY_STATE_PATH, JSON.stringify(next, null, 2), 'utf8');
+    await writeJsonAtomically(NIGHTLY_STATE_PATH, next);
     return next;
   };
 
@@ -41,6 +46,7 @@ export function registerPodcastDownloadRoutes(app, deps) {
   } = deps;
 
   const runMpcUpdate = async (targetPath = '') => {
+    assertMutation('mpd-update');
     const p = String(targetPath || '').trim();
     if (!p) return;
     await new Promise((resolve, reject) => {
@@ -53,6 +59,7 @@ export function registerPodcastDownloadRoutes(app, deps) {
 
   const configuredPodcastRoot = String(podcastRoot || process.env.PODCAST_ROOT || process.env.PODCAST_SHOWS_DIR || '').trim();
   const assertPodcastRootWritable = async () => {
+    capabilities?.assertStateWrite(configuredPodcastRoot);
     if (!configuredPodcastRoot) throw new Error('Podcast root is not configured (paths.podcastRoot).');
     await fsp.mkdir(configuredPodcastRoot, { recursive: true });
     await fsp.access(configuredPodcastRoot, fs.constants.W_OK);
@@ -77,6 +84,7 @@ export function registerPodcastDownloadRoutes(app, deps) {
 
   app.post('/podcasts/nightly-retention', async (req, res) => {
     try {
+      assertMutation('nightly-retention');
       const enabled = !!req.body?.enabled;
       const days = Math.max(1, Math.min(3650, Number(req.body?.days || 30)));
       const state = await writeNightlyState({ retentionEnabled: enabled, retentionDays: days });
@@ -88,6 +96,7 @@ export function registerPodcastDownloadRoutes(app, deps) {
 
   app.post('/podcasts/cleanup-older-than', async (req, res) => {
     try {
+      assertMutation('cleanup');
       const days = Math.max(1, Math.min(3650, Number(req.body?.days || 30)));
       const dryRun = req.body?.dryRun === true;
       const cutoff = Date.now() - days * 86400000;
@@ -139,6 +148,7 @@ export function registerPodcastDownloadRoutes(app, deps) {
 
   app.post('/podcasts/build-playlist', async (req, res) => {
     try {
+      assertMutation('build-playlist');
       const rss = normUrl(req.body?.rss);
       const newestFirst = req.body?.newestFirst !== false;
       const limit = Math.max(1, Math.min(5000, Number(req.body?.limit || 500)));
@@ -255,6 +265,7 @@ export function registerPodcastDownloadRoutes(app, deps) {
 
   app.post('/podcasts/download-one', async (req, res) => {
     try {
+      assertMutation('download-one');
       const rss = normUrl(req.body?.rss);
       const id = String(req.body?.id || '').trim().toLowerCase();
       const enclosure = String(req.body?.enclosure || '').trim();
@@ -485,6 +496,7 @@ export function registerPodcastDownloadRoutes(app, deps) {
 
   app.post('/podcasts/download-latest', async (req, res) => {
     try {
+      assertMutation('download-latest');
       const rss = normUrl(req.body?.rss);
       const count = Math.max(0, Math.min(50, Number(req.body?.count ?? 5)));
       if (!rss) return res.status(400).json({ ok: false, error: 'Missing/invalid rss' });
@@ -500,6 +512,7 @@ export function registerPodcastDownloadRoutes(app, deps) {
 
   app.post('/podcasts/nightly-run', async (_req, res) => {
     try {
+      assertMutation('nightly-run');
       const subs = readSubs();
       const targets = subs.filter((s) => (s?.autoDownload === true) || (s?.autoLatest === true));
 

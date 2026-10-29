@@ -4,6 +4,7 @@ import dns from 'node:dns/promises';
 import net from 'node:net';
 import os from 'node:os';
 import { XMLParser } from 'fast-xml-parser';
+import { runtimeCapabilities } from './runtime-capabilities.mjs';
 
 const SSDP_ADDRESS = '239.255.255.250';
 const SSDP_PORT = 1900;
@@ -1033,6 +1034,7 @@ export function publicDevice(device) {
 export class UpnpControlPoint {
   constructor({
     fetchImpl = globalThis.fetch,
+    capabilities = runtimeCapabilities(),
     socketFactory,
     interfaces = undefined,
     validateUrl = validateTrustedLocalUrl,
@@ -1043,7 +1045,11 @@ export class UpnpControlPoint {
     maxSoapBytes = Number(process.env.UPNP_MAX_SOAP_BYTES || DEFAULT_MAX_SOAP_BYTES),
     discoveryCooldownMs = Number(process.env.UPNP_DISCOVERY_COOLDOWN_MS || DEFAULT_DISCOVERY_COOLDOWN_MS),
   } = {}) {
-    this.fetchImpl = fetchImpl;
+    this.capabilities = capabilities;
+    this.fetchImpl = (...args) => {
+      this.capabilities.assertExternalRead('upnp.read');
+      return fetchImpl(...args);
+    };
     this.socketFactory = socketFactory;
     this.interfaces = interfaces;
     this.lookup = lookup;
@@ -1188,6 +1194,7 @@ export class UpnpControlPoint {
     if (!force && this.lastDiscoveryResult && now - this.lastDiscoveryAt < this.discoveryCooldownMs) {
       return this.lastDiscoveryResult;
     }
+    this.capabilities.assertExternalRead('upnp.discovery');
     const responses = await discoverSsdp({
       interfaces: this.interfaces || getLocalDiscoveryInterfaces(),
       socketFactory: this.socketFactory,
@@ -1586,6 +1593,9 @@ export class UpnpControlPoint {
         code: 'UPNP_ACTION_NOT_ALLOWED',
         status: 400,
       });
+    }
+    if (MUTATING_AVTRANSPORT_ACTIONS.has(name)) {
+      this.capabilities.assertExternalMutation('upnp.renderer-control');
     }
     const device = this.getDevice(deviceId);
     if (!device.roles.includes('media-renderer')) {

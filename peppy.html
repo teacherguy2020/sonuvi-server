@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
+  <script src="scripts/runtime-auth.js?v=20261024-h2"></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <title>Peppy Bridge</title>
@@ -2132,7 +2133,7 @@
             const r = await fetch(`${base}/config/runtime`, { cache:'no-store' });
             if (!r.ok) continue;
             const j = await r.json().catch(() => ({}));
-            const k = String(j?.config?.trackKey || '').trim();
+            const k = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
             if (k) {
               api = base;
               runtimeTrackKey = k;

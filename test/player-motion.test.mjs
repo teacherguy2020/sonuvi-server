@@ -18,7 +18,7 @@ test('shared player clears stale animated art when a track has no motion source'
     /const src = String\(mp4Url \|\| ''\)\.trim\(\);\s*if \(!src\) \{\s*clearMotionArtVideo\(\);\s*return;\s*\}/,
   );
   assert.match(player, /id="album-art-video"/);
-  assert.match(player, /scripts\/index-ui\.js\?v=20261017-qobuz-art1/);
+  assert.match(player, /scripts\/index-ui\.js\?v=[A-Za-z0-9-]+/);
   assert.match(contract, /an empty motion result is an explicit clear operation/);
 });
 
@@ -65,5 +65,5 @@ test('UPnP uses the existing provider-neutral matcher with static-art fallback a
   assert.match(hero, /isMotionRadioOrStream/);
   assert.match(hero, /np\?\.animatedArt\?\.identity/);
   assert.match(hero, /discard stale motion resolve/);
-  for (const page of pages) assert.match(page, /now-playing-art\.js\?v=20261014-upnp-motion2/);
+  for (const page of pages) assert.match(page, /now-playing-art\.js\?v=[A-Za-z0-9-]+/);
 });

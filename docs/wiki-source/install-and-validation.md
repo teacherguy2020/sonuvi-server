@@ -20,7 +20,8 @@ against a migrated host.
 
 Use [Sonuvi Server operations](../runbooks/sonuvi-server-operations.md) for the
 current release/state layout, service templates, enablement, and preservation
-rules. Main alone does not yet provide the complete reviewed release bundle.
+rules. Main contains the accepted runtime and release builder/verifiers; see the
+[source baseline](../runbooks/sonuvi-source-baseline.md) for remaining host tooling gaps.
 No fresh-install or reboot acceptance is implied by an already running server.
 
 ## Purpose

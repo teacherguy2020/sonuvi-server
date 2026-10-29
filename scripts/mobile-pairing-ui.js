@@ -72,9 +72,7 @@
     const params = new URL(location.href).searchParams;
     const configured = text(root.dataset.apiBase) || text(params.get('apiBase'));
     if (configured) return configured.replace(/\/+$/, '');
-    if (location.port === '3101') return location.origin;
-    const protocol = location.protocol || 'http:';
-    return `${protocol}//${location.hostname}:3101`;
+    return globalThis.NPArt.apiBase();
   }
 
   const apiBase = resolveApiBase();
@@ -100,7 +98,7 @@
     try {
       const response = await fetch(`${apiBase}/config/runtime`, { cache: 'no-store' });
       const body = await response.json().catch(() => ({}));
-      cachedTrackKey = text(body?.config?.trackKey);
+      cachedTrackKey = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
     } catch {}
     return cachedTrackKey;
   }
@@ -232,7 +230,7 @@
     } catch (error) {
       resetDisplay();
       setStatus(error?.message === 'track_key_required'
-        ? 'Enter the Track Key in Network & Runtime before starting pairing.'
+        ? 'Enter your existing Server access key in Server access before starting pairing.'
         : 'Unable to start pairing. Check the Track Key and API connection.', 'error');
     } finally {
       state.busy = false;

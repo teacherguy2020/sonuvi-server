@@ -2,6 +2,8 @@
 <html lang="en">
 <head>
   <script src="scripts/now-playing-art.js?v=20261028-https1"></script>
+  <script src="scripts/runtime-auth.js?v=20261024-h2"></script>
+  <script src="scripts/config-editable.js?v=20261028-config1"></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <script id="shell-redirect">
@@ -26,7 +28,9 @@
   <link rel="stylesheet" href="styles/podcasts2.css?v=20260222-widepages2" />
   <style>
     html.standaloneMode .preHeroStatusWrap,
-    html.standaloneMode .heroRail{display:none !important}
+    html.standaloneMode .heroRail .topTabs,
+    html.standaloneMode .heroRail header,
+    html.standaloneMode .heroRail .heroTransportRow{display:none !important}
     .cfgWrap { max-width: 1080px; margin: 0 auto; padding: 10px 18px 36px; }
     .cfgGrid { display:grid; grid-template-columns: repeat(auto-fit,minmax(320px,1fr)); gap:14px; align-items:stretch; }
     .cfgCard { background: rgba(15,20,26,.7); border:1px solid rgba(255,255,255,.12); border-radius:18px; padding:14px; display:flex; flex-direction:column; }
@@ -44,19 +48,21 @@
     .ipField { max-width: 220px !important; }
     #alexaDomain, #alexaRouteWebhookUrl, #alexaStopWebhookUrl, #moodeBaseUrl, #fallbackAlbumArt, #musicLibraryRoot, #radioStationMapFile { max-width: min(100%, 520px); }
 
-    /* Network card: constrain field lengths to realistic values */
-    #networkCard #apiNodeIp,
-    #networkCard #mpdHost,
-    #networkCard #moodeSshHost { max-width: min(100%, 16ch) !important; }
-    #networkCard #apiPort,
-    #networkCard #uiPort,
-    #networkCard #mpdPort { max-width: min(100%, 7ch) !important; }
-    #networkCard #moodeSshUser { max-width: min(100%, 12ch) !important; }
-    #networkCard #configTrackKey { max-width: min(100%, 22ch) !important; }
-    #networkCard #moodeBaseUrl { max-width: min(100%, 34ch) !important; }
-    #networkCard #pathMusicLibraryRoot,
-    #networkCard #pathMoodeUsbMount,
-    #networkCard #pathPiMountBase { max-width: min(100%, 30ch) !important; }
+    #networkCard .cfgField { min-width:0; }
+    #networkCard .cfgField label { min-height:0; }
+    #networkCard .cfgField input { box-sizing:border-box; max-width:100% !important; min-height:40px; padding:8px; }
+    #networkCard input:disabled { opacity:.8; }
+    .runtimeConnectionGrid { grid-template-columns:minmax(0,1fr) 8rem 8rem !important; }
+    .runtimePlayerGrid { grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,2fr) minmax(0,1fr) !important; }
+    .runtimePathsGrid { grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr)) !important; }
+    .runtimeFieldStatus { margin-top:6px; overflow-wrap:anywhere; }
+    [data-config-save-status] { margin-top:8px; min-height:1.4em; font-size:13px; }
+    [data-config-save-status][data-state="saved"] { color:#86efac; }
+    [data-config-save-status][data-state="error"] { color:#fbbf24; }
+    body.theme-light [data-config-save-status][data-state="saved"] { color:#166534; }
+    body.theme-light [data-config-save-status][data-state="error"] { color:#92400e; }
+    @media (max-width:900px) { .runtimePlayerGrid { grid-template-columns:repeat(2,minmax(0,1fr)) !important; } }
+    @media (max-width:560px) { .runtimeConnectionGrid,.runtimePlayerGrid { grid-template-columns:minmax(0,1fr) !important; } }
     .cfgRow { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
     .cfgActions { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
     .cfgHint { font-size:12px; opacity:.8; }
@@ -167,10 +173,20 @@
         <div class="controls">
           <div class="cfgWrap">
             <div class="cfgGrid">
+              <div class="cfgCard" id="serverAccessCard" style="grid-column: 1 / -1;">
+                <h3>Server access</h3>
+                <div class="cfgField">
+                  <label for="configTrackKey">Server access key (Track Key)</label>
+                  <input id="configTrackKey" type="password" autocomplete="off" spellcheck="false" placeholder="Enter your existing server access key" />
+                </div>
+                <div class="cfgHint">Authorizes this browser using <code>x-track-key</code>. The server never returns the key. This field does not change or rotate it; Save Configuration never submits it as a setting. Paired iOS apps use separate bearer tokens.</div>
+                <button class="btn" id="verifyServerAccessBtn" type="button">Verify server access</button>
+                <div class="cfgHint" id="serverAccessStatus" role="status" aria-live="polite">Authentication not yet checked.</div>
+              </div>
               <div class="cfgCard" id="networkCard" style="grid-column: 1 / -1;">
                 <h3>Network & Runtime</h3>
-                <div class="cfgHint" style="margin-bottom:8px;"><strong>Step 1:</strong> Fill this card, then click <strong>Check SSH + Paths</strong> to unlock the other modules.</div>
-                <div class="cfgRow" style="grid-template-columns: fit-content(220px) fit-content(130px) fit-content(130px); align-items:start; justify-content:start;">
+                <div class="cfgHint" style="margin-bottom:8px;">Saved server settings. Green means a check passed; amber needs attention; blue means not checked. Restricted SSH does not prevent playback or saving settings.</div>
+                <div class="cfgRow runtimeConnectionGrid">
                   <div class="cfgField">
                     <label for="apiNodeIp">API host (hostname or IP) <span id="apiNodeIpLight" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#7dd3fc;box-shadow:0 0 0 3px rgba(125,211,252,.2);margin-left:6px;vertical-align:middle;"></span></label>
                     <input id="apiNodeIp" class="ipField" type="text" placeholder="ex. sonuvi.local" />
@@ -179,14 +195,16 @@
                   <div class="cfgField narrow">
                     <label for="apiPort">API port <span id="apiPortLight" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#7dd3fc;box-shadow:0 0 0 3px rgba(125,211,252,.2);margin-left:6px;vertical-align:middle;"></span></label>
                     <input id="apiPort" type="number" min="1" max="65535" placeholder="ex. 3101" />
+                    <div class="cfgHint runtimeFieldStatus" id="apiPortStatus">Service-managed; not checked</div>
                   </div>
                   <div class="cfgField narrow">
                     <label for="uiPort">UI port <span id="uiPortLight" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#7dd3fc;box-shadow:0 0 0 3px rgba(125,211,252,.2);margin-left:6px;vertical-align:middle;"></span></label>
                     <input id="uiPort" type="number" min="1" max="65535" placeholder="ex. 8101" />
+                    <div class="cfgHint runtimeFieldStatus" id="uiPortStatus">Service-managed; not checked</div>
                   </div>
                 </div>
-                <div class="cfgHint">Defaults are API <code>3101</code>, UI <code>8101</code>, MPD port <code>6600</code>, and music library root <code>/var/lib/mpd/music</code>. API host can be hostname (recommended: <code>sonuvi.local</code>) or IP. Host fields are auto-prefilled conservatively and never overwrite saved values.</div>
-                <div class="cfgRow" style="grid-template-columns: fit-content(220px) fit-content(130px) fit-content(220px) fit-content(130px); align-items:start; justify-content:start;">
+                <div class="cfgHint" id="runtimeConnectionHint">Your browser uses HTTPS on port 443. The API and web ports above are internal HTTP listeners, managed by the server.</div>
+                <div class="cfgRow runtimePlayerGrid">
                   <div class="cfgField">
                     <label for="mpdHost">MPD host <span id="mpdHostLight" title="MPD host verification" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#7dd3fc;box-shadow:0 0 0 3px rgba(125,211,252,.2);margin-left:6px;vertical-align:middle;"></span> <span id="mpdHostVerifyText" class="cfgHint" style="display:inline;color:#9fb3c8;">not verified</span></label>
                     <input id="mpdHost" class="ipField" type="text" placeholder="ex. moode.local" />
@@ -200,18 +218,18 @@
                   <div class="cfgField">
                     <label for="moodeSshHost">moOde SSH host (opt. override) <span id="sshHostLight" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#7dd3fc;box-shadow:0 0 0 3px rgba(125,211,252,.2);margin-left:6px;vertical-align:middle;"></span></label>
                     <input id="moodeSshHost" class="ipField" type="text" placeholder="defaults to MPD host" />
+                    <div class="cfgHint runtimeFieldStatus" id="sshHostStatus">Not checked</div>
                   </div>
                   <div class="cfgField narrow">
                     <label for="moodeSshUser">moOde SSH user <span id="sshUserLight" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#7dd3fc;box-shadow:0 0 0 3px rgba(125,211,252,.2);margin-left:6px;vertical-align:middle;"></span></label>
                     <input id="moodeSshUser" type="text" placeholder="moode" />
+                    <div class="cfgHint runtimeFieldStatus" id="sshUserStatus">Not checked</div>
                   </div>
                 </div>
                 <details style="margin-top:6px;">
-                  <summary>SSH key setup help (one-time)</summary>
-                  <div class="cfgHint" style="margin-top:8px;">Run on your API host (web/API machine):</div>
+                  <summary>Managed SSH capability</summary>
+                  <div class="cfgHint" style="margin-top:8px;">Remote management is currently unavailable. Local settings and MPD playback are independent.</div>
                   <pre id="sshSetupCmds" style="white-space:pre-wrap;margin:6px 0 0;"></pre>
-                  <div class="cfgHint" style="margin-top:6px;">When <code>ssh-keygen</code> prompts for key file, press Enter to use default (<code>~/.ssh/id_ed25519</code>). For unattended/headless automation, leave passphrase empty (press Enter twice).</div>
-                  <div class="cfgHint" style="margin-top:6px;">If sudo check fails, update sudoers on moOde for the configured SSH user (minimum required commands).</div>
                 </details>
                 <div style="display:none" id="runtimeCheckStatusOld"></div>
                 <div style="display:none" id="runtimeCheckDetailsOld"></div>
@@ -219,34 +237,33 @@
                   <div class="cfgField">
                     <label for="moodeBaseUrl">moOde base URL (opt. override)</label>
                     <input id="moodeBaseUrl" type="text" placeholder="ex. http://moode.local" />
-                    <div class="cfgHint">Leave blank to derive from SSH/MPD host. moOde is HTTP-only; an HTTPS value is saved as HTTP.</div>
-                  </div>
-                  <div class="cfgField">
-                    <label for="configTrackKey">Track Key</label>
-                    <input id="configTrackKey" type="text" autocomplete="off" placeholder="Use a unique secret key" />
-                    <div class="cfgHint">Create a unique key used to protect config and maintenance endpoints (sent as <code>x-track-key</code>).</div>
+                    <div class="cfgHint" id="moodeBaseUrlHint">Optional override. Without one, the moOde web address follows the player host.</div>
                   </div>
                 </div>
-                <div class="cfgRow" style="grid-template-columns: fit-content(340px) fit-content(340px) fit-content(340px); align-items:start; justify-content:start;">
+                <div class="cfgRow runtimePathsGrid">
                   <div class="cfgField">
-                    <label for="pathMusicLibraryRoot">Music library root <span id="pathMusicLibraryRootLight" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#7dd3fc;box-shadow:0 0 0 3px rgba(125,211,252,.2);margin-left:6px;vertical-align:middle;"></span></label>
+                    <label for="pathMusicLibraryRoot">MPD music root (moOde) <span id="pathMusicLibraryRootLight" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#7dd3fc;box-shadow:0 0 0 3px rgba(125,211,252,.2);margin-left:6px;vertical-align:middle;"></span></label>
                     <input id="pathMusicLibraryRoot" type="text" placeholder="ex. /var/lib/mpd/music" />
+                    <div class="cfgHint runtimeFieldStatus" id="pathMusicLibraryRootStatus">Not checked</div>
                   </div>
                   <div class="cfgField">
-                    <label for="pathMoodeUsbMount">1) Path on moOde (media mount) <span id="pathMoodeUsbMountLight" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#7dd3fc;box-shadow:0 0 0 3px rgba(125,211,252,.2);margin-left:6px;vertical-align:middle;"></span></label>
+                    <label for="pathMoodeUsbMount">Media mount (moOde) <span id="pathMoodeUsbMountLight" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#7dd3fc;box-shadow:0 0 0 3px rgba(125,211,252,.2);margin-left:6px;vertical-align:middle;"></span></label>
                     <input id="pathMoodeUsbMount" type="text" placeholder="ex. /media/NAMEOFYOURDRIVE" />
+                    <div class="cfgHint runtimeFieldStatus" id="pathMoodeUsbMountStatus">Not checked</div>
                   </div>
                   <div class="cfgField">
-                    <label for="pathPiMountBase">2) Path on API host (mount base) <span id="pathPiMountBaseLight" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#7dd3fc;box-shadow:0 0 0 3px rgba(125,211,252,.2);margin-left:6px;vertical-align:middle;"></span></label>
+                    <label for="pathPiMountBase">Music mount (Sonuvi server) <span id="pathPiMountBaseLight" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#7dd3fc;box-shadow:0 0 0 3px rgba(125,211,252,.2);margin-left:6px;vertical-align:middle;"></span></label>
                     <input id="pathPiMountBase" type="text" placeholder="ex. /mnt/NAMEOFYOURDRIVE" />
+                    <div class="cfgHint runtimeFieldStatus" id="pathPiMountBaseStatus">Not checked</div>
                   </div>
                 </div>
-                <div class="cfgHint">Typing in (1) auto-fills path (2). Podcast path is in the Podcasts card.</div>
+                <div class="cfgHint">These are the saved folder paths, visible after authentication. Editing one folder does not change the others. Podcast folder is in the Podcasts card.</div>
                 <!-- podcast root moved to Podcasts card -->
                 <div class="cfgActions" style="margin-top:6px; display:flex; gap:8px; flex-wrap:wrap;">
-                  <button class="btn" id="checkRuntimeBtn" type="button">Check SSH + Paths</button>
+                  <button class="btn" id="checkRuntimeBtn" type="button">Check configured runtime</button>
                   <button class="btn btnPrimary" id="saveBtnTop" type="button">Save Configuration</button>
                 </div>
+                <div data-config-save-status role="status" aria-live="polite"></div>
                 <div class="cfgHint" style="margin-top:4px;"><strong>Important:</strong> after edits, click <strong>Save Configuration</strong> (top or bottom) before leaving this page.</div>
                 <div class="cfgHint" id="runtimeCheckStatus" style="margin-top:6px;"></div>
                 <div id="runtimeCheckDetails" class="cfgHint" style="margin-top:6px;"></div>
@@ -284,6 +301,7 @@
                   <div class="cfgField" id="podcastRootFieldWrap">
                     <label for="pathPodcastRoot">Podcast root on API host <span id="pathPodcastRootLight" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#7dd3fc;box-shadow:0 0 0 3px rgba(125,211,252,.2);margin-left:6px;vertical-align:middle;"></span></label>
                     <input id="pathPodcastRoot" type="text" placeholder="ex. /var/lib/mpd/music/Podcasts" />
+                    <div class="cfgHint runtimeFieldStatus" id="pathPodcastRootStatus">Not checked</div>
                     <div class="cfgHint" id="podcastRootHint">Used only when Podcasts feature is enabled.</div>
                   </div>
                   <div class="cfgHint">Enable podcast pages and background download/subscription tools.</div>
@@ -337,14 +355,14 @@
 
                 <div class="cfgCard gateCard" id="sonuviLastfmCard">
                   <h3>Sonuvi Last.fm scrobbling</h3>
-                  <div class="cfgHint">Sonuvi now handles scrobbling for device and moOde playback. Enter the Sonuvi Last.fm application credentials here; they are stored only on the API server.</div>
+                  <div class="cfgHint">Last.fm credentials and account authorization are operator-managed on this deployment. This page can check configuration status, but cannot replace credentials or complete authorization. A configured session is not proof of an accepted scrobble.</div>
                   <div class="cfgField"><label for="sonuviLastfmApiKey">Sonuvi API key</label><input id="sonuviLastfmApiKey" type="password" placeholder="Enter Sonuvi Last.fm API key" autocomplete="new-password" /></div>
                   <div class="cfgField"><label for="sonuviLastfmApiSecret">Sonuvi API secret</label><input id="sonuviLastfmApiSecret" type="password" placeholder="Enter Sonuvi Last.fm API secret" autocomplete="new-password" /></div>
                   <div class="cfgHint" id="sonuviLastfmStatus" style="margin-top:8px;">Status: checking…</div>
                   <div class="cfgActions" style="margin-top:8px;">
-                    <button class="btn" id="sonuviLastfmSaveBtn" type="button">Save credentials</button>
-                    <button class="btn" id="sonuviLastfmAuthorizeBtn" type="button">Authorize Sonuvi</button>
-                    <button class="btn" id="sonuviLastfmCompleteBtn" type="button">Complete authorization</button>
+                    <button class="btn" id="sonuviLastfmSaveBtn" type="button" disabled title="Operator-managed">Save credentials (operator-managed)</button>
+                    <button class="btn" id="sonuviLastfmAuthorizeBtn" type="button" disabled title="Operator-managed">Authorize (operator-managed)</button>
+                    <button class="btn" id="sonuviLastfmCompleteBtn" type="button" disabled title="Operator-managed">Complete authorization (operator-managed)</button>
                     <button class="btn" id="sonuviLastfmRefreshBtn" type="button">Refresh</button>
                   </div>
                 </div>
@@ -371,7 +389,7 @@
                     </select>
                   </div>
                   <div class="cfgHint">When enabled/configured, Vibe tools are available in Queue Wizard.</div>
-                  <div class="cfgHint">Vibe uses this existing API key for metadata and recommendations. It is separate from Sonuvi scrobbling credentials above.</div>
+                  <div class="cfgHint">Vibe uses the existing operator-managed API key for metadata and recommendations. Save changes preferences only, not credentials. Scrobbling additionally requires an authorized Last.fm session.</div>
                   <div class="cfgHint">Required on API host for Vibe: <code>python3-mpd</code>, <code>python3-requests</code>, <code>python3-mutagen</code>. Install (Debian/Ubuntu): <code>sudo apt install -y python3-mpd python3-requests python3-mutagen</code>.</div>
                 </div>
               </div>
@@ -393,13 +411,13 @@
 
                   <div class="cfgField">
                     <label for="alexaRouteWebhookUrl">Route webhook URL</label>
-                    <input id="alexaRouteWebhookUrl" type="url" placeholder="http://10.0.0.5:8787/api/v1/actions/alexa-start" />
+                    <input id="alexaRouteWebhookUrl" type="password" disabled placeholder="Operator-managed; retained on server" />
                     <div class="cfgHint">Used by “Route to Alexa” actions to trigger the Homebridge Alexa-start action.</div>
                   </div>
 
                   <div class="cfgField">
                     <label for="alexaStopWebhookUrl">Stop webhook URL</label>
-                    <input id="alexaStopWebhookUrl" type="url" placeholder="http://10.0.0.5:8787/api/v1/actions/alexa-stop" />
+                    <input id="alexaStopWebhookUrl" type="password" disabled placeholder="Operator-managed; retained on server" />
                     <div class="cfgHint">Used by “Stop Alexa” actions to trigger the Homebridge Alexa-stop action.</div>
                   </div>
 
@@ -429,7 +447,7 @@
                   <div class="cfgCard gateCard" id="ratingsCard">
                     <h3>Ratings Setup</h3>
                     <div class="cfgField"><label><input id="featureRatings" type="checkbox" /> Enabled</label></div>
-                    <div class="cfgHint">When Ratings is enabled, verify MPD sticker DB and keep backups before updates.</div>
+                    <div class="cfgHint">These advanced controls refer to the separate moOde-owned MPD sticker database, not Sonuvi listening history. Remote backup/restore is unavailable while SSH is restricted; do not use it as a Sonuvi backup.</div>
                     <div class="cfgActions" style="margin-top:10px;">
                       <button class="btn" id="checkRatingsDbBtn" type="button">Check Ratings DB</button>
                       <button class="btn" id="backupRatingsDbBtn" type="button">Backup Ratings DB</button>
@@ -445,7 +463,8 @@
 
                   <div class="cfgCard gateCard" id="pushoverCard">
                     <h3>Track Notifications (Apple Push + Pushover)</h3>
-                    <div class="cfgField"><label><input id="featurePushover" type="checkbox" /> Track notifications enabled</label></div>
+                    <div class="cfgField"><label><input id="featurePushover" type="checkbox" disabled /> Notification delivery configured (status only)</label></div>
+                    <div class="cfgHint" id="pushoverStatus">Pushover credentials are operator-managed and are never returned or submitted here.</div>
                     <div class="cfgField">
                       <label><input id="notifyEnabled" type="checkbox" /> Background monitor running</label>
                     </div>
@@ -499,14 +518,14 @@
 
             <div class="cfgCard" style="grid-column: 1 / -1;">
               <details id="advancedJsonDetails">
-                <summary><strong>Advanced JSON (full config)</strong></summary>
-                <div class="cfgHint" style="margin-top:8px;">Edit full <code>now-playing.config.json</code> directly, then Save Full JSON.</div>
+                <summary><strong>Advanced JSON is intentionally unavailable</strong></summary>
+                <div class="cfgHint" style="margin-top:8px;">Raw configuration editing is disabled. Credentials stay operator-managed and cannot be replaced here. Existing paths remain unchanged unless an editable path field is explicitly changed.</div>
                 <div class="cfgField">
-                  <textarea id="fullJson" style="width:100%; min-height:220px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;"></textarea>
+                  <textarea id="fullJson" disabled aria-disabled="true" style="width:100%; min-height:100px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;">Raw configuration editing is disabled for this browser surface.</textarea>
                 </div>
                 <div class="cfgActions">
-                  <button class="btn" id="formatJsonBtn" type="button">Format JSON</button>
-                  <button class="btn btnPrimary" id="saveFullBtn" type="button">Save Full JSON</button>
+                  <button class="btn" id="formatJsonBtn" type="button" disabled>Format JSON</button>
+                  <button class="btn btnPrimary" id="saveFullBtn" type="button" disabled>Save Full JSON</button>
                 </div>
               </details>
             </div>
@@ -515,9 +534,10 @@
               <button class="btn" id="reloadBtn" type="button">Reload</button>
               <button class="btn btnPrimary" id="saveBtn" type="button">Save Configuration</button>
             </div>
+            <div data-config-save-status role="status" aria-live="polite"></div>
             <div class="cfgHint" style="margin-top:4px;">
               <strong>Reload</strong> pulls the latest config from disk and discards unsaved edits on this page. 
-              <strong>Save</strong> writes the form values to config JSON.
+              <strong>Save</strong> submits changed editable settings only; protected credentials and unedited settings remain untouched.
             </div>
 
             <pre id="out" aria-label="Config response log"></pre>
@@ -530,7 +550,8 @@
   <div id="restartModal" class="modalBg" aria-hidden="true">
     <div class="modalCard">
       <h4>Config saved</h4>
-      <div class="cfgHint">Restart services now to apply changes?</div>
+      <div class="cfgHint">Restart the coupled Sonuvi API and web services to apply startup settings? This may briefly interrupt playback and clients. Environment-managed values require an operator change.</div>
+      <div class="cfgHint" id="restartCapabilityStatus"></div>
       <div class="modalActions">
         <button class="btn" id="modalLaterBtn" type="button">Later</button>
         <button class="btn btnPrimary" id="modalRestartBtn" type="button">Restart services now</button>
@@ -541,6 +562,52 @@
 <script>
 const out = document.getElementById('out');
 const API_BASE = globalThis.NPArt.apiBase();
+let configAuthenticated = false;
+let sshRestricted = true;
+let restartAvailable = false;
+let editableBaseline = null;
+let aliasBaseline = {};
+let configSaving = false;
+let mediaPathOverrides = {};
+const MEDIA_PATH_FIELDS = Object.freeze({
+  musicLibraryRoot: 'pathMusicLibraryRoot', moodeUsbMount: 'pathMoodeUsbMount',
+  piMountBase: 'pathPiMountBase', podcastRoot: 'pathPodcastRoot',
+});
+
+function configSaveStatus(message, state = '') {
+  document.querySelectorAll('[data-config-save-status]').forEach(el => {
+    el.textContent = message;
+    el.dataset.state = state;
+  });
+}
+
+function renderMediaPaths(paths) {
+  for (const [name, id] of Object.entries(MEDIA_PATH_FIELDS)) {
+    const field = document.getElementById(id);
+    if (!field) continue;
+    field.value = paths ? String(paths[name] || '') : '';
+    field.placeholder = paths ? 'Not configured' : 'Verify server access to view';
+    field.disabled = !paths;
+  }
+}
+
+function accessStatus(message) {
+  document.getElementById('serverAccessStatus').textContent = message;
+  ['saveBtn', 'saveBtnTop'].forEach(id => { document.getElementById(id).disabled = !configAuthenticated || configSaving; });
+}
+
+async function refreshRestartCapability(){
+  restartAvailable = false;
+  try {
+    const r = await fetch(`${API_BASE}/config/restart-services/status`, { cache: 'no-store', headers: { 'x-track-key': getTrackKey() } });
+    const j = await r.json().catch(() => ({}));
+    restartAvailable = r.ok && j.ok && j.available === true;
+  } catch {}
+  document.getElementById('modalRestartBtn').disabled = !restartAvailable;
+  document.getElementById('restartCapabilityStatus').textContent = restartAvailable
+    ? 'Operator-configured restart policy for the Sonuvi pair. Systemd enforces permission when requested; no restart has been tested here.'
+    : 'Automatic restart unavailable; ask the administrator to restart the Sonuvi pair.';
+}
 
 document.getElementById('apiHint').textContent = API_BASE.replace(/^https?:\/\//, '');
 setPillState('apiPill', 'neutral');
@@ -838,7 +905,8 @@ function ensureParentRestartModal(){
     root.innerHTML = `
       <div style="width:min(520px,92vw);background:#0f141a;border:1px solid rgba(255,255,255,.18);border-radius:14px;padding:16px;color:#e6edf7;box-shadow:0 20px 50px rgba(0,0,0,.45)">
         <h4 style="margin:0 0 8px;">Config saved</h4>
-        <div style="opacity:.92;">Restart services now to apply changes?</div>
+        <div style="opacity:.92;">Restart the Sonuvi API and web service pair? Clients may briefly disconnect. Environment-managed settings remain operator-managed.</div>
+        <div id="npParentRestartStatus" style="margin-top:8px;"></div>
         <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px;">
           <button id="npParentRestartLater" style="padding:9px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.22);background:transparent;color:#e6edf7;cursor:pointer;">Later</button>
           <button id="npParentRestartNow" style="padding:9px 14px;border-radius:10px;border:1px solid #3566ff;background:linear-gradient(180deg,#4f7bff,#3a61e8);color:white;cursor:pointer;">Restart services now</button>
@@ -855,6 +923,8 @@ function showRestartModal(){
   const parentModal = ensureParentRestartModal();
   if (parentModal) {
     parentRestartModal = parentModal;
+    parentModal.querySelector('#npParentRestartNow').disabled = !restartAvailable;
+    parentModal.querySelector('#npParentRestartStatus').textContent = document.getElementById('restartCapabilityStatus').textContent;
     parentRestartModal.style.display = 'flex';
     return;
   }
@@ -875,7 +945,7 @@ function collectConfigSnapshot(){
   host.querySelectorAll('input, textarea, select').forEach((el) => {
     const id = el.id || el.name;
     if (!id) return;
-    if (id === 'out') return;
+    if (id === 'out' || id === 'configTrackKey' || el.disabled || el.closest('#serverAccessCard')) return;
     if (el.type === 'checkbox' || el.type === 'radio') data[id] = !!el.checked;
     else data[id] = String(el.value ?? '');
   });
@@ -924,25 +994,17 @@ function syncAlexaCardVisibility(){
 }
 
 function syncLastfmCardVisibility(){
-  const featureEl = document.getElementById('featureLastfm');
-  const keyEl = document.getElementById('lastfmApiKey');
-  const on = !!featureEl?.checked;
-  if (keyEl) keyEl.disabled = !on;
-  if (on && keyEl && !keyEl.value.trim()) {
-    const cached = localStorage.getItem('nowplaying.secret.lastfmApiKey') || '';
-    if (cached) keyEl.value = cached;
-  }
+  const el = document.getElementById('lastfmApiKey');
+  if (el) { el.value = ''; el.disabled = true; el.placeholder = 'Operator-managed; never returned to this page'; }
 }
-
 function podcastsCronCommand(){
-  const key = String(getTrackKey() || document.getElementById('configTrackKey')?.value || '').trim();
-  return `15 2 * * * /usr/bin/curl -fsS -m 3300 -X POST http://127.0.0.1:3101/podcasts/nightly-run -H "content-type: application/json" -H "x-track-key: ${key || 'YOUR_TRACK_KEY'}" --data "{}" >> /opt/now-playing/var/podcasts/nightly-cron.log 2>&1`;
+  return '15 2 * * * /usr/bin/curl --config /OPERATOR_MANAGED/sonuvi-nightly.curl --fail --silent --show-error --max-time 3300 --request POST http://127.0.0.1:3101/podcasts/nightly-run --header "content-type: application/json" --data "{}" >> /var/lib/sonuvi/logs/podcasts-nightly.log 2>&1';
 }
-
 async function showPodcastsCronInstallHelp(){
   const line = podcastsCronCommand();
   const block = [
-    'On API host, run:',
+    'Operator example only. Adapt to the actual state/log directory and existing scheduler; do not install a duplicate job.',
+    'First provision a private curl config with the existing x-track-key header. The placeholder below is not an existing file.',
     '(crontab -l 2>/dev/null | grep -v "podcasts/nightly-run"; echo \'' + line.replace(/'/g, `'"'"'`) + '\') | crontab -',
     '',
     'Verify:',
@@ -1001,27 +1063,20 @@ function syncPodcastsUi(){
 }
 
 function syncPushoverCardVisibility(){
-  const featureEl = document.getElementById('featurePushover');
-  const notifyEnabledEl = document.getElementById('notifyEnabled');
-  const tokenEl = document.getElementById('pushoverToken');
-  const userEl = document.getElementById('pushoverUser');
-  const on = !!featureEl?.checked;
-  if (notifyEnabledEl) notifyEnabledEl.disabled = !on;
-  if (tokenEl) tokenEl.disabled = !on;
-  if (userEl) userEl.disabled = !on;
-  if (notifyEnabledEl && on && !notifyEnabledEl.checked) notifyEnabledEl.checked = true;
-  if (on) {
-    if (tokenEl && !tokenEl.value.trim()) tokenEl.value = localStorage.getItem('nowplaying.secret.pushoverToken') || '';
-    if (userEl && !userEl.value.trim()) userEl.value = localStorage.getItem('nowplaying.secret.pushoverUser') || '';
+  const on = !!document.getElementById('featurePushover')?.checked;
+  // Delivery status must not switch the independent background monitor.
+  for (const id of ['pushoverToken', 'pushoverUser']) {
+    const el = document.getElementById(id);
+    if (el) { el.value = ''; el.disabled = true; el.placeholder = 'Operator-managed'; el.type = 'password'; }
   }
 }
-
 function syncRatingsCardVisibility(){
   const on = !!document.getElementById('featureRatings')?.checked;
   ['checkRatingsDbBtn','backupRatingsDbBtn','ratingsBackupSelect','restoreRatingsDbBtn'].forEach((id) => {
     const el = document.getElementById(id);
-    if (el) el.disabled = !on;
+    if (el) el.disabled = !on || sshRestricted;
   });
+  if (sshRestricted) document.getElementById('ratingsDbStatus').textContent = 'Unavailable: moOde-owned sticker maintenance requires restricted SSH restoration. Sonuvi listening history is separate.';
 }
 
 async function refreshSonuviLastfmStatus(){
@@ -1031,7 +1086,7 @@ async function refreshSonuviLastfmStatus(){
     const r = await fetch(`${API_BASE}/config/lastfm/status`, { headers: { 'x-track-key': getTrackKey() }, cache: 'no-store' });
     const j = await r.json().catch(() => ({}));
     if (!r.ok || !j?.ok) throw new Error(j?.error || `HTTP ${r.status}`);
-    if (el) el.textContent = j.authorized ? `Status: authorized${j.username ? ` as ${j.username}` : ''} · mode ${j.mpdMode}` : `Status: credentials ${j.apiKeyConfigured && j.apiSecretConfigured ? 'saved; authorization required' : 'not configured'}`;
+    if (el) el.textContent = j.authorized ? `Status: credentials and session configured${j.username ? ` as ${j.username}` : ''} · mode ${j.mpdMode}. A qualified scrobble still requires listening verification.` : `Status: credentials ${j.apiKeyConfigured && j.apiSecretConfigured ? 'configured; operator authorization required' : 'not configured'}`;
   } catch (e) { if (el) el.textContent = `Status: ${String(e?.message || e)}`; }
 }
 
@@ -1121,41 +1176,15 @@ async function releaseQobuzSession(){
   }
 }
 
-async function saveSonuviLastfmCredentials(){
-  const key = getTrackKey();
-  const apiKey = String(document.getElementById('sonuviLastfmApiKey')?.value || '');
-  const apiSecret = String(document.getElementById('sonuviLastfmApiSecret')?.value || '');
-  const r = await fetch(`${API_BASE}/config/lastfm/credentials`, { method:'POST', headers:{'Content-Type':'application/json','x-track-key':key}, body:JSON.stringify({apiKey,apiSecret}) });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok || !j?.ok) throw new Error(j?.error || `HTTP ${r.status}`);
-  document.getElementById('sonuviLastfmApiKey').value = '';
-  document.getElementById('sonuviLastfmApiSecret').value = '';
-  await refreshSonuviLastfmStatus();
-}
-
-async function startSonuviLastfmAuthorization(){
-  const r = await fetch(`${API_BASE}/config/lastfm/authorize/start`, { method:'POST', headers:{'x-track-key':getTrackKey()} });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok || !j?.ok) throw new Error(j?.error || `HTTP ${r.status}`);
-  window.open(j.authorizationUrl, '_blank', 'noopener,noreferrer');
-  const el = document.getElementById('sonuviLastfmStatus');
-  if (el) el.textContent = 'Status: approve Sonuvi in the new Last.fm tab, then choose Complete authorization.';
-}
-
-async function completeSonuviLastfmAuthorization(){
-  const r = await fetch(`${API_BASE}/config/lastfm/authorize/complete`, { method:'POST', headers:{'x-track-key':getTrackKey()} });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok || !j?.ok) throw new Error(j?.error || `HTTP ${r.status}`);
-  await refreshSonuviLastfmStatus();
-}
+function managedLastfmNotice(){ log('Last.fm credentials and account authorization are operator-managed; no changes submitted.'); }
+async function saveSonuviLastfmCredentials(){ managedLastfmNotice(); }
+async function startSonuviLastfmAuthorization(){ managedLastfmNotice(); }
+async function completeSonuviLastfmAuthorization(){ managedLastfmNotice(); }
 
 let runtimeReady = false;
 function applyRuntimeGate(){
-  document.querySelectorAll('.gateCard').forEach((el) => {
-    el.classList.toggle('blocked', !runtimeReady);
-  });
+  document.querySelectorAll('.gateCard').forEach(el => el.classList.remove('blocked'));
 }
-
 const TRACK_KEY_STORAGE = 'nowplaying.trackkey';
 const tkEl = document.getElementById('trackKey');
 const tkTextEl = document.getElementById('trackKeyText');
@@ -1178,6 +1207,7 @@ if (tkTextEl) tkTextEl.addEventListener('input', () => {
 
 function getTrackKey(){
   const cfg = document.getElementById('configTrackKey');
+  if (cfg) return String(cfg.value || '').trim();
   const v = String(cfg?.value || '').trim();
   if (v) return v;
   const cached = String(localStorage.getItem('nowplaying.secret.trackKey') || '').trim();
@@ -1209,33 +1239,61 @@ applyTrackKeyVisibility();
 function bindSecretCache(inputId, storageKey){
   const el = document.getElementById(inputId);
   if (!el) return;
-  const saved = localStorage.getItem(storageKey) || '';
+  const saved = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || localStorage.getItem(storageKey) || '');
   if (!String(el.value || '').trim() && saved) el.value = saved;
   el.addEventListener('input', () => {
     const v = String(el.value || '');
-    if (v.trim()) localStorage.setItem(storageKey, v);
+    if (v.trim()) { localStorage.setItem(storageKey, v); if (inputId === 'configTrackKey') localStorage.setItem(TRACK_KEY_STORAGE, v); }
   });
 }
 
 bindSecretCache('configTrackKey', 'nowplaying.secret.trackKey');
-bindSecretCache('lastfmApiKey', 'nowplaying.secret.lastfmApiKey');
-bindSecretCache('pushoverToken', 'nowplaying.secret.pushoverToken');
-bindSecretCache('pushoverUser', 'nowplaying.secret.pushoverUser');
 
 async function loadCfg(){
-  const r = await fetch(`${API_BASE}/config/runtime`, { cache:'no-store' });
-  const j = await r.json();
-  if (!j.ok) return log(j);
+  configAuthenticated = false;
+  editableBaseline = null;
+  renderMediaPaths(null);
+  configSaveStatus('Loading saved settings…');
+  accessStatus('Checking browser authentication…');
+  const localKey = getTrackKey();
+  const endpoint = localKey ? '/config/runtime/admin' : '/config/runtime';
+  const r = await fetch(`${API_BASE}${endpoint}`, {
+    cache:'no-store',
+    headers: localKey ? { 'x-track-key': localKey } : {},
+  });
+  const j = await r.json().catch(() => ({ ok:false, error:`HTTP ${r.status}` }));
+  if (!r.ok || !j.ok) {
+    accessStatus(r.status === 403 || r.status === 401 ? 'Browser key rejected. Enter the existing server key and verify again; the server credential has not changed.' : 'Authentication could not be verified. Check server availability.');
+    configSaveStatus('Saved settings could not be loaded. Nothing has been changed.', 'error');
+    return;
+  }
 
   const c = j.config || {};
-  const full = j.fullConfig || {};
+  const full = c;
+  configAuthenticated = endpoint === '/config/runtime/admin' && c.contract === 'sonuvi.runtime-admin-config.v1';
+  accessStatus(configAuthenticated
+    ? `Browser authenticated. Server access key: ${c.trackKeyConfigured ? 'configured' : 'status unavailable'}. iOS bearer authentication is separate.`
+    : 'Public settings only. Enter the existing server access key and verify to edit settings; no server credential was disclosed.');
+  if (!configAuthenticated) { configSaveStatus('Verify server access to view and edit saved settings.'); return; }
+  sshRestricted = c.deployment?.sshRestricted !== false;
+  for (const id of ['apiPort', 'uiPort', ...(c.deployment?.environmentManaged || [])]) {
+    const el = document.getElementById(id);
+    if (el) { el.disabled = true; el.title = 'Operator-managed service environment; not changed by Save Configuration'; }
+  }
+  for (const id of ['sonuviLastfmApiKey', 'sonuviLastfmApiSecret', 'sonuviLastfmSaveBtn', 'sonuviLastfmAuthorizeBtn', 'sonuviLastfmCompleteBtn', 'alexaRouteWebhookUrl', 'alexaStopWebhookUrl']) {
+    const el = document.getElementById(id);
+    if (el) { el.disabled = true; el.title = 'Operator-managed credentials; not editable here'; if ('value' in el) el.value = ''; }
+  }
   const host = location.hostname || 'sonuvi.local';
   const apiPortHint = Number(c.ports?.api || 3101);
   const uiPortHint = Number(c.ports?.ui || 8101);
+  document.getElementById('runtimeConnectionHint').textContent = location.protocol === 'https:'
+    ? `Browser connection: ${location.origin} (HTTPS). API ${apiPortHint} and web ${uiPortHint} are internal HTTP listeners, managed by the server.`
+    : `Browser connection: ${location.origin} (HTTP). API ${apiPortHint} and web ${uiPortHint} are separate HTTP listeners, managed by the server.`;
   const apiHint = document.getElementById('apiHint');
   const webHint = document.getElementById('webHint');
-  if (apiHint) apiHint.textContent = `${host}:${apiPortHint}`;
-  if (webHint) webHint.textContent = `${host}:${uiPortHint}`;
+  if (apiHint) apiHint.textContent = API_BASE.replace(/^https?:\/\//, '');
+  if (webHint) webHint.textContent = location.host;
   setPillState('apiPill', 'good');
   setPillState('webPill', 'good');
   const alexaHint = document.getElementById('alexaHint');
@@ -1256,14 +1314,11 @@ async function loadCfg(){
     }
   }
 
-  // Preload track key from local cache; fallback to server-provided effective key.
-  const localKey = localStorage.getItem(TRACK_KEY_STORAGE) || '';
-  const serverKey = String(c.trackKey || '').trim();
-  const effectiveKey = localKey || serverKey;
-  if (effectiveKey) {
-    if (tkEl) tkEl.value = effectiveKey;
-    if (tkTextEl) tkTextEl.value = effectiveKey;
-    if (!localKey) localStorage.setItem(TRACK_KEY_STORAGE, effectiveKey);
+  // The Track Key is deliberately browser-owned. Runtime responses never
+  // disclose it, even to an authenticated administrator request.
+  if (localKey) {
+    if (tkEl) tkEl.value = localKey;
+    if (tkTextEl) tkTextEl.value = localKey;
   }
 
   document.getElementById('featureAlexaSkill').checked = !!c.alexa?.enabled;
@@ -1279,11 +1334,12 @@ async function loadCfg(){
   syncPodcastsUi();
 
   const hasTrackNotifications = !!(
-    String(c.notifications?.pushover?.token || '').trim()
-    || String(c.notifications?.pushover?.userKey || '').trim()
+    c.notifications?.pushover?.configured
     || c.notifications?.trackNotify?.enabled
     || c.notifications?.apns?.configured
   );
+  document.getElementById('pushoverStatus').textContent = `Pushover: ${c.notifications?.pushover?.configured ? 'configured' : 'not configured'}. Credentials are operator-managed and unchanged by Save.`;
+  document.getElementById('lastfmApiKey').placeholder = c.lastfm?.configured ? 'Configured on server (operator-managed)' : 'Not configured (operator-managed)';
   document.getElementById('featurePushover').checked = hasTrackNotifications;
   document.getElementById('notifyEnabled').checked = !!c.notifications?.trackNotify?.enabled;
   document.getElementById('pollMs').value = c.notifications?.trackNotify?.pollMs ?? 3000;
@@ -1310,7 +1366,7 @@ async function loadCfg(){
   syncRatingsCardVisibility();
   refreshSonuviLastfmStatus().catch(() => {});
   refreshQobuzAccountStatus().catch(() => {});
-  const lastfmKey = String(full.lastfm?.apiKey || localStorage.getItem('nowplaying.secret.lastfmApiKey') || '');
+  const lastfmKey = '';
   const lastfmUsername = String(full.lastfm?.username || '');
   document.getElementById('featureLastfm').checked = !!(c.features?.lastfm ?? lastfmKey);
   document.getElementById('lastfmApiKey').value = lastfmKey;
@@ -1361,13 +1417,20 @@ async function loadCfg(){
   document.getElementById('moodeBaseUrl').value = moodeBaseRaw
     ? normalizeMoodeBaseUrl(moodeBaseRaw, sshHostPrefill || mpdHostPrefill || 'moode.local')
     : '';
-  const loadedTrackKey = String(full.trackKey || c.trackKey || localStorage.getItem('nowplaying.secret.trackKey') || '');
+  document.getElementById('moodeBaseUrlHint').textContent = moodeBaseRaw
+    ? 'Saved override. moOde uses HTTP.'
+    : `No override needed. Using ${normalizeMoodeBaseUrl('', sshHostPrefill || mpdHostPrefill || 'moode.local')}.`;
+  const loadedTrackKey = localKey;
   document.getElementById('configTrackKey').value = loadedTrackKey;
   if (loadedTrackKey) localStorage.setItem('nowplaying.secret.trackKey', loadedTrackKey);
-  document.getElementById('pathMusicLibraryRoot').value = String(full.paths?.musicLibraryRoot || c.paths?.musicLibraryRoot || '/var/lib/mpd/music');
-  document.getElementById('pathMoodeUsbMount').value = String(full.paths?.moodeUsbMount || c.paths?.moodeUsbMount || '/media/SamsungMoode');
-  document.getElementById('pathPiMountBase').value = String(full.paths?.piMountBase || c.paths?.piMountBase || '/mnt/SamsungMoode');
-  document.getElementById('pathPodcastRoot').value = String(full.paths?.podcastRoot || c.paths?.podcastRoot || '/var/lib/mpd/music/Podcasts');
+  renderMediaPaths(c.paths);
+  mediaPathOverrides = c.storage?.mediaPathOverrides || {};
+  for (const [name, value] of Object.entries(mediaPathOverrides)) {
+    const field = document.getElementById(MEDIA_PATH_FIELDS[name]);
+    if (!field) continue;
+    field.disabled = true;
+    field.title = `Managed by the server service; currently using ${value}. Save Configuration cannot change this override.`;
+  }
 
   loadArtistAliasesFromObject(c.alexa?.artistAliases || {});
   albumAliasMap = (c.alexa?.albumAliases && typeof c.alexa.albumAliases === 'object' && !Array.isArray(c.alexa.albumAliases)) ? { ...c.alexa.albumAliases } : {};
@@ -1387,18 +1450,20 @@ async function loadCfg(){
   heardPlaylists = Array.isArray(c.alexa?.heardPlaylists) ? c.alexa.heardPlaylists : [];
   renderHeardPlaylistList();
 
-  const pushToken = String(c.notifications?.pushover?.token || localStorage.getItem('nowplaying.secret.pushoverToken') || '');
-  const pushUser = String(c.notifications?.pushover?.userKey || localStorage.getItem('nowplaying.secret.pushoverUser') || '');
+  const pushToken = '';
+  const pushUser = '';
   document.getElementById('pushoverToken').value = pushToken;
   document.getElementById('pushoverUser').value = pushUser;
   if (pushToken) localStorage.setItem('nowplaying.secret.pushoverToken', pushToken);
   if (pushUser) localStorage.setItem('nowplaying.secret.pushoverUser', pushUser);
-  document.getElementById('fullJson').value = JSON.stringify(full, null, 2);
-
-  log({ ok:true, configPath:j.configPath, loadedAt:new Date().toISOString() });
+  log({ ok:true, contract:c.contract || 'unknown', loadedAt:new Date().toISOString() });
   await loadRatingsBackups();
-  await checkRuntimeEnv(true).catch(() => {});
+  if (getTrackKey()) await checkRuntimeEnv(true).catch(() => {});
+  await refreshRestartCapability();
+  editableBaseline = SonuviConfigEditable.capture(document);
+  aliasBaseline = structuredClone({ artistAliases: getArtistAliasesFromUi(), albumAliases: albumAliasMap, playlistAliases: playlistAliasMap });
   markConfigSaved();
+  configSaveStatus('Saved settings loaded from the server.');
 }
 
 async function saveArtistCorrectionsOnly(showModal = false){
@@ -1441,193 +1506,78 @@ async function saveArtistCorrectionsOnly(showModal = false){
 }
 
 async function saveCfg(){
+  if (configSaving) return;
+  if (!configAuthenticated || !editableBaseline) return configSaveStatus('Verify server access before saving settings.', 'error');
   const key = getTrackKey();
-  if (!key) return log('Track key is required to save.');
-
-  const mpdHostEl = document.getElementById('mpdHost');
-  const mpdHostVal = String(mpdHostEl?.value || '').trim();
-  if (!mpdHostVal) {
-    try { setMpdHostLight('bad', 'required'); } catch {}
-    if (mpdHostEl) {
-      mpdHostEl.focus();
-      mpdHostEl.style.outline = '2px solid rgba(239,68,68,.9)';
-      setTimeout(() => { try { mpdHostEl.style.outline = ''; } catch {} }, 2200);
-    }
-    return log('MPD host is required. Enter your moOde IP/hostname (e.g. moode.local) and save again.');
+  const current = SonuviConfigEditable.capture(document);
+  for (const id of Object.values(MEDIA_PATH_FIELDS)) {
+    if (editableBaseline[id] && !current[id]) return configSaveStatus('A saved folder cannot be cleared here. Enter its replacement path or reload to keep the saved value.', 'error');
   }
-
-  let artistAliases = {};
+  const config = SonuviConfigEditable.changes(editableBaseline, current);
+  const aliases = { artistAliases: getArtistAliasesFromUi(), albumAliases: albumAliasMap, playlistAliases: playlistAliasMap };
+  for (const [name, value] of Object.entries(aliases)) {
+    if (JSON.stringify(value) !== JSON.stringify(aliasBaseline[name])) (config.alexa ||= {})[name] = value;
+  }
+  if (!Object.keys(config).length) return configSaveStatus('No changes to save. The displayed settings are already saved.');
+  const submittedSnapshot = collectConfigSnapshot();
+  configSaving = true;
+  ['saveBtn', 'saveBtnTop'].forEach(id => { document.getElementById(id).disabled = true; });
+  configSaveStatus('Saving settings…');
+  let accepted = false;
   try {
-    artistAliases = getArtistAliasesFromUi();
-  } catch (e) {
-    return log('Invalid artist corrections: ' + String(e.message || e));
-  }
-
-  const nodeIp = document.getElementById('apiNodeIp').value.trim();
-  const nodesNext = (Array.isArray(loadedNodes) && loadedNodes.length)
-    ? loadedNodes.map((n, i) => (i === 0 ? { ...n, ip: nodeIp || n.ip || '' } : n))
-    : [{ name: 'pi-main', ip: nodeIp, role: 'both', sshUser: 'brianwis' }];
-
-  const payload = {
-    config: {
-      alexa: {
-        enabled: document.getElementById('featureAlexaSkill').checked,
-        publicDomain: document.getElementById('alexaDomain').value.trim(),
-        routeWebhookUrl: document.getElementById('alexaRouteWebhookUrl').value.trim(),
-        stopWebhookUrl: document.getElementById('alexaStopWebhookUrl').value.trim(),
-        artistAliases,
-        albumAliases: albumAliasMap,
-        playlistAliases: playlistAliasMap,
-        unresolvedArtists,
-        heardArtists,
-        unresolvedAlbums,
-        heardAlbums,
-        unresolvedPlaylists,
-        heardPlaylists,
-      },
-      notifications: {
-        trackNotify: {
-          enabled: document.getElementById('featurePushover').checked ? document.getElementById('notifyEnabled').checked : false,
-          pollMs: Number(document.getElementById('pollMs').value || 3000),
-          dedupeMs: Number(document.getElementById('dedupeMs').value || 15000),
-          alexaMaxAgeMs: Number(document.getElementById('alexaMaxAgeMs').value || 21600000),
-        },
-        pushover: {
-          token: document.getElementById('featurePushover').checked ? document.getElementById('pushoverToken').value.trim() : '',
-          userKey: document.getElementById('featurePushover').checked ? document.getElementById('pushoverUser').value.trim() : '',
-        },
-      },
-      features: {
-        podcasts: document.getElementById('featurePodcasts').checked,
-        ratings: document.getElementById('featureRatings').checked,
-        radio: document.getElementById('featureRadio').checked,
-        albumPersonnel: document.getElementById('featureAlbumPersonnel').checked,
-        showAboutWhenNoPersonnel: document.getElementById('featureShowAboutWhenNoPersonnel').checked,
-        moodeDisplayTakeover: document.getElementById('featureMoodeDisplayTakeover').checked,
-        lastfm: document.getElementById('featureLastfm').checked,
-      },
-      trackKey: document.getElementById('configTrackKey').value.trim(),
-      apiHost: nodeIp,
-      apiNodeIp: nodeIp,
-      ports: {
-        api: Number(document.getElementById('apiPort').value || 3101),
-        ui: Number(document.getElementById('uiPort').value || 8101),
-      },
-      mpd: {
-        host: document.getElementById('mpdHost').value.trim(),
-        port: Number(document.getElementById('mpdPort').value || 6600),
-      },
-      moode: {
-        sshHost: document.getElementById('moodeSshHost').value.trim(),
-        sshUser: document.getElementById('moodeSshUser').value.trim(),
-        baseUrl: (() => {
-          const raw = document.getElementById('moodeBaseUrl').value.trim();
-          return raw ? normalizeMoodeBaseUrl(raw, mpdHostVal || 'moode.local') : '';
-        })(),
-      },
-      paths: {
-        musicLibraryRoot: document.getElementById('pathMusicLibraryRoot').value.trim(),
-        moodeUsbMount: document.getElementById('pathMoodeUsbMount').value.trim(),
-        piMountBase: document.getElementById('pathPiMountBase').value.trim(),
-        podcastRoot: document.getElementById('pathPodcastRoot').value.trim(),
-      },
-      runtime: {
-      },
-      display: {
-        idleBrandLine: document.getElementById('idleBrandLine').value.trim(),
-        idleMessageLine: document.getElementById('idleMessageLine').value.trim(),
-      },
-      nodes: nodesNext,
-      lastfm: {
-        apiKey: document.getElementById('featureLastfm').checked ? document.getElementById('lastfmApiKey').value.trim() : '',
-        username: document.getElementById('featureLastfm').checked ? document.getElementById('lastfmUsername').value.trim() : '',
-        recentsReplaceRadio: !!document.getElementById('lastfmRecentsReplaceRadio').checked,
-        recentsMode: (() => {
-          const m = String(document.getElementById('lastfmRecentsMode').value || 'toptracks').toLowerCase();
-          return (m === 'topartists' || m === 'topalbums' || m === 'recenttracks') ? m : 'toptracks';
-        })(),
-      },
-    },
-  };
-
-  const r = await fetch(`${API_BASE}/config/runtime`, {
-    method:'POST',
-    headers:{ 'Content-Type':'application/json', 'x-track-key': key },
-    body: JSON.stringify(payload),
-  });
-
-  const j = await r.json();
-  log(j);
-  if (j && j.ok) {
-    markConfigSaved();
-    showRestartModal();
+    const r = await fetch(`${API_BASE}/config/runtime`, {
+      method:'POST', headers:{ 'Content-Type':'application/json', 'x-track-key': key },
+      body: JSON.stringify({ config }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.ok) return configSaveStatus(`Save failed: ${j.error || `HTTP ${r.status}`}. Your edits remain on this page.`, 'error');
+    accepted = true;
+    if (config.paths) {
+      const read = await fetch(`${API_BASE}/config/runtime/admin`, { cache:'no-store', headers:{ 'x-track-key': key } });
+      const saved = await read.json().catch(() => ({}));
+      if (!read.ok || !saved.ok || Object.entries(config.paths).some(([name,value]) => saved.config?.paths?.[name] !== value)) {
+        return configSaveStatus('Save was accepted, but the saved folders could not be verified. Your edits remain here; reload to check before retrying.', 'error');
+      }
+    }
+    editableBaseline = current;
+    aliasBaseline = structuredClone(aliases);
+    _savedConfigSnapshot = submittedSnapshot;
+    refreshDirtyState();
+    const message = j.changed === false ? 'These values were already saved on the server.'
+      : config.paths ? 'Saved to the server. Folder values verified by reading them back.' : 'Settings saved to the server.';
+    configSaveStatus(message + (_isDirty ? ' Newer edits on this page are not saved yet.' : ''), 'saved');
+    log({ ok: true, changed: j.changed, message: j.message });
+    if (j.changed !== false) showRestartModal();
+  } catch {
+    configSaveStatus(accepted ? 'Save was accepted, but verification lost its connection. Reload to check the saved values before retrying.' : 'The connection failed; the save outcome is unknown. Your edits remain here. Reload to check before retrying.', 'error');
+  } finally {
+    configSaving = false;
+    ['saveBtn', 'saveBtnTop'].forEach(id => { document.getElementById(id).disabled = !configAuthenticated; });
   }
 }
-
 async function saveFullCfg(){
-  const key = getTrackKey();
-  if (!key) return log('Track key is required to save.');
-  let full;
-  try {
-    full = JSON.parse(document.getElementById('fullJson').value || '{}');
-  } catch (e) {
-    return log('Invalid JSON: ' + String(e.message || e));
-  }
-
-  const r = await fetch(`${API_BASE}/config/runtime`, {
-    method:'POST',
-    headers:{ 'Content-Type':'application/json', 'x-track-key': key },
-    body: JSON.stringify({ fullConfig: full }),
-  });
-  const j = await r.json();
-  log(j);
-  if (j && j.ok) {
-    markConfigSaved();
-    showRestartModal();
-  }
+  log('Raw configuration writes are disabled. Use the reviewed form fields.');
 }
 
 function formatFullJson(){
-  try {
-    const v = JSON.parse(document.getElementById('fullJson').value || '{}');
-    document.getElementById('fullJson').value = JSON.stringify(v, null, 2);
-  } catch (e) {
-    log('Invalid JSON: ' + String(e.message || e));
-  }
+  log('Raw configuration editing is disabled.');
 }
 
 async function restartServicesNow(){
-  const key = getTrackKey();
-  if (!key) return log('Track key is required to restart services.');
-
-  // User has explicitly saved and chosen restart; treat current form as saved baseline.
-  markConfigSaved();
-
-  // Hide first because restarting can interrupt response.
+  if (!configAuthenticated || !restartAvailable) return log('Automatic Sonuvi restart is unavailable; use the administrator procedure.');
+  if (!window.confirm('Restart sonuvi-api.service and sonuvi-web.service? Playback and connected clients may briefly disconnect.')) return;
   hideRestartModal();
-
   try {
     const r = await fetch(`${API_BASE}/config/restart-services`, {
-      method:'POST',
-      headers:{ 'Content-Type':'application/json', 'x-track-key': key },
-      body: JSON.stringify({}),
+      method: 'POST', headers: { 'Content-Type':'application/json', 'x-track-key': getTrackKey() }, body: '{}',
     });
-
-    const txt = await r.text();
-    let j = null;
-    try { j = txt ? JSON.parse(txt) : null; } catch {}
-
-    if (j) log(j);
-    else log(`Service restart requested${r.ok ? '.' : ` (HTTP ${r.status})`}`);
-  } catch (e) {
-    markConfigSaved();
-    log('Restart requested. The API connection dropped while services were restarting (this is expected). Visit other pages to explore features.');
-    setTimeout(() => {
-      loadCfg().catch(() => {});
-    }, 5000);
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.restartAccepted) return log(j.error || 'Restart was not accepted.');
+    log('Sonuvi restart accepted, not yet verified. Reload after the services recover.');
+  } catch {
+    log('Restart outcome is unknown because the connection failed. Do not retry automatically; check service health.');
   }
 }
-
 async function checkRatingsDb(){
   const key = getTrackKey();
   const statusEl = document.getElementById('ratingsDbStatus');
@@ -1655,6 +1605,10 @@ async function checkRatingsDb(){
 }
 
 async function loadRatingsBackups(){
+  if (sshRestricted) {
+    document.getElementById('ratingsBackupSelect').innerHTML = '<option value="">SSH restricted — not queried</option>';
+    return;
+  }
   const key = getTrackKey();
   const sel = document.getElementById('ratingsBackupSelect');
   if (!sel || !key) return;
@@ -1732,7 +1686,7 @@ async function restoreRatingsDb(){
   }
 }
 
-function setLight(id, state = 'neutral'){
+function setLight(id, state = 'neutral', label = ''){
   const dot = document.getElementById(id);
   if (!dot) return;
   const map = {
@@ -1744,6 +1698,9 @@ function setLight(id, state = 'neutral'){
   const s = map[state] || map.neutral;
   dot.style.background = s.c;
   dot.style.boxShadow = `0 0 0 3px ${s.b}`;
+  dot.dataset.state = state;
+  dot.title = label || ({good:'Check passed',warn:'Needs attention',bad:'Check failed',neutral:'Not checked'}[state]);
+  dot.setAttribute('aria-label', dot.title);
 }
 
 function setMpdHostLight(state = 'neutral', text = 'not verified'){
@@ -1768,108 +1725,59 @@ function resetMoodeVerificationPill(){
 }
 
 async function checkRuntimeEnv(silent = false){
-  const key = getTrackKey();
-  const statusEl = document.getElementById('runtimeCheckStatus');
-  const detailsEl = document.getElementById('runtimeCheckDetails');
+  const status = document.getElementById('runtimeCheckStatus');
+  const details = document.getElementById('runtimeCheckDetails');
+  if (!configAuthenticated) { status.textContent = 'Verify Server access to inspect the configured runtime.'; return; }
   const btn = document.getElementById('checkRuntimeBtn');
-  if (!key) return log('Track key is required to check runtime env.');
-
-  const mpdHost = String(document.getElementById('mpdHost')?.value || '').trim();
-  const mpdPort = Number(document.getElementById('mpdPort')?.value || 6600);
-  const sshHostRaw = String(document.getElementById('moodeSshHost')?.value || '').trim();
-  const sshHost = sshHostRaw || mpdHost;
-  const sshUser = String(document.getElementById('moodeSshUser')?.value || 'moode').trim();
-  const podcastsEnabled = !!document.getElementById('featurePodcasts')?.checked;
-  const paths = {
-    musicLibraryRoot: String(document.getElementById('pathMusicLibraryRoot')?.value || '').trim(),
-    moodeUsbMount: String(document.getElementById('pathMoodeUsbMount')?.value || '').trim(),
-    piMountBase: String(document.getElementById('pathPiMountBase')?.value || '').trim(),
-    podcastRoot: podcastsEnabled ? String(document.getElementById('pathPodcastRoot')?.value || '').trim() : '',
-  };
-
-  if (btn) btn.disabled = true;
-  if (!silent && statusEl) statusEl.textContent = 'Checking SSH/MPD/paths…';
-  if (!silent && detailsEl) detailsEl.innerHTML = '';
+  btn.disabled = true;
   try {
-    const r = await fetch(`${API_BASE}/config/runtime/check-env`, {
-      method:'POST',
-      headers:{ 'Content-Type':'application/json', 'x-track-key': key },
-      body: JSON.stringify({ mpdHost, mpdPort, sshHost, sshUser, paths }),
-    });
+    const r = await fetch(`${API_BASE}/config/runtime/check-env`, { cache: 'no-store', headers: { 'x-track-key': getTrackKey() } });
     const j = await r.json().catch(() => ({}));
-    if (!r.ok || !j?.ok) throw new Error(j?.error || `HTTP ${r.status}`);
-
-    const ssh = j.sshOk ? 'SSH ✅' : 'SSH ❌';
-    const mpd = j.mpdOk ? 'MPD ✅' : 'MPD ❌';
-    const bad = (j.pathChecks || []).filter((x) => !x.exists).length;
-    runtimeReady = !!(j.sshOk && j.mpdOk);
-    const moodeHintEl = document.getElementById('moodeHint');
-    if (runtimeReady) {
-      setPillState('moodePill', 'good');
-      if (moodeHintEl) moodeHintEl.textContent = `confirmed (${sshHost || mpdHost})`;
-      setMpdHostLight('good', 'verified');
-      ['apiPortLight','uiPortLight','apiNodeIpLight','mpdPortLight','sshHostLight','sshUserLight'].forEach((id) => setLight(id, 'good'));
-    } else {
-      setPillState('moodePill', 'warn');
-      if (moodeHintEl) moodeHintEl.textContent = `not confirmed (${sshHost || mpdHost || 'unknown'})`;
-      setMpdHostLight(j.mpdOk ? 'warn' : 'bad', j.mpdOk ? 'host ok, ssh failed' : 'not verified');
-      setLight('apiPortLight', 'good');
-      setLight('uiPortLight', 'good');
-      setLight('apiNodeIpLight', 'good');
-      setLight('mpdPortLight', j.mpdOk ? 'good' : 'bad');
-      setLight('sshHostLight', j.sshOk ? 'good' : 'bad');
-      setLight('sshUserLight', j.sshOk ? 'good' : 'bad');
+    if (!r.ok || !j.ok) throw new Error('Runtime status unavailable; SSH and MPD have not been evaluated.');
+    runtimeReady = !!j.mpdOk;
+    status.textContent = `MPD: ${j.mpdStatus}. SSH: ${j.ssh.status}. Results apply to saved settings, not unsaved edits.`;
+    const pathLabels = {musicLibraryRoot:'moOde music root',moodeUsbMount:'moOde media mount',piMountBase:'Sonuvi music mount',podcastRoot:'Sonuvi podcast folder'};
+    const pathResults = {present:'Saved folder found',restricted:'Not checked — remote SSH is restricted','not-configured':'No folder configured','not-directory':'Not a folder',missing:'Saved folder not found',unreadable:'Saved folder is not readable',unavailable:'Unable to check'};
+    const summaries = [];
+    for (const row of j.pathChecks || []) {
+      const fieldId = MEDIA_PATH_FIELDS[row.name];
+      if (!fieldId) continue;
+      let label = pathResults[row.status] || 'Not checked';
+      if (mediaPathOverrides[row.name]) label += ` · service-managed (${mediaPathOverrides[row.name]})`;
+      const state = row.status === 'present' ? 'good' : row.status === 'restricted' || row.status === 'not-configured' ? 'neutral' : 'warn';
+      setLight(fieldId+'Light', state, label);
+      const hint = document.getElementById(fieldId+'Status');
+      if (hint) hint.textContent = label;
+      summaries.push(`${pathLabels[row.name]}: ${label}.`);
     }
-    applyRuntimeGate();
-    if (!silent && statusEl) statusEl.textContent = `${ssh} · ${mpd} · Paths ${bad ? `⚠️ ${bad} missing` : '✅'}`;
-    setActionBtnDone('checkRuntimeBtn', !!runtimeReady);
-
-    const rows = Array.isArray(j.pathChecks) ? j.pathChecks : [];
-    const pathLightMap = {
-      musicLibraryRoot: 'pathMusicLibraryRootLight',
-      moodeUsbMount: 'pathMoodeUsbMountLight',
-      piMountBase: 'pathPiMountBaseLight',
-      podcastRoot: 'pathPodcastRootLight',
-    };
-    Object.entries(pathLightMap).forEach(([name, id]) => {
-      const row = rows.find((x) => x && x.name === name);
-      if (!row) return setLight(id, 'neutral');
-      setLight(id, row.exists ? 'good' : 'bad');
-    });
-
-    if (!silent && detailsEl) {
-      const podcastRow = rows.find((x) => x && x.name === 'podcastRoot');
-      const needsPodcastCreate = podcastsEnabled && podcastRow && !podcastRow.exists;
-      const table = rows.length ? `
-        <table class="miniTable" style="margin-top:6px;">
-          <thead><tr><th>Path</th><th>Status</th></tr></thead>
-          <tbody>
-            ${rows.map((x) => `<tr style="background:${x.exists ? 'rgba(34,197,94,.10)' : 'rgba(239,68,68,.12)'}"><td><code>${escapeHtml(x.path || '')}</code></td><td>${x.exists ? '✅ Found' : '❌ Missing'}</td></tr>`).join('')}
-          </tbody>
-        </table>
-      ` : '<em>No path checks returned.</em>';
-      const podcastHint = needsPodcastCreate
-        ? `<div style="margin-top:8px; display:flex; gap:8px; align-items:center;"><span>Podcasts is enabled and podcast root is missing.</span><button class="btn" id="createPodcastRootBtn" type="button">Create Podcasts Folder</button></div>`
-        : '';
-      detailsEl.innerHTML = table + podcastHint;
-      const createBtn = document.getElementById('createPodcastRootBtn');
-      if (createBtn) createBtn.addEventListener('click', () => ensurePodcastRoot().catch(e => log(String(e))));
+    details.textContent = [j.ssh.status === 'restricted' ? 'Remote folder checks have not run: SSH access to moOde is restricted. This is not a missing-folder result.' : j.ssh.reason, ...summaries].join('\n');
+    details.style.whiteSpace = 'pre-line';
+    setMpdHostLight(j.mpdOk ? 'good' : 'warn', j.mpdOk ? 'MPD reachable' : 'MPD unavailable');
+    setLight('mpdPortLight', j.mpdOk ? 'good' : 'warn', j.mpdOk ? 'MPD connection succeeded' : 'MPD connection failed');
+    const sameHost = document.getElementById('apiNodeIp').value === location.hostname;
+    setLight('apiNodeIpLight', sameHost ? 'good' : 'neutral', sameHost ? 'Authenticated connection succeeded' : 'Saved hostname not checked directly');
+    for (const [name,id] of [['api','apiPort'],['web','uiPort']]) {
+      const result = j.listeners?.[name];
+      const label = result === 'listening' ? 'Listening · service-managed' : result === 'unavailable' ? 'Listener unavailable' : 'Service-managed; not checked';
+      setLight(id+'Light', result === 'listening' ? 'good' : result === 'unavailable' ? 'warn' : 'neutral', label);
+      document.getElementById(id+'Status').textContent = label;
     }
-  } catch (e) {
-    runtimeReady = false;
-    const moodeHintEl = document.getElementById('moodeHint');
-    setPillState('moodePill', 'bad');
-    if (moodeHintEl) moodeHintEl.textContent = 'not confirmed';
-    setMpdHostLight('bad', 'not verified');
-    ['mpdPortLight','sshHostLight','sshUserLight'].forEach((id) => setLight(id, 'bad'));
-    applyRuntimeGate();
-    if (!silent && statusEl) statusEl.textContent = `❌ Runtime check failed: ${String(e?.message || e)}`;
-    setActionBtnDone('checkRuntimeBtn', false);
-  } finally {
-    if (btn) btn.disabled = false;
+    setPillState('moodePill', j.mpdOk ? 'good' : 'warn');
+    const moodeHint = document.getElementById('moodeHint');
+    if (moodeHint) moodeHint.textContent = `${j.mpdOk ? 'MPD reachable' : 'MPD unavailable'}; SSH ${j.ssh.status}`;
+    for (const id of ['sshHost','sshUser']) {
+      const label = j.ssh.status === 'restricted' ? 'Unavailable — SSH restricted' : 'Remote SSH not tested';
+      setLight(id+'Light', j.ssh.status === 'restricted' ? 'warn' : 'neutral', label);
+      document.getElementById(id+'Status').textContent = label;
+    }
+  } catch (error) {
+    status.textContent = 'Runtime check unavailable. No current verification result.';
+    details.textContent = '';
+    resetMoodeVerificationPill();
+    document.querySelectorAll('.runtimeFieldStatus').forEach(el => { el.textContent = 'Not checked — status request failed'; });
   }
+  finally { btn.disabled = false; applyRuntimeGate(); }
 }
-
 async function ensurePodcastRoot(){
   const key = getTrackKey();
   const statusEl = document.getElementById('runtimeCheckStatus');
@@ -1906,44 +1814,8 @@ async function ensurePodcastRoot(){
 
 function refreshSshSetupHelp(){
   const el = document.getElementById('sshSetupCmds');
-  if (!el) return;
-  const mpdHost = String(document.getElementById('mpdHost')?.value || '').trim();
-  const sshHostRaw = String(document.getElementById('moodeSshHost')?.value || '').trim();
-  const sshHost = sshHostRaw || mpdHost || '<moode-host>';
-  const sshUser = String(document.getElementById('moodeSshUser')?.value || '').trim() || 'moode';
-  el.textContent = `ssh-keygen -t ed25519 -C "now-playing-api"
-ssh-copy-id ${sshUser}@${sshHost}
-ssh ${sshUser}@${sshHost} 'echo ok'
-ssh ${sshUser}@${sshHost} 'sudo -n true && echo sudo_ok'`;
+  if (el) el.textContent = 'Managed Sonuvi uses the identity and pinned known-hosts file configured in SONUVI_MOODE_SSH_ROOT. Remote SSH capabilities remain restricted pending separate authorization. Do not generate replacement keys, use ssh-copy-id, or grant blanket sudo. MPD connectivity and local paths are checked independently.';
 }
-
-function derivePathsFromMoode(){
-  const moode = String(document.getElementById('pathMoodeUsbMount')?.value || '').trim();
-  const statusEl = document.getElementById('runtimeCheckStatus');
-  if (!moode) {
-    if (statusEl) statusEl.textContent = 'Enter path (1) first (ex. /media/NAMEOFYOURDRIVE).';
-    return;
-  }
-
-  // Accept both /media/<drive> and /media/<drive>/Podcasts
-  const parts = moode.split('/').filter(Boolean);
-  const mediaIdx = parts.indexOf('media');
-  let drive = '';
-  if (mediaIdx >= 0 && parts.length > mediaIdx + 1) drive = parts[mediaIdx + 1];
-  if (!drive && parts.length >= 2) drive = parts[parts.length - 1];
-  if (!drive || /^podcasts$/i.test(drive)) {
-    if (statusEl) statusEl.textContent = 'Could not detect drive name from path (1). Use /media/DRIVENAME.';
-    return;
-  }
-
-  const piEl = document.getElementById('pathPiMountBase');
-  const podEl = document.getElementById('pathPodcastRoot');
-  if (piEl) piEl.value = `/mnt/${drive}`;
-  if (podEl) podEl.value = `/mnt/${drive}/Podcasts`;
-  if (statusEl) statusEl.textContent = `Auto-filled paths using drive: ${drive}`;
-  refreshDirtyState();
-}
-
 function syncAlexaDomainUi(){
   const enabled = !!document.getElementById('featureAlexaSkill')?.checked;
   const domain = String(document.getElementById('alexaDomain')?.value || '').trim();
@@ -2176,6 +2048,11 @@ document.getElementById('featureAlexaSkill')?.addEventListener('change', () => {
 document.getElementById('featureLastfm')?.addEventListener('change', syncLastfmCardVisibility);
 document.getElementById('featurePodcasts')?.addEventListener('change', syncPodcastsUi);
 document.getElementById('configTrackKey')?.addEventListener('input', () => { refreshPodcastsCronHint().catch(() => {}); });
+document.getElementById('configTrackKey')?.addEventListener('input', () => {
+  configAuthenticated = false;
+  accessStatus('Browser key changed locally; verify access before saving settings. Server credentials are unchanged.');
+});
+document.getElementById('verifyServerAccessBtn')?.addEventListener('click', () => loadCfg().catch(() => accessStatus('Server access could not be verified.')));
 document.getElementById('podcastsCronInstallHelpBtn')?.addEventListener('click', () => { showPodcastsCronInstallHelp().catch((e) => log(String(e))); });
 document.getElementById('featurePushover')?.addEventListener('change', syncPushoverCardVisibility);
 document.getElementById('featureRatings')?.addEventListener('change', () => {
@@ -2187,6 +2064,7 @@ async function checkDisplayTakeoverTargetNow(){
   const hint = document.getElementById('displayTakeoverTargetHint');
   const enabled = !!document.getElementById('featureMoodeDisplayTakeover')?.checked;
   if (!hint) return;
+  if (sshRestricted) { hint.textContent = 'Remote display-target verification is unavailable: managed SSH is restricted. MPD and Sonuvi web access are independent.'; return; }
   if (!enabled) { hint.textContent = ''; return; }
 
   const host = location.hostname || 'sonuvi.local';
@@ -2233,8 +2111,6 @@ document.getElementById('sonuviLastfmCompleteBtn')?.addEventListener('click', ()
 document.getElementById('sonuviLastfmRefreshBtn')?.addEventListener('click', () => refreshSonuviLastfmStatus().catch(e => log(String(e))));
 document.getElementById('qobuzAccountRefreshBtn')?.addEventListener('click', () => refreshQobuzAccountStatus().catch(() => {}));
 document.getElementById('qobuzSessionReleaseBtn')?.addEventListener('click', () => releaseQobuzSession().catch((e) => log(String(e))));
-document.getElementById('pathMoodeUsbMount')?.addEventListener('input', derivePathsFromMoode);
-document.getElementById('pathMoodeUsbMount')?.addEventListener('change', derivePathsFromMoode);
 // derivePathsBtn removed; auto-derive runs on input/change.
 document.getElementById('moodeSshHost')?.addEventListener('input', () => { refreshSshSetupHelp(); resetMoodeVerificationPill(); });
 document.getElementById('moodeSshUser')?.addEventListener('input', refreshSshSetupHelp);
@@ -2244,10 +2120,10 @@ document.getElementById('apiPort')?.addEventListener('input', () => setLight('ap
 document.getElementById('uiPort')?.addEventListener('input', () => setLight('uiPortLight','neutral'));
 document.getElementById('apiNodeIp')?.addEventListener('input', () => setLight('apiNodeIpLight','neutral'));
 document.getElementById('moodeSshUser')?.addEventListener('input', () => setLight('sshUserLight','neutral'));
-document.getElementById('pathMusicLibraryRoot')?.addEventListener('input', () => setLight('pathMusicLibraryRootLight','neutral'));
-document.getElementById('pathMoodeUsbMount')?.addEventListener('input', () => setLight('pathMoodeUsbMountLight','neutral'));
-document.getElementById('pathPiMountBase')?.addEventListener('input', () => setLight('pathPiMountBaseLight','neutral'));
-document.getElementById('pathPodcastRoot')?.addEventListener('input', () => setLight('pathPodcastRootLight','neutral'));
+
+
+
+
 document.getElementById('checkRatingsDbBtn')?.addEventListener('click', () => checkRatingsDb().catch(e => log(String(e))));
 document.getElementById('backupRatingsDbBtn')?.addEventListener('click', () => backupRatingsDb().catch(e => log(String(e))));
 document.getElementById('restoreRatingsDbBtn')?.addEventListener('click', () => restoreRatingsDb().catch(e => log(String(e))));
@@ -2275,6 +2151,14 @@ window.addEventListener('beforeunload', (e) => {
 document.getElementById('reloadBtn').onclick = () => loadCfg().catch(e => log(String(e)));
 document.getElementById('saveBtn').onclick = () => saveCfg().catch(e => log(String(e)));
 document.getElementById('saveBtnTop')?.addEventListener('click', () => saveCfg().catch(e => log(String(e))));
+for (const id of Object.values(MEDIA_PATH_FIELDS)) {
+  document.getElementById(id)?.addEventListener('input', () => {
+    setLight(id+'Light', 'neutral', 'Unsaved folder edit — not checked');
+    const hint = document.getElementById(id+'Status');
+    if (hint) hint.textContent = 'Unsaved folder edit — not checked';
+    configSaveStatus('Unsaved changes. Save Configuration to keep them.');
+  });
+}
 document.getElementById('saveFullBtn').onclick = () => saveFullCfg().catch(e => log(String(e)));
 document.getElementById('formatJsonBtn').onclick = () => formatFullJson();
 document.getElementById('modalLaterBtn').onclick = () => hideRestartModal();

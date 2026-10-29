@@ -77,7 +77,7 @@
         API_BASE = `${proto}//${host}:${apiPort}`;
         if (apiHintEl) apiHintEl.textContent = `${host}:${apiPort}`;
         if (webHintEl) webHintEl.textContent = `${host}:${uiPort}`;
-        const k = String(j?.config?.trackKey || '').trim();
+        const k = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
         if (k) runtimeTrackKey = k;
 
         const axEnabled = !!j?.config?.alexa?.enabled;

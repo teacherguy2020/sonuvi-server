@@ -35,9 +35,10 @@ immutable releases under `/opt/sonuvi`, and writable state under `/var/lib/sonuv
 PM2 and the legacy installer are not the current production startup mechanism.
 The old installer and file-push helper fail without making changes.
 
-This branch does not include the complete reviewed release tooling. Obtain an
-approved artifact and deployment procedure; do not treat a main checkout or
-these unit templates as a complete installation bundle. Historical validation
+Main includes the accepted runtime and release builder/verifiers. Obtain an
+approved artifact and deployment procedure; the remaining host activation and
+fresh-install gaps are listed in the [source baseline](../runbooks/sonuvi-source-baseline.md).
+Do not treat a main checkout or unit templates as a complete installation bundle. Historical validation
 notes remain in [install-and-validation.md](install-and-validation.md).
 
 ## Configure the first connection
@@ -46,10 +47,11 @@ notes remain in [install-and-validation.md](install-and-validation.md).
 2. Set the moOde/MPD host and port.
 3. Preserve the approved operator authentication and separate native-device pairing.
 4. Use the release's validated configuration/protected environment and managed SSH paths.
-5. Do not use Config Save/Restart to bootstrap an immutable installation: Save
-   still has known protected-field incompatibilities. A hardened service may
-   reject automatic restart; an administrator must restart the API/web pair
-   together and verify health. Never weaken its sandbox or restart legacy units.
+5. Config Save edits only supported non-secret settings and verifies media-path
+   readback after authentication. It is not an installation/migration mechanism.
+   Restart requires the separately configured narrow Sonuvi-pair policy; when
+   unavailable, an administrator must restart the pair and verify health.
+   Never weaken the sandbox or restart legacy units.
 
 Use [config-interface.md](config-interface.md) for the page model and
 [config-network-and-runtime.md](config-network-and-runtime.md) for connection

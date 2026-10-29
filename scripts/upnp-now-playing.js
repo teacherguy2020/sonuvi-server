@@ -30,7 +30,7 @@
     if (keyPromise) return keyPromise;
     keyPromise = fetch(`${base}/config/runtime`, { cache: 'no-store' })
       .then((response) => response.json().catch(() => ({})))
-      .then((data) => { trackKey = String(data?.config?.trackKey || '').trim(); return trackKey; })
+      .then((data) => { trackKey = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim(); return trackKey; })
       .catch(() => '')
       .finally(() => { keyPromise = null; });
     return keyPromise;

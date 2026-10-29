@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { runtimeStatePaths } from '../lib/runtime-state-paths.mjs';
 import {
   jukeboxEntries,
   beginJukeboxSession,
@@ -42,7 +43,7 @@ function parseMpdId(raw) {
 export function registerMultiphoneRoutes(app, deps) {
   const { requireTrackKey, mpdQueryRaw, mpdEscapeValue, mpdHasACK, parseMpdFirstBlock,
     multiphonePlaylistName = 'Multiphone Playlist',
-    jukeboxStatePath = (process.env.NODE_TEST_CONTEXT || process.argv.includes('--test')) ? null : path.resolve(process.cwd(), 'data/jukebox-entries.json') } = deps;
+    jukeboxStatePath = (process.env.NODE_TEST_CONTEXT || process.argv.includes('--test')) ? null : runtimeStatePaths().jukeboxStatePath } = deps;
   const playlistName = String(multiphonePlaylistName || 'Multiphone Playlist').trim();
   loadJukeboxState(jukeboxStatePath);
   const entries = (process.env.NODE_TEST_CONTEXT || process.argv.includes('--test')) ? new Map() : jukeboxEntries;

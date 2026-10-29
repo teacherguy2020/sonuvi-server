@@ -3,6 +3,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { MPD_HOST, MOODE_SSH_HOST, MOODE_SSH_USER } from '../config.mjs';
+import { runtimeStatePaths } from '../lib/runtime-state-paths.mjs';
 
 const execFileP = promisify(execFile);
 
@@ -64,7 +65,7 @@ const LIB_HEALTH_CACHE_TTL_MS = 15 * 60 * 1000;
 const LIBRARY_GENRES_CACHE_TTL_MS = 15 * 60 * 1000;
 const LIBRARY_THUMBS_CACHE_DIR =
   String(process.env.NOW_PLAYING_THUMBS_CACHE_DIR || '').trim()
-  || path.resolve(process.cwd(), '.cache/library-thumbs');
+  || runtimeStatePaths().libraryThumbsDir;
 let libraryHealthCache = null;
 let libraryHealthJob = null;
 let libraryGenresCache = null;

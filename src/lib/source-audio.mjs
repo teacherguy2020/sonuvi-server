@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { runtimeStatePaths } from './runtime-state-paths.mjs';
 
 const execFileP = promisify(execFile);
 
@@ -104,7 +105,7 @@ export function createSourceAudioProbe({
   ffprobePath = process.env.FFPROBE || '/usr/bin/ffprobe',
 } = {}) {
   const probeVersion = 2;
-  const configuredCachePath = path.resolve(String(cachePath || path.join(process.cwd(), 'var', 'mobile-source-audio.json')));
+  const configuredCachePath = path.resolve(String(cachePath || runtimeStatePaths().sourceAudioCachePath));
   let cache = null;
   const inflight = new Map();
   let persistOperation = Promise.resolve();

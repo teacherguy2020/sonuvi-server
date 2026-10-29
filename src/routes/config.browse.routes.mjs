@@ -1,3 +1,4 @@
+import { RadioCatalogUnavailableError } from '../lib/moode-radio-catalog.mjs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { MPD_HOST, TRACK_KEY, PORT, MOODE_SSH_HOST, MOODE_SSH_USER } from '../config.mjs';
@@ -80,13 +81,15 @@ async function refreshRecentRadioCache() {
   recentRadioCache.inflight = (async () => {
     try {
       const resp = await localApi('/config/queue-wizard/radio-favorites', { timeoutMs: 7000 });
-      const rows = (resp.ok && resp?.json?.ok && Array.isArray(resp.json.favorites)) ? resp.json.favorites : [];
+      if (!resp.ok || resp?.json?.ok !== true || !Array.isArray(resp.json.favorites)) throw new RadioCatalogUnavailableError();
+      const rows = resp.json.favorites;
       const items = rows.map((x) => {
         const title = String(x?.stationName || x?.file || '(station)').trim();
         return { kind: 'radio', title, url: String(x?.file || '').trim(), art: `/art/radio-logo.jpg?name=${encodeURIComponent(title)}` };
       });
-      if (items.length) { recentRadioCache.ts = Date.now(); recentRadioCache.items = items; }
+      recentRadioCache.ts = Date.now(); recentRadioCache.items = items;
     } catch {
+      throw new RadioCatalogUnavailableError();
     } finally { recentRadioCache.inflight = null; }
     return recentRadioCache.items;
   })();
@@ -227,7 +230,7 @@ export function registerConfigBrowseRoutes(app, deps) {
       const items = (recentRadioCache.items || []).slice(0, limit);
       return res.json({ ok: true, count: items.length, items, source: 'radio-cache' });
     } catch (e) {
-      return res.status(500).json({ ok: false, error: e?.message || String(e) });
+      return res.status(503).json({ ok: false, code: 'RADIO_CATALOG_UNAVAILABLE', error: 'Radio catalog unavailable. Please retry.' });
     }
   });
 

@@ -42,6 +42,7 @@ export function registerAllConfigRoutes(app, deps) {
 
   registerConfigQueueWizardApplyRoute(app, {
     requireTrackKey: deps.requireTrackKey,
+    mpdQueryRaw: deps.mpdQueryRaw,
   });
 
   const queueWizardVibe = registerConfigQueueWizardVibeRoutes(app, {
