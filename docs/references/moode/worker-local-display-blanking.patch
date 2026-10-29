@@ -1,0 +1,64 @@
+--- worker.php
++++ worker.php
+@@ -1971,5 +1971,5 @@
+ 	}
+-	if ($_SESSION['peppy_display'] == '1' && $_SESSION['scn_blank'] != 'off') {
++	if (($_SESSION['local_display'] == '1' || $_SESSION['peppy_display'] == '1') && $_SESSION['scn_blank'] != 'off') {
+ 		//debugLog('** chkPeppyScnBlank');
+ 		chkPeppyScnBlank();
+ 	}
+@@ -2328,6 +2328,37 @@
+ // Peppy screen blank
+ // - Timeout is set
+-// - Peppy is on
++// - Local or Peppy display is on
+ // - No renderer is active
+-// - MPD is not playing
++// - MPD or authoritative external Now Playing source is not active
++
++function chkAttachedDisplayPlaybackActive($mpdState) {
++	if ($_SESSION['local_display'] != '1') {
++		return $mpdState == 'play';
++	}
++
++	$localDisplay = parse_url($_SESSION['local_display_url']);
++	$host = is_array($localDisplay) ? ($localDisplay['host'] ?? '') : '';
++	if ($host == '' || in_array($host, array('localhost', '127.0.0.1', '::1'))) {
++		return $mpdState == 'play';
++	}
++
++	// Keep the curl command constrained to a hostname or IPv4 literal.
++	if (preg_match('/^[A-Za-z0-9.-]+$/', $host) != 1) {
++		return $mpdState == 'play';
++	}
++
++	$nowPlayingUrl = 'http://' . $host . ':3101/now-playing';
++	$nowPlayingJson = implode('', sysCmd('curl -s --max-time 1 ' . escapeshellarg($nowPlayingUrl)));
++	$nowPlaying = json_decode($nowPlayingJson, true);
++	if (!is_array($nowPlaying)) {
++		return $mpdState == 'play';
++	}
++
++	return ($nowPlaying['state'] ?? '') == 'play'
++		|| ($nowPlaying['isAirplay'] ?? false) === true
++		|| ($nowPlaying['isUpnp'] ?? false) === true
++		|| ($nowPlaying['millsMode'] ?? false) === true
++		|| ($nowPlaying['displayMode'] ?? '') == 'mills';
++}
++
+ function chkPeppyScnBlank() {
+@@ -2337,5 +2368,6 @@ function chkPeppyScnBlank() {
+ 		$mpdState = getMpdStatus($sock)['state'];
+ 		closeMpdSock($sock);
+-		if ($mpdState == 'play') {
++		$displayActive = chkAttachedDisplayPlaybackActive($mpdState);
++		if ($displayActive) {
+ 			$GLOBALS['scn_blank_timeout'] = $_SESSION['scn_blank']; // Reset timeout
+ 		}
+@@ -2344,5 +2376,5 @@ function chkPeppyScnBlank() {
+ 		if ($GLOBALS['scn_blank_timeout'] != 'off'
+ 			&& chkRendererActive() === false
+ 			&& $_SESSION['rxactive'] == '0'
+-			&& $mpdState != 'play') {
++			&& $displayActive === false) {
+ 			// This SQL value is set to '1' here and '0' in watchdog.sh wake_display()

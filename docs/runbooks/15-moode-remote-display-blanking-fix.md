@@ -61,6 +61,18 @@ This is a version-sensitive moOde core-file change. Back up and syntax-check
 `/var/www/daemon/worker.php` after every moOde upgrade; do not copy an old
 worker wholesale over a new release.
 
+### Version-specific patch artifacts
+
+The implementation is captured as reviewable, replay-tested unified diffs:
+
+- `docs/references/moode/worker-local-display-blanking.patch`
+- `docs/references/moode/watchdog-local-display-wake.patch`
+
+They target the recorded 2026-10-29 `worker.php` and `watchdog.sh` hashes
+in `docs/references/moode/README.md`. Stage matching files, run
+`patch --dry-run -p0`, and inspect the diff before any separately authorized
+live application. The source artifacts themselves do not modify a moOde host.
+
 ## How to apply on a new moOde host
 
 > Use this only when local display target URL points to an external host
@@ -140,6 +152,8 @@ For convenience, this repo includes version-specific reference artifacts:
 - `docs/references/moode/watchdog.sh.upstream-20260302.example`
 - `docs/references/moode/watchdog.sh.patched.example`
 - `docs/references/moode/watchdog-remote-display.patch`
+- `docs/references/moode/worker-local-display-blanking.patch`
+- `docs/references/moode/watchdog-local-display-wake.patch`
 
 Recommended order:
 
