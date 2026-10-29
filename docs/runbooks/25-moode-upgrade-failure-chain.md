@@ -217,9 +217,11 @@ Run this in order. Do not start by changing application code on the Pi5.
 
 1. Confirm the moOde release.
 2. Back up `/var/www/daemon/worker.php` and `watchdog.sh`.
-3. Reapply the release-appropriate changes from
-   [`15-moode-remote-display-blanking-fix.md`](15-moode-remote-display-blanking-fix.md).
-4. Run `php -l` on `worker.php` and `bash -n` on `watchdog.sh`.
+3. Stage the matching `worker-local-display-blanking.patch` and
+   `watchdog-local-display-wake.patch` from `docs/references/moode/`; run
+   `patch --dry-run -p0` for each and inspect the resulting diffs.
+4. Apply only version-appropriate diffs, then run `php -l` on `worker.php`
+   and `bash -n` on `watchdog.sh`; restart both daemons.
 5. Confirm the Target URL is portless and Chromium uses the same value.
 
 Never copy an old `worker.php` wholesale over a new moOde release.
@@ -273,7 +275,8 @@ being `active` without fresh data is not a successful verification.
 
 ### D. Exercise the actual user behaviors
 
-- pause/stop local playback and allow the configured blank interval to pass;
+- confirm the configured `scn_blank` interval; it is a moOde setting, not a hard-coded timeout;
+- pause/stop local playback and allow that interval to pass;
 - resume local playback and confirm wake;
 - test AirPlay and confirm both audio and metadata;
 - test Peppy needles and spectrum movement;

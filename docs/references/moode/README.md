@@ -31,7 +31,30 @@ They are not generic moOde drop-ins. First stage the target files and verify
 each patch with `patch --dry-run -p0`; inspect the resulting diff before any
 separately authorized live application. The repository test suite replays both
 patches against minimized GPL-attributed fixtures. No patch in this directory
-is applied to a live host by the repository.
+is applied automatically; a live host is changed only by an explicitly
+authorized deployment.
+
+## Current live installation and upgrade rule
+
+On 2026-10-29, the two patches above were applied on `moode@10.0.0.254`
+only after their exact baseline SHA-256 values matched, both dry runs
+succeeded, and the staged diffs were inspected. The live post-apply hashes are:
+
+- `worker.php`: `b8b6f623dc54a7d0d55b852a7aa32b5543221efc50f922dc0f95bc780491b819`
+- `watchdog.sh`: `d0ac04a6894745bd1467ed61736e4d402089390a6998e07d65430400866e46f2`
+
+The worker and watchdog were syntax-checked, restarted, and verified on the
+physical display. The configured `scn_blank` value was `600` seconds then;
+that is a moOde setting, not a patch constant.
+
+After every moOde upgrade:
+
+1. Record the new moOde version and fresh SHA-256 values for both target files.
+2. Stage both patches, run `patch --dry-run -p0`, and inspect each resulting diff.
+3. If either patch does not apply cleanly, stop and derive a reviewed,
+   release-specific equivalent; never copy an old daemon file over an upgrade.
+4. Back up, apply, syntax-check, and restart both daemon files.
+5. Verify real paused/stopped blanking and playback wake on the physical display.
 
 ## License / credit
 

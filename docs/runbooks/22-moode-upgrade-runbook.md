@@ -32,6 +32,13 @@ Create and verify all of these recovery layers:
 Do not rely on the native moOde backup alone for sticker ratings or custom
 host files.
 
+> **Required post-install step:** Treat a moOde upgrade as replacing the local
+> display modifications. Do not call the upgrade complete until the
+> version-appropriate worker and watchdog patches have been revalidated,
+> reapplied when needed, and verified on the physical display. See
+> [`../references/moode/README.md`](../references/moode/README.md) for the
+> current live baseline and upgrade rule.
+
 ## Immediately after upgrading
 
 ### 1. Confirm the moOde version and database state
@@ -79,6 +86,13 @@ The blanking decision must use the authoritative playback source:
 - `state=play`, `isAirplay=true`, or `isUpnp=true` means active playback;
 - paused/stopped means the attached display may blank.
 
+The current deployed artifact is
+[`worker-local-display-blanking.patch`](../references/moode/worker-local-display-blanking.patch).
+It is version-scoped: record the installed worker SHA-256, stage it, run
+`patch --dry-run -p0`, and inspect its diff. If it no longer applies cleanly,
+derive and review a new release-specific patch; never copy a previous
+`worker.php` over an upgrade.
+
 Back up `/var/www/daemon/worker.php` before applying the version-appropriate
 change. Validate and restart the worker after patching:
 
@@ -95,18 +109,24 @@ The worker daemonizes itself. Confirm that `/run/worker.pid` contains a live
 worker PID and that `php -l` reports no syntax errors. Do not enable the
 Peppy-specific branch merely to obtain blanking for Player or Kiosk.
 
-### 4. Reapply the external-display watchdog patch
+### 4. Reapply the attached-display watchdog patch
 
 The stock r1034 watchdog probes moOde’s `/command/` endpoint on the target
 host. Sonuvi does not provide that endpoint, so the probe returns 404 and
 can falsely wake the display while paused or stopped.
 
-Apply the version-appropriate patch from:
+Apply the release-appropriate attached-display patch from:
 
-- [`docs/references/moode/watchdog-remote-display.patch`](../references/moode/watchdog-remote-display.patch)
-- [`docs/runbooks/15-moode-remote-display-blanking-fix.md`](./15-moode-remote-display-blanking-fix.md)
+- [`watchdog-local-display-wake.patch`](../references/moode/watchdog-local-display-wake.patch)
+  - Current local Sonuvi/Kiosk attached-display wake behavior.
+- [`watchdog-remote-display.patch`](../references/moode/watchdog-remote-display.patch)
+  - Historical r1034 remote-only behavior; not a substitute for the current patch.
 
-The resulting remote branch must query:
+As with the worker patch, record the target SHA-256, stage the patch, run
+`patch --dry-run -p0`, and inspect the diff. If it does not apply cleanly,
+stop and derive a reviewed release-specific `watchdog.sh` patch.
+
+The resulting Sonuvi-state check must query:
 
 ```text
 http://<NOW_PLAYING_HOST>:3101/now-playing
@@ -187,6 +207,14 @@ then follow the consolidated runbook's fresh-data checks rather than relying
 only on `systemctl is-active`.
 
 ## Functional verification
+
+The blank interval is the moOde Screen Blank setting, not a code constant.
+Check the configured value before testing (for example, `600` means ten
+minutes):
+
+```bash
+sudo moodeutl -d -gv scn_blank
+```
 
 Test each state, allowing the configured screen-blank interval to elapse:
 
