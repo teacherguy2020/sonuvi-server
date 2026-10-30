@@ -374,6 +374,31 @@ accuracy:
 - `output`: the same actual ALSA observation as `hardwareOutput`, with device,
   interface, format, rate, and channels grouped under the output role.
 
+### Active radio-stream source evidence
+
+When diagnostics are requested for an active, ordinary MPD radio stream, the
+Server may augment `sourceFile` with a short, upstream observation. The stream
+URL is read only from current Server-owned MPD `status`/`currentsong` state;
+the request cannot provide a URL, host, path, redirect destination, or command.
+Qobuz Connect, UPnP, local files, paused/stopped playback, and non-radio paths
+do not start this probe.
+
+The initial URL and every manual redirect must be public HTTP(S) destinations;
+loopback, local/private/link-local, multicast, documentation, and unresolved
+addresses are rejected. The Server requests at most a 64 KiB byte range with a
+short timeout, consumes at most 64 KiB, and sends those bytes to `ffprobe` on
+stdin. `ffprobe` never receives a network URL. Results are briefly cached per
+normalized active stream URL, deduplicated while a probe is in flight, and
+discarded immediately when MPD's current stream identity changes.
+
+A successful bounded probe carries `valueType: "live-stream"` and
+`provenance: "live-upstream-probe"`; for example it can establish
+`AAC-LC · 44.1 kHz · Stereo`. `icy-br` is represented separately as encoded
+bitrate with `encodedBitrateProvenance: "icy.header"`. Header-only evidence is
+partial and uses `codecStatus: "reported"`; it does not invent sample rate,
+channels, bit depth, decoded PCM, ALSA/DAC output, resampling, or Bit Perfect
+delivery. For AAC, source bit depth remains `not-applicable`.
+
 This distinction is required because moOde's `audioinfo.php` builds its
 `Decoded to` string from MPD's decoder fields but appends MPD's `bitrate`
 field to that same string. For AAC, moOde also maps MPD's floating-point
@@ -393,4 +418,4 @@ while Qobuz owns playback; the server route also rejects those MPD commands
 with a source-aware unavailable response. No Qobuz remote-control API is
 implied by the metadata integration.
 
-*Last reviewed: 2026-10-28 America/Chicago*
+*Last reviewed: 2026-10-30 America/Chicago*

@@ -136,6 +136,8 @@ export function registerAllConfigRoutes(app, deps) {
     getQobuzNowPlaying: deps.getQobuzNowPlaying,
     probeAlsaHardware: deps.probeAlsaHardware,
     getSourceAudio: deps.getSourceAudio,
+    getActiveRadioStream: deps.getActiveRadioStream,
+    getLiveRadioAudio: deps.getLiveRadioAudio,
   });
 
   if (deps.controlPoint) {

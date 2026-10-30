@@ -276,6 +276,7 @@ import { registerMobileRoutes } from './src/routes/mobile.routes.mjs';
 import { getBrowseIndex } from './src/lib/browse-index.mjs';
 import { buildMobileCatalog } from './src/lib/mobile-track-identity.mjs';
 import { createSourceAudioProbe } from './src/lib/source-audio.mjs';
+import { createLiveRadioAudioProbe } from './src/lib/live-radio-audio.mjs';
 import {
   buildQobuzNowPlayingPayload,
   createQobuzConnectSource,
@@ -4255,6 +4256,36 @@ const sourceAudioProbe = createSourceAudioProbe({
   },
   cachePath: RUNTIME_STATE_PATHS.sourceAudioCachePath,
 });
+
+const liveRadioAudioProbe = createLiveRadioAudioProbe({
+  // Use the API's read-only fetch boundary rather than accepting a URL from a
+  // diagnostic request. The probe itself validates every initial/redirect URL.
+  fetchImpl: fetch,
+  capabilities: RUNTIME_CAPABILITIES,
+});
+
+async function getActiveRadioStream() {
+  const [statusRaw, songRaw] = await Promise.all([
+    mpdQueryRaw('status'),
+    mpdQueryRaw('currentsong'),
+  ]);
+  if (mpdHasACK(statusRaw) || mpdHasACK(songRaw)) return null;
+
+  const status = parseMpdKeyVals(statusRaw);
+  if (String(status?.state || '').trim().toLowerCase() !== 'play') return null;
+  const song = parseMpdKeyVals(songRaw);
+  const url = String(song?.file || '').trim();
+  if (getStreamKind(url) !== 'radio') return null;
+
+  const songId = String(song?.id || status?.songid || status?.song || '').trim();
+  return {
+    owner: 'server-mpd-current',
+    active: true,
+    kind: 'radio',
+    url,
+    streamKey: `${songId}:${url}`,
+  };
+}
 
 async function runCmdQuiet(cmd, args) {
   try {
@@ -9509,6 +9540,8 @@ const configRouteHandles = registerAllConfigRoutes(app, {
   getYoutubeNowPlayingHint: () => youtubeNowPlayingHint,
   getYoutubeQueueHint,
   getSourceAudio: sourceAudioProbe.get,
+  getActiveRadioStream,
+  getLiveRadioAudio: liveRadioAudioProbe.get,
   getQobuzNowPlaying: () => qobuzConnect.get(),
   releaseQobuzConnect: () => qobuzConnectController.release(),
   controlPoint: upnpControlPoint,

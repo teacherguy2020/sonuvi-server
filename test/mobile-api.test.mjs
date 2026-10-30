@@ -1595,6 +1595,7 @@ test('mobile audio info requires bearer auth and strips internal source metadata
           fetchedAt: '2026-09-30T12:00:00.000Z',
           rows: [
             { section: 'Input / Output', key: 'Source', value: 'USB/SamsungMoode/Album/01 - Track.flac' },
+            { section: 'Input / Output', key: 'Playable URL', value: 'https://stream.example.org/live?private=never-forward' },
             { section: 'Input / Output', key: 'Decoded to', value: 'PCM 24 bit 44.1 kHz, Stereo' },
             { section: 'Audio Device', key: 'Device', value: 'Test DAC' },
             { section: 'Audio Device', key: 'Sample rate', value: '192 kHz' },
@@ -1651,6 +1652,8 @@ test('mobile audio info requires bearer auth and strips internal source metadata
               live: true,
               measured: false,
               verified: true,
+              streamUrl: 'https://stream.example.org/live?private=never-forward',
+              probeError: 'upstream probe failed: private diagnostic detail',
             },
             decodedAudio: {
               format: 'PCM',
@@ -1773,6 +1776,7 @@ test('mobile audio info requires bearer auth and strips internal source metadata
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.body.rows, [
     { section: 'Input / Output', key: 'Source', value: 'Local file' },
+    { section: 'Input / Output', key: 'Playable URL', value: 'Network stream' },
     { section: 'Input / Output', key: 'Decoded to', value: 'PCM 24 bit 44.1 kHz, Stereo' },
     { section: 'Audio Device', key: 'Device', value: 'Test DAC' },
     { section: 'Audio Device', key: 'Sample rate', value: '192 kHz' },
@@ -1788,7 +1792,7 @@ test('mobile audio info requires bearer auth and strips internal source metadata
   assert.equal(response.body.diagnostics.decodedAudio.pcmBitrateBps, 2116800);
   assert.equal(response.body.diagnostics.output.format, 'S32_LE');
   assert.equal(response.body.diagnostics.hardwareOutput.format, 'S32_LE');
-  assert.doesNotMatch(JSON.stringify(response.body), /USB\/SamsungMoode|moode\.local|PHPSESSID|stored-moode-session/);
+  assert.doesNotMatch(JSON.stringify(response.body), /USB\/SamsungMoode|moode\.local|PHPSESSID|stored-moode-session|stream\.example\.org|private diagnostic detail/);
 });
 
 test('mobile now-playing replaces a generic radio fallback with the resolved queue station', async () => {

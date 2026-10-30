@@ -417,7 +417,7 @@ function buildSourceFileMetadata({
   const probedCodec = text(probe?.codec);
   const codec = probedCodec || text(reportedDetails.codec) || parsedSource.codec;
   const codecKind = text(probe?.codecKind) || audioCodecKind(codec);
-  const codecStatus = probedCodec ? 'verified' : (codec ? 'reported' : 'unavailable');
+  const codecStatus = text(probe?.codecStatus) || (probedCodec ? 'verified' : (codec ? 'reported' : 'unavailable'));
   const bitDepth = positiveInt(probe?.bitDepth)
     || (codecKind === 'lossless'
       ? positiveInt(reportedDetails.bitDepth) || positiveInt(parsedSource.bitDepth)
@@ -430,12 +430,18 @@ function buildSourceFileMetadata({
     || (encodedBitrateBps
       ? (qobuzActive ? 'pibuz-qobuz-metadata' : 'moode-audioinfo.php:mpd-status-bitrate')
       : '');
-  const provenance = probe
-    ? 'ffprobe.source-file'
-    : (qobuzActive ? 'pibuz-qobuz-metadata' : 'moode-audioinfo.php');
+  const provenance = text(probe?.provenance)
+    || (probe
+      ? 'ffprobe.source-file'
+      : (qobuzActive ? 'pibuz-qobuz-metadata' : 'moode-audioinfo.php'));
+  const valueType = text(probe?.valueType)
+    || (qobuzActive ? 'source-reported' : 'source-file');
+  const verified = typeof probe?.verified === 'boolean'
+    ? probe.verified
+    : Boolean(probe && (probedCodec || probe?.container || probe?.bitDepthStatus === 'verified'));
 
   return {
-    format: text(sourceFormat) || 'Unknown',
+    format: text(probe?.format) || text(sourceFormat) || 'Unknown',
     container: text(probe?.container) || parsedSource.container || 'Unknown',
     codec: codec || 'Unknown',
     codecStatus,
@@ -451,13 +457,15 @@ function buildSourceFileMetadata({
       || parsedSource.channels,
     encodedBitrateBps,
     encodedBitrateKbps: encodedBitrateBps ? Math.round(encodedBitrateBps / 1000) : null,
-    encodedBitrateStatus: encodedBitrateBps ? 'reported' : 'unavailable',
+    encodedBitrateStatus: encodedBitrateBps
+      ? (text(probe?.encodedBitrateStatus) || 'reported')
+      : 'unavailable',
     encodedBitrateProvenance: encodedBitrateProvenance || null,
     provenance,
-    valueType: qobuzActive ? 'source-reported' : 'source-file',
-    live: true,
-    measured: false,
-    verified: Boolean(probe && (probedCodec || probe?.container || probe?.bitDepthStatus === 'verified')),
+    valueType,
+    live: typeof probe?.live === 'boolean' ? probe.live : true,
+    measured: typeof probe?.measured === 'boolean' ? probe.measured : false,
+    verified,
     configured: false,
   };
 }

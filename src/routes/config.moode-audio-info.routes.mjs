@@ -85,6 +85,8 @@ export function registerConfigMoodeAudioInfoRoutes(app, deps = {}) {
   const readAlsaHardware = deps.probeAlsaHardware || (() => probeAlsaHardware());
   const getDeviceMeta = deps.fetchMoodeDeviceMeta || fetchMoodeDeviceMeta;
   const getSourceAudio = deps.getSourceAudio;
+  const getActiveRadioStream = deps.getActiveRadioStream;
+  const getLiveRadioAudio = deps.getLiveRadioAudio;
 
   app.get('/config/moode/audio-info', async (req, res) => {
     try {
@@ -148,16 +150,26 @@ export function registerConfigMoodeAudioInfoRoutes(app, deps = {}) {
       if (qobuz?.active || diagnosticsRequested) {
         alsa = await readAlsaHardware().catch(() => null);
       }
-      if (diagnosticsRequested && !qobuz?.active && typeof getSourceAudio === 'function') {
-        const source = rows.find((row) => (
-          String(row?.section || '').trim() === 'Input / Output'
-            && String(row?.key || '').trim().toLowerCase() === 'source'
-        ))?.value;
-        const sourceValue = String(source || '').trim();
-        if (sourceValue
-          && !/^(?:not playing|unknown|—)$/i.test(sourceValue)
-          && !/^[a-z][a-z\d+.-]*:\/\//i.test(sourceValue)) {
-          sourceAudio = await getSourceAudio(sourceValue).catch(() => null);
+      if (diagnosticsRequested && !qobuz?.active) {
+        // A live-radio URL is never read from the request or from an
+        // audioinfo.php row. The injected getter is backed by current MPD
+        // state, and the probe itself enforces public-URL/redirect policy.
+        const activeRadio = typeof getActiveRadioStream === 'function'
+          ? await getActiveRadioStream().catch(() => null)
+          : null;
+        if (activeRadio && typeof getLiveRadioAudio === 'function') {
+          sourceAudio = await getLiveRadioAudio(activeRadio).catch(() => null);
+        } else if (!activeRadio && typeof getSourceAudio === 'function') {
+          const source = rows.find((row) => (
+            String(row?.section || '').trim() === 'Input / Output'
+              && String(row?.key || '').trim().toLowerCase() === 'source'
+          ))?.value;
+          const sourceValue = String(source || '').trim();
+          if (sourceValue
+            && !/^(?:not playing|unknown|—)$/i.test(sourceValue)
+            && !/^[a-z][a-z\d+.-]*:\/\//i.test(sourceValue)) {
+            sourceAudio = await getSourceAudio(sourceValue).catch(() => null);
+          }
         }
       }
       if (qobuz?.active) {
