@@ -149,6 +149,66 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
     }
   }
 
+  async function applyVibePlanToMpd(job, { mpdHost, playNow, keepPlaying, resumePlayback = false }) {
+    const tracks = (Array.isArray(job?.tracks) ? job.tracks : [])
+      .map((track) => ({ ...track, file: String(track?.file || '').trim() }))
+      .filter((track) => track.file);
+    if (!tracks.length) return { added: [], failed: [] };
+
+    // The Vibe planner must finish before this point. Cropping is intentionally
+    // delayed until a non-empty plan exists so a failed discovery request never
+    // leaves the listener with an empty queue.
+    job.phase = 'applying planned queue';
+    job.updatedAt = Date.now();
+    job.logs.push(`[apply] cropping current queue and adding ${tracks.length} planned track(s)`);
+    appendVibeJobLog(job, 'apply-start', { requested: tracks.length, playNow, keepPlaying }).catch(() => {});
+
+    await execFileP('mpc', ['-h', mpdHost, '-p', '6600', 'crop']);
+    try { await execFileP('mpc', ['-h', mpdHost, '-p', '6600', 'random', 'off']); } catch (_) {}
+
+    const added = [];
+    const failed = [];
+    for (const track of tracks) {
+      try {
+        await execFileP('mpc', ['-h', mpdHost, '-p', '6600', 'add', track.file]);
+        added.push(track);
+      } catch (error) {
+        failed.push({ file: track.file, error: error?.message || String(error) });
+      }
+    }
+
+    if (playNow && added.length) {
+      try { await execFileP('mpc', ['-h', mpdHost, '-p', '6600', 'play']); } catch (_) {}
+    } else if (resumePlayback && added.length) {
+      // A slow plan can finish after the final seed has naturally ended. In
+      // Endless Vibe that means resume the just-extended queue, but do not
+      // force playback for ordinary queue-building requests.
+      try {
+        const { stdout } = await execFileP('mpc', ['-h', mpdHost, '-p', '6600', 'status']);
+        if (!/\[playing\]/i.test(String(stdout || ''))) {
+          await execFileP('mpc', ['-h', mpdHost, '-p', '6600', 'play']);
+        }
+      } catch (_) {}
+    }
+
+    job.tracks = added;
+    job.builtCount = added.length;
+    for (const track of added) {
+      job.added.push({
+        eventId: job.nextEventId++,
+        artist: String(track.artist || ''),
+        title: String(track.title || ''),
+        method: String(track.method || 'planner-v2'),
+      });
+    }
+    if (job.added.length > 500) job.added = job.added.slice(-500);
+    job.debug.appliedCount = added.length;
+    job.debug.applyFailures = failed;
+    job.logs.push(`[apply] added ${added.length}/${tracks.length} planned track(s)`);
+    appendVibeJobLog(job, 'apply-complete', { added: added.length, failed, playNow, keepPlaying, resumePlayback }).catch(() => {});
+    return { added, failed };
+  }
+
   async function readEndlessVibeEnabled() {
     try {
       const raw = await fs.readFile(endlessVibeSettingsPath, 'utf8');
@@ -237,7 +297,7 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
       if (!requireTrackKey(req, res)) return;
 
       const targetQueueRaw = req.body?.targetQueue;
-      const targetQueue = Math.max(10, Math.min(200, Number(targetQueueRaw) || 50));
+      const targetQueue = Math.max(10, Math.min(200, Number(targetQueueRaw) || 12));
       const minRating = Math.max(0, Math.min(5, Number(req.body?.minRating || 0)));
       const excludeGenre = String(req.body?.excludeGenre || 'christmas').trim().toLowerCase();
       const playNow = !!req.body?.playNow;
@@ -271,33 +331,22 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
         '--seed-title', title,
         '--target-queue', String(targetQueue),
         '--json-out', jsonTmp,
-        '--mode', playNow ? 'play' : 'load',
-        '--similar-limit', isSmallQueue ? '80' : '150',
-        '--shuffle-top', isSmallQueue ? '15' : '25',
-        '--reseed-random',
-        '--max-misses', isSmallQueue ? '6' : '12',
+        '--mode', 'load',
+        '--similar-limit', isSmallQueue ? '100' : '150',
+        '--planner-v2',
+        '--planner-max-expansions', '3',
         '--max-seconds', isSmallQueue ? '18' : '45',
         '--host', mpdHost,
         '--port', '6600',
         '--debug-trace',
-        '--simple-seed-pass',
+        '--dry-run',
       ];
       if (excludeGenre === 'christmas') pyArgs.push('--exclude-christmas');
       else if (excludeGenre === 'none') pyArgs.push('--include-christmas');
-      if (!playNow) {
-        if (keepPlaying) {
-          pyArgs.push('--crop');
-          pyArgs.push('--no-final-stop');
-        } else {
-          pyArgs.push('--dry-run');
-        }
-      } else {
-        pyArgs.push('--crop');
-      }
-
-      if (playNow || keepPlaying) {
-        try { await execFileP('mpc', ['-h', mpdHost, '-p', '6600', 'random', 'off']); } catch (_) {}
-      }
+      // The Python process is dry-run only, but this tells planner v2 that
+      // the active seed will be retained when this route applies the plan.
+      // That keeps targetQueue equal to the final queue size.
+      if (playNow || keepPlaying) pyArgs.push('--crop');
 
       const job = {
         id: jobId,
@@ -316,6 +365,7 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
         tracks: [],
         logs: [],
         debug: {
+          planner: 'v2',
           fallbackUsed: false,
           fallbackCount: 0,
           previewResponseCount: 0,
@@ -432,21 +482,7 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
           const data = JSON.parse(jsonOut);
           const baseTracks = Array.isArray(data?.tracks) ? data.tracks : [];
           job.rawBuiltCount = baseTracks.length;
-
-          if (job.minRating > 0 && typeof getRatingForFile === 'function') {
-            const kept = [];
-            for (const t of baseTracks) {
-              const f = String(t?.file || '').trim();
-              let r = 0;
-              try { r = Number(await getRatingForFile(f)) || 0; } catch {}
-              if (r >= job.minRating) kept.push(t);
-            }
-            // Guardrail: if rating filter wipes out a successful build, keep base tracks.
-            // This prevents "built N then 0" UX when ratings are sparse/missing.
-            job.tracks = kept.length ? kept : baseTracks;
-          } else {
-            job.tracks = baseTracks;
-          }
+          job.tracks = baseTracks;
 
           // Fallback: if Last.fm vibe resolves to zero tracks, build a local seed list from current artist.
           if (!job.tracks.length) {
@@ -455,7 +491,7 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
                 genres: [],
                 artists: job.seedArtist ? [job.seedArtist] : [],
                 albums: [],
-                excludeGenres: [],
+                excludeGenres: job.excludeGenre === 'christmas' ? ['christmas'] : [],
                 minRating: Number(job.minRating || 0),
                 maxTracks: Number(job.targetQueue || 50),
               };
@@ -499,6 +535,28 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
             }
           }
 
+          // Rating is now applied before any MPD operation. An empty filtered
+          // plan is an honest result, not permission to enqueue low-rated rows.
+          if (job.minRating > 0 && typeof getRatingForFile === 'function') {
+            const plannedBeforeRating = job.tracks.length;
+            const kept = [];
+            for (const t of job.tracks) {
+              const f = String(t?.file || '').trim();
+              let rating = 0;
+              try { rating = Number(await getRatingForFile(f)) || 0; } catch {}
+              if (rating >= job.minRating) kept.push({ ...t, rating });
+            }
+            job.tracks = kept;
+            job.debug.ratingFilter = {
+              minRating: job.minRating,
+              before: plannedBeforeRating,
+              kept: kept.length,
+            };
+            if (!kept.length && plannedBeforeRating) {
+              job.logs.push(`[rating] no planned tracks met minimum rating ${job.minRating}`);
+            }
+          }
+
           job.builtCount = job.tracks.length || 0;
           await fs.unlink(jsonTmp).catch(() => {});
         } catch (e) {
@@ -506,6 +564,13 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
         }
 
         if (code !== 0 && !job.error) job.error = `vibe builder exited with code ${code}`;
+        if (!job.error && (playNow || keepPlaying) && job.tracks.length) {
+          try {
+            await applyVibePlanToMpd(job, { mpdHost, playNow, keepPlaying });
+          } catch (applyError) {
+            job.error = `Queue apply failed: ${applyError?.message || String(applyError)}`;
+          }
+        }
         job.done = true;
         job.status = job.error ? 'error' : 'done';
         job.phase = job.error ? 'error' : 'complete';
@@ -695,6 +760,9 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
     const seedArtist = String(seedArtistRaw || '').trim();
     const seedTitle = String(seedTitleRaw || '').trim();
     if (!seedArtist || !seedTitle) throw new Error('Missing seedArtist/seedTitle');
+    // Endless Vibe must use the same plan-before-mutation path as normal Vibe.
+    // Other seeded callers retain their established behavior for now.
+    const usePlannerV2 = endless === true;
 
     const lastfmApiKey = await resolveLastfmApiKey();
     if (!lastfmApiKey) throw new Error('Last.fm API key is not configured');
@@ -702,9 +770,10 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
     const mpdHost = String(MPD_HOST || 'moode.local');
     const pyPath = releaseScript('lastfm_vibe_radio.py');
     const jobId = makeVibeJobId();
+    const jsonTmp = usePlannerV2 ? await createVibeTemporaryJson(jobId) : '';
 
     // Ensure deterministic queue order for seeded vibe starts.
-    if (playNow || keepPlaying) {
+    if (!usePlannerV2 && (playNow || keepPlaying)) {
       try { await execFileP('mpc', ['-h', mpdHost, '-p', '6600', 'random', 'off']); } catch (_) {}
     }
 
@@ -726,6 +795,7 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
       tracks: [],
       logs: [],
       debug: {
+        planner: usePlannerV2 ? 'v2' : 'legacy',
         fallbackUsed: false,
         fallbackCount: 0,
         previewResponseCount: 0,
@@ -738,7 +808,7 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
       nextEventId: 1,
       error: '',
       done: false,
-      jsonTmp: '',
+      jsonTmp,
       logPath: path.join(vibeLogDir, `${jobId}.jsonl`),
       proc: null,
     };
@@ -758,7 +828,10 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
     }).catch(() => {});
 
     const indexReady = await ensureVibeIndexReady(job, vibeIndexPath, mpdHost);
-    if (!indexReady) return { ok: false, error: job.error || 'Index build failed', jobId, job };
+    if (!indexReady) {
+      if (jsonTmp) await fs.unlink(jsonTmp).catch(() => {});
+      return { ok: false, error: job.error || 'Index build failed', jobId, job };
+    }
 
     const pyArgs = [
       pyPath,
@@ -767,17 +840,28 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
       '--seed-artist', seedArtist,
       '--seed-title', seedTitle,
       '--target-queue', String(targetQueue),
-      '--mode', playNow ? 'play' : 'load',
-      '--shuffle-top', '25',
-      '--reseed-random',
-      '--max-misses', '12',
+      '--mode', usePlannerV2 ? 'load' : (playNow ? 'play' : 'load'),
       '--host', mpdHost,
       '--port', '6600',
       '--debug-trace',
     ];
+    if (usePlannerV2) {
+      // Run the planner against the current final queue item, but leave MPD
+      // untouched until its completed local-file plan has been read back.
+      pyArgs.push(
+        '--planner-v2',
+        '--planner-max-expansions', '3',
+        '--max-seconds', '18',
+        '--exclude-christmas',
+        '--json-out', jsonTmp,
+        '--dry-run',
+      );
+    } else {
+      pyArgs.push('--shuffle-top', '25', '--reseed-random', '--max-misses', '12');
+    }
     if (playNow || keepPlaying || endless) pyArgs.push('--crop');
-    if (endless) pyArgs.push('--endless');
-    if (keepPlaying && !playNow) pyArgs.push('--no-final-stop');
+    if (!usePlannerV2 && endless) pyArgs.push('--endless');
+    if (!usePlannerV2 && keepPlaying && !playNow) pyArgs.push('--no-final-stop');
 
     let child;
     try {
@@ -788,6 +872,7 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
       });
     } catch (error) {
       const message = error?.message || String(error);
+      if (jsonTmp) await fs.unlink(jsonTmp).catch(() => {});
       job.error = message;
       job.done = true;
       job.status = 'error';
@@ -823,6 +908,8 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
       if (/Last\.fm get similar/i.test(line)) job.phase = 'querying last.fm';
       const candidateMatch = line.match(/pick from\s+(\d+)\s+similar/i);
       if (candidateMatch) job.phase = `matching local library (${candidateMatch[1]} Last.fm candidates)`;
+      if (/^\[v2\]\s+pass\s+\d+:/i.test(line)) job.phase = 'matching local library';
+      if (/^\[v2\]\s+selected\s+\d+/i.test(line)) job.phase = 'planning diverse queue';
 
       const m = line.match(/^\[hop\s+\d+\]\s+Added:\s+(.+?)\s+\(([^)]+)\)/i)
         || line.match(/^\[simple\]\s+Added:\s+(.+?)\s+\(([^)]+)\)/i);
@@ -865,10 +952,42 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
       errBuf = lines.pop() || '';
       lines.filter(Boolean).forEach((ln) => onLine(`stderr: ${ln}`));
     });
-    child.on('close', (code) => {
+    child.on('close', async (code) => {
       if (outBuf.trim()) onLine(outBuf.trim());
       if (errBuf.trim()) onLine(`stderr: ${errBuf.trim()}`);
       if (code !== 0 && !job.error) job.error = `vibe builder exited with code ${code}`;
+
+      if (usePlannerV2) {
+        try {
+          if (!job.error) {
+            const data = JSON.parse(await fs.readFile(jsonTmp, 'utf8'));
+            const plannedTracks = Array.isArray(data?.tracks) ? data.tracks : [];
+            job.tracks = plannedTracks;
+            job.rawBuiltCount = plannedTracks.length;
+            job.builtCount = plannedTracks.length;
+
+            if (plannedTracks.length) {
+              await applyVibePlanToMpd(job, {
+                mpdHost,
+                playNow,
+                keepPlaying,
+                resumePlayback: endless,
+              });
+            } else {
+              job.logs.push('[planner-v2] no usable local plan; MPD queue left unchanged');
+              appendVibeJobLog(job, 'plan-empty', { planner: 'v2' }).catch(() => {});
+            }
+          }
+        } catch (error) {
+          const message = error?.message || String(error);
+          if (!job.error) job.error = `planner-v2 result could not be applied: ${message}`;
+          job.logs.push(`planner-v2 apply error: ${message}`);
+          appendVibeJobLog(job, 'planner-v2-apply-error', { error: message }).catch(() => {});
+        } finally {
+          await fs.unlink(jsonTmp).catch(() => {});
+        }
+      }
+
       job.done = true;
       job.status = job.error ? 'error' : 'done';
       job.phase = job.error ? 'error' : 'complete';
@@ -879,6 +998,8 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
         phase: job.phase,
         error: job.error || '',
         builtCount: Number(job.builtCount || 0),
+        rawBuiltCount: Number(job.rawBuiltCount || 0),
+        planner: usePlannerV2 ? 'v2' : 'legacy',
         seededStart: true,
         endless: !!endless,
       }).catch(() => {});
@@ -977,7 +1098,7 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
       endlessVibeLastAttemptAt = now;
 
       const result = await startSeededVibeJob({
-        targetQueue: 25,
+        targetQueue: 12,
         playNow: false,
         keepPlaying: true,
         endless: true,

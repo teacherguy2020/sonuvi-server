@@ -141,9 +141,9 @@ The Config page explicitly notes:
 
 ### Endless Vibe
 
-Endless Vibe is a Live Queue mode in the tablet controller that uses this same Last.fm/Vibe configuration. When enabled, it automatically extends playback whenever the currently playing local track becomes the final queue item. The track is cropped as the active seed, Last.fm is queried for related material, and locally matched tracks are appended while playback is preserved.
+Endless Vibe is a Live Queue mode in the tablet controller that uses this same Last.fm/Vibe configuration. When enabled, it automatically extends playback whenever the currently playing local track becomes the final queue item. It first plans a 12-track final queue (the active seed plus local additions) using the V2 planner, then crops to the seed and applies that completed plan while preserving playback.
 
-The mode is deliberately more resilient than a one-shot Vibe action: it uses chained generation, allows same-artist fallback matching when Last.fm metadata is sparse, suppresses duplicate refresh jobs, and retains the active seed if no usable local matches are found. Its browser-local toggle is off by default and does not change the global Last.fm feature setting.
+The mode is deliberately more resilient than a one-shot Vibe action: it plans before MPD mutation, suppresses duplicate refresh jobs, and retains the active seed if no usable local matches are found. If the seed ends during planning, the server resumes the newly extended queue. Its browser-local toggle is off by default and does not change the global Last.fm feature setting.
 
 That makes this section both a feature setup surface and a documentation surface for prerequisites.
 
@@ -153,6 +153,15 @@ seeded Vibe preview and canonical catalog resolution; it does not run `lastfm_vi
 or store Last.fm API/session credentials. This keeps the server as the shared
 Last.fm/index authority while allowing the device queue and playback to remain
 local.
+
+### Vibe planner v2
+
+On 2026-10-30, an isolated runtime trial validated a richer Vibe planner using
+the existing protected `LASTFM_API_KEY`; no credentials were created, copied,
+or exposed. It builds a local MPD metadata index, plans a small 12-entry queue
+before mutation, and only then applies local matches. This source revision
+uses that planner for normal Vibe and server-side Endless Vibe. Native-device
+behavior remains unchanged.
 
 ## Save/load behavior
 
@@ -283,4 +292,4 @@ It is:
 - row-behavior shaping
 - prerequisite-aware integration config
 
-*Last reviewed: 2026-10-01 10:16 America/Chicago*
+*Last reviewed: 2026-10-30 America/Chicago*

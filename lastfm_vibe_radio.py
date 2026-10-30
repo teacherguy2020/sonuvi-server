@@ -12,6 +12,7 @@ from datetime import datetime
 import requests
 from mpd import MPDClient, CommandError
 from mutagen import File as MutagenFile
+from vibe_planner import select_diverse_candidates
 
 # Use HTTPS (more reliable than plain HTTP) + retries below
 LASTFM_ROOT = "https://ws.audioscrobbler.com/2.0/"
@@ -319,6 +320,234 @@ def read_tags(mpd_file: str):
     return ("", "", "", "")
 
 
+def read_indexed_tags(file_meta: dict, mpd_file: str):
+    """Use the MPD-built metadata index before falling back to Mutagen I/O."""
+    record = file_meta.get(mpd_file) or file_meta.get(ensure_mpd_path(mpd_file))
+    if isinstance(record, dict):
+        artist = first_str(record.get("artist"))
+        title = first_str(record.get("title"))
+        album = first_str(record.get("album"))
+        genre = first_str(record.get("genre"))
+        if artist or title or album or genre:
+            return (artist, title, album, genre)
+    return read_tags(mpd_file)
+
+
+def recommendation_fields(recommendation):
+    rec_title = str(recommendation.get("name") or "").strip()
+    rec_artist_raw = recommendation.get("artist", {})
+    if isinstance(rec_artist_raw, dict):
+        rec_artist = str(rec_artist_raw.get("name") or "").strip()
+    else:
+        rec_artist = str(rec_artist_raw or "").strip()
+    rec_mbid = str(recommendation.get("mbid") or "").strip().lower()
+    return rec_artist, rec_title, rec_mbid
+
+
+def resolve_local_candidate(recommendation, *, mbid_map, text_map, used_files, file_meta, source_rank):
+    """Resolve one Last.fm recommendation to its best local-library file."""
+    rec_artist, rec_title, rec_mbid = recommendation_fields(recommendation)
+    if not rec_artist or not rec_title:
+        return None
+
+    candidate = None
+    method = ""
+    if rec_mbid and rec_mbid in mbid_map:
+        candidate = pick_best(mbid_map[rec_mbid], used_files)
+        if candidate:
+            method = "mbid"
+    if not candidate:
+        paths = text_map.get(f"{norm(rec_artist)}|{norm(rec_title)}")
+        if paths:
+            candidate = pick_best(paths, used_files)
+            if candidate:
+                method = "text"
+    if not candidate:
+        paths = fuzzy_within_artist(text_map, rec_artist, rec_title)
+        if paths:
+            candidate = pick_best(paths, used_files)
+            if candidate:
+                method = "fuzzy"
+    if not candidate:
+        return None
+
+    artist, title, album, genre = read_indexed_tags(file_meta, candidate)
+    return {
+        "file": candidate,
+        "artist": artist or rec_artist,
+        "title": title or rec_title,
+        "album": album,
+        "genre": genre,
+        "method": method,
+        "rec_artist": rec_artist,
+        "rec_title": rec_title,
+        "source_rank": source_rank,
+    }
+
+
+def build_v2_plan(mpd, args, *, mbid_map, text_map, file_meta, seed_artist, seed_title, seed_genre):
+    """Build a small, diverse local queue before making any MPD mutation."""
+    used_files = set()
+    try:
+        for item in mpd.playlistinfo():
+            file_name = str(item.get("file") or "").strip()
+            if file_name:
+                used_files.add(file_name)
+    except Exception:
+        pass
+
+    used_tracks = {track_key(seed_artist, seed_title)}
+    used_tracks.discard("")
+    include_xmas = bool(args.include_christmas) and not bool(args.exclude_christmas)
+    configured_target = max(1, int(args.target_queue or 12))
+    # A cropped queue retains the currently playing seed. Plan only the
+    # remaining slots so --target-queue means the final queue size, not
+    # "seed plus N new tracks".
+    retained_current = 1 if args.crop and not args.append else 0
+    target = max(1, configured_target - retained_current)
+    max_expansions = max(0, min(3, int(args.planner_max_expansions or 0)))
+    started = time.time()
+    all_candidates = []
+    visited_seeds = set()
+    pending_seeds = [(seed_artist, seed_title)]
+    pass_number = 0
+    plan = []
+
+    def same_artist_family(left, right):
+        """Avoid recursively querying a cosmetic variant of the same artist."""
+        left_key = norm(left)
+        right_key = norm(right)
+        return bool(
+            left_key and right_key
+            and (left_key == right_key or left_key.startswith(f"{right_key} ") or right_key.startswith(f"{left_key} "))
+        )
+
+    def select_plan():
+        return select_diverse_candidates(
+            all_candidates,
+            target=target,
+            seed_artist=seed_artist,
+            seed_genre=seed_genre,
+            avoid_files=used_files,
+            avoid_tracks=used_tracks,
+            include_seasonal=include_xmas,
+        )
+
+    while pending_seeds and pass_number <= max_expansions:
+        if args.max_seconds > 0 and (time.time() - started) >= args.max_seconds:
+            print(f"[v2] Time budget reached ({args.max_seconds}s), finishing available plan.", flush=True)
+            break
+
+        query_artist, query_title = pending_seeds.pop(0)
+        query_key = track_key(query_artist, query_title)
+        if not query_key or query_key in visited_seeds:
+            continue
+        visited_seeds.add(query_key)
+        pass_number += 1
+
+        print(
+            f"[{datetime.now().strftime('%H:%M:%S')}] Last.fm get similar "
+            f"{query_artist} - {query_title} limit {args.similar_limit} (v2 pass {pass_number})",
+            flush=True,
+        )
+        similar = lastfm_get_similar(args.api_key, query_artist, query_title, args.similar_limit)
+        pass_candidates = []
+        for rank, recommendation in enumerate(similar, start=1):
+            candidate = resolve_local_candidate(
+                recommendation,
+                mbid_map=mbid_map,
+                text_map=text_map,
+                used_files=used_files,
+                file_meta=file_meta,
+                source_rank=((pass_number - 1) * max(1, args.similar_limit)) + rank,
+            )
+            if candidate:
+                all_candidates.append(candidate)
+                pass_candidates.append(candidate)
+        print(
+            f"[v2] pass {pass_number}: {len(similar)} Last.fm candidates, "
+            f"{len(pass_candidates)} new local matches, {len(all_candidates)} total local matches",
+            flush=True,
+        )
+        plan = select_plan()
+        strict_variety_met = len(plan) >= target and all(int(item.get("selection_stage", 4)) == 0 for item in plan)
+        if strict_variety_met:
+            print(f"[v2] pass {pass_number}: strict variety target reached.", flush=True)
+            break
+        if pass_number > max_expansions:
+            break
+
+        expansion_seed = next(
+            (
+                (str(item.get("artist") or ""), str(item.get("title") or ""))
+                for item in pass_candidates
+                if track_key(str(item.get("artist") or ""), str(item.get("title") or "")) not in visited_seeds
+                and not same_artist_family(str(item.get("artist") or ""), seed_artist)
+                and not same_artist_family(str(item.get("artist") or ""), query_artist)
+            ),
+            None,
+        )
+        if not expansion_seed:
+            break
+        pending_seeds.append(expansion_seed)
+
+    print(
+        f"[v2] selected {len(plan)}/{target} tracks from {len(all_candidates)} local matches across {pass_number} pass(es)",
+        flush=True,
+    )
+    return plan, pass_number
+
+
+def apply_v2_plan(mpd, args, tracks, *, was_playing):
+    """Apply a completed plan only after selection succeeded."""
+    if args.dry_run:
+        return list(tracks)
+
+    if not tracks:
+        print("[v2] No planned tracks; MPD queue left unchanged.", flush=True)
+        return []
+
+    if not args.append:
+        if args.crop:
+            subprocess.run(["mpc", "-h", args.host, "-p", str(args.port), "crop"], check=False)
+        else:
+            mpd.clear()
+        # Keep the freshly planned order audible; random mode otherwise
+        # defeats the planner's intentional early-track variety.
+        subprocess.run(["mpc", "-h", args.host, "-p", str(args.port), "random", "off"], check=False)
+
+    added = []
+    for item in tracks:
+        file_name = str(item.get("file") or "").strip()
+        if not file_name:
+            continue
+        try:
+            mpd.add(file_name)
+            added.append(item)
+            print(f"[v2] Added: {item.get('title', '')} — {item.get('artist', '')}", flush=True)
+        except CommandError as error:
+            print(f"[v2] SKIP (MPD can't add): {file_name} ({error})", flush=True)
+
+    if args.mode == "play" and added:
+        try:
+            mpd.play()
+        except Exception:
+            pass
+    elif args.mode == "load" and not args.no_final_stop:
+        try:
+            mpd.stop()
+        except Exception:
+            pass
+    elif args.endless and was_playing:
+        try:
+            if str(mpd.status().get("state", "")).lower() != "play":
+                mpd.play()
+        except Exception:
+            pass
+
+    return added
+
+
 def main():
     ap = argparse.ArgumentParser(description="Build a chained Last.fm-based queue in moOde/MPD.")
     ap.add_argument("--api-key", default=os.environ.get("LASTFM_API_KEY", ""))
@@ -358,6 +587,10 @@ def main():
                     help="Emit detailed matching diagnostics for each hop")
     ap.add_argument("--simple-seed-pass", action="store_true",
                     help="One-pass mode: query seed once and add local matches up to target, then stop")
+    ap.add_argument("--planner-v2", action="store_true",
+                    help="Plan a small, diverse local queue before changing MPD")
+    ap.add_argument("--planner-max-expansions", type=int, default=2,
+                    help="Additional Last.fm seed expansions for planner v2 (0-3)")
     ap.add_argument("--dry-run", action="store_true",
                     help="Preview tracks without touching MPD")
     ap.add_argument("--no-final-stop", action="store_true",
@@ -383,11 +616,13 @@ def main():
             idx = json.load(f)
         mbid_map = idx.get("mbid_map", {})
         text_map = idx.get("text_map", {})
+        file_meta = idx.get("file_meta", {})
         print(f"[{datetime.now().strftime('%H:%M:%S')}] index OK: {sum(len(paths) for paths in text_map.values())} text tracks")
     except Exception as e:
         print(f"[{datetime.now().strftime('%H:%M:%S')}] WARNING index load failed ({args.index}): {e}. Empty library.", flush=True)
         mbid_map = {}
         text_map = {}
+        file_meta = {}
 
     # NOTE: even for preview we still connect to MPD to read current song / playlistinfo.
     print(f"[{datetime.now().strftime('%H:%M:%S')}] STEP: mpd connect {args.host}:{args.port}", flush=True)
@@ -435,6 +670,7 @@ def main():
     # last album guard (avoid immediate same-album picks)
     last_album_k = ""
     last_genre_n = ""
+    seed_genre = ""
     seed_genres = set()
     if cur:
         cur_a = first_str(cur.get("artist"))
@@ -443,6 +679,7 @@ def main():
             last_album_k = album_key(first_str(cur.get("album")))
             cur_genre = first_str(cur.get("genre"))
             last_genre_n = norm(cur_genre)
+            seed_genre = cur_genre
             seed_genres = genre_tokens(cur_genre)
 
     # If explicit seed wasn't current song, try local lookup to set album context
@@ -454,11 +691,60 @@ def main():
                 last_album_k = album_key(alb0)
             if not last_genre_n and g0:
                 last_genre_n = norm(g0)
+            if not seed_genre and g0:
+                seed_genre = g0
             if not seed_genres and g0:
                 seed_genres = genre_tokens(g0)
 
     # Keep stable fallback seed to break dead-ends.
     original_seed = (seed_artist, seed_title)
+
+    if args.planner_v2:
+        plan, discovery_passes = build_v2_plan(
+            mpd,
+            args,
+            mbid_map=mbid_map,
+            text_map=text_map,
+            file_meta=file_meta,
+            seed_artist=seed_artist,
+            seed_title=seed_title,
+            seed_genre=seed_genre,
+        )
+        applied_tracks = apply_v2_plan(mpd, args, plan, was_playing=was_playing)
+        final_state = "unknown"
+        try:
+            final_state = mpd.status().get("state", "unknown")
+        except Exception:
+            pass
+        if args.dry_run:
+            final_queue = len(plan) + (1 if args.crop and not args.append else 0)
+        else:
+            final_queue = queue_len()
+        summary = {
+            "seed_artist": original_seed[0],
+            "seed_title": original_seed[1],
+            "target_queue": args.target_queue,
+            "final_queue": final_queue,
+            "mode": args.mode,
+            "state": final_state,
+            "append": bool(args.append),
+            "include_christmas": bool(include_xmas),
+            "dry_run": bool(args.dry_run),
+            "crop": bool(args.crop),
+            "planner": "v2",
+            "discovery_passes": discovery_passes,
+            "tracks": plan if args.dry_run else applied_tracks,
+        }
+        if args.json_out:
+            try:
+                with open(args.json_out, "w", encoding="utf-8") as f:
+                    json.dump(summary, f, indent=2)
+            except Exception:
+                print(f"WARN: failed writing json output to {args.json_out}")
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] final queue {final_queue}", flush=True)
+        mpd.disconnect()
+        print(f"Done. Final queue length: {final_queue} | mode={args.mode} | state={final_state} | dry_run={args.dry_run}")
+        return
 
     def resume_endless_playback():
         """Keep an active Endless Vibe session playing through queue extension."""

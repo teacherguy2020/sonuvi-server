@@ -223,6 +223,40 @@ Important operational note from live code tracing:
 - seeded Vibe starts should also run the same vibe-index readiness check used by the now-playing Vibe builder path
 - without those two pieces, the UI can look like “nothing happened” even when a seed request was accepted, because the controller gets a `jobId` but has no status object to poll and no surfaced error if index prep fails
 
+## Vibe planner v2 — 2026-10-30
+
+This source revision uses planner v2 for the normal
+`POST /config/queue-wizard/vibe-start` flow and the server-side Endless Vibe
+handoff. Other seeded callers retain their established path until they are
+migrated deliberately.
+
+The design separates planning from MPD mutation:
+
+1. Build a richer local MPD index containing normalized artist/title keys,
+   MusicBrainz track IDs, and local artist/title/album/genre metadata.
+2. Perform a small, time-bounded set of Last.fm discovery passes and resolve
+   only local-library matches.
+3. Select a queue plan before touching MPD. The selector rejects queued files,
+   duplicate normalized tracks, and seasonal material; it prefers distinct
+   artist families and albums before relaxing those constraints.
+4. Apply rating filtering before queue mutation. A zero-result plan leaves the
+   existing queue alone.
+5. Only after a non-empty plan exists does the route crop to the active seed,
+   disable MPD random mode, append the plan, and optionally play.
+
+For the initial small-list trial, `targetQueue: 12` means **12 total queue
+entries including the currently playing seed**. The planner produces the
+remaining 11 additions. It uses up to three additional discovery expansions
+only while strict variety is not yet possible, subject to the existing time
+budget.
+
+Live MPD verification was run from an isolated temporary copy of the new
+scripts: a saved John Mayer seed plus 11 additions produced a 12-track playing
+queue. All added tracks were local MPD files, random mode was off, the run
+completed with no stderr output, and the final plan reached the strict variety
+stage. The immutable release process is still the authority for making this
+source revision active on the production server.
+
 ## Endless Vibe behavior
 
 The tablet controller's Live Queue surface also supports an **Endless Vibe** toggle in the queue header. This is a continuous queue-extension mode built on the seeded Vibe route rather than a separate Last.fm integration.
@@ -234,12 +268,18 @@ Current behavior:
 - controller surfaces only read and change the shared setting; an open controller page is not required for monitoring or queue extension
 - radio, podcast, and stream entries are excluded
 - the current track's artist, title, and file become the next seed
-- the seeded route runs with `keepPlaying: true` and `endless: true`
-- the builder crops to the current seed, then appends generated local tracks while preserving playback
-- playback state is guarded before and after queue extension so natural queue exhaustion does not leave an active session stopped
+- the seeded route runs with `keepPlaying: true` and `endless: true`, selecting the V2 planner path
+- the V2 process is dry-run only: it plans a 12-track final queue (the active seed plus up to 11 local additions) before it is allowed to crop MPD
+- after a non-empty local-file plan is read back, the server crops to the current seed, turns random off, and appends the planned tracks
+- an empty or failed plan leaves the existing MPD queue alone
+- if the seed naturally ends while the plan is being produced, Endless Vibe resumes the newly extended queue; ordinary one-shot queue builds do not force playback
 - duplicate requests are suppressed while a Vibe job is starting or running
 
-Endless Vibe intentionally differs from a one-shot seeded Vibe start. It uses the chained builder path, permits resilient same-artist fallback matching for sparse Last.fm metadata, and avoids treating an empty Last.fm/local-library match as permission to discard the active seed.
+Endless Vibe intentionally differs from a one-shot seeded Vibe start: it is
+triggered only at the final local MPD item and protects the active seed from a
+failed or empty discovery result. Its V2 planner applies queue variety rules
+before MPD is changed, rather than streaming legacy discovery results directly
+into the queue.
 
 ## Native-device Endless Vibe
 
@@ -290,4 +330,4 @@ This page now gives the wiki a sharper internal model of Queue Wizard:
 - Add to Playlist, collage, and Vibe remain explicit server-side operations;
   the native client does not receive raw MPD paths or Track Keys
 
-_Last updated: 2026-10-20 22:51 America/Chicago_
+_Last updated: 2026-10-30 America/Chicago_

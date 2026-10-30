@@ -18,6 +18,7 @@
   },
   "scripts": {
     "test": "node --test test/*.test.mjs",
+    "test:vibe-planner": "PYTHONPATH=. python3 -m unittest discover -s test -p 'test_vibe_planner.py'",
     "peppy:export": "node scripts/export-peppymeter-skins.mjs",
     "peppy:deploy": "scripts/deploy-peppy-skins-to-moode.sh"
   },
