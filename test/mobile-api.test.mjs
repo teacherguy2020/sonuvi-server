@@ -1752,6 +1752,12 @@ test('mobile audio info requires bearer auth and strips internal source metadata
               measured: false,
               configured: false,
             },
+            collection: {
+              session: { status: 'available', code: null, provenance: 'sonuvi-moode-readonly-v1', capturedAt: '2026-09-30T12:00:00.000Z', live: true },
+              rendererReport: { status: 'unavailable', code: 'SONUVI_MOODE_SESSION_UNAVAILABLE', provenance: 'sonuvi-moode-readonly-v1', capturedAt: '2026-09-30T12:00:00.000Z', live: false },
+              mpd: { status: 'available', code: null, provenance: 'mpd-status', capturedAt: '2026-09-30T12:00:00.000Z', live: true },
+              alsa: { status: 'unavailable', code: 'private_session_value', provenance: 'alsa-procfs', capturedAt: '2026-09-30T12:00:00.000Z', live: false },
+            },
           },
         },
       };
@@ -1792,6 +1798,9 @@ test('mobile audio info requires bearer auth and strips internal source metadata
   assert.equal(response.body.diagnostics.decodedAudio.pcmBitrateBps, 2116800);
   assert.equal(response.body.diagnostics.output.format, 'S32_LE');
   assert.equal(response.body.diagnostics.hardwareOutput.format, 'S32_LE');
+  assert.equal(response.body.diagnostics.collection.session.status, 'available');
+  assert.equal(response.body.diagnostics.collection.rendererReport.code, 'SONUVI_MOODE_SESSION_UNAVAILABLE');
+  assert.equal(response.body.diagnostics.collection.alsa.code, null);
   assert.doesNotMatch(JSON.stringify(response.body), /USB\/SamsungMoode|moode\.local|PHPSESSID|stored-moode-session|stream\.example\.org|private diagnostic detail/);
 });
 

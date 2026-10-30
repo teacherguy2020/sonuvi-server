@@ -4,6 +4,7 @@ import path from 'node:path';
 import { syncBuiltinESMExports } from 'node:module';
 import { promisify } from 'node:util';
 
+import { isManagedReadOnlyInvocation } from './moode-ssh-profile.mjs';
 import { runtimeCapabilities } from './runtime-capabilities.mjs';
 import { runtimeStatePaths } from './runtime-state-paths.mjs';
 
@@ -91,11 +92,12 @@ function installStateWriteBoundary({ capabilities, fsModule }) {
 }
 
 function installProcessBoundary({ capabilities, statePaths, childProcessModule }) {
-  function assertProcessAllowed(command) {
+  function assertProcessAllowed(command, method, args) {
     const executable = commandName(command);
     if (capabilities.rehearsal) capabilities.assertExternalMutation(`process.${executable}`);
     if (statePaths.sharedStateEnabled && RAW_IMMUTABLE_SSH_COMMANDS.has(executable)) {
-      throw new Error('Raw SSH/SCP transport is disabled for immutable Sonuvi releases pending restricted remote authorization');
+      if (method === 'execFile' && isManagedReadOnlyInvocation(command, args[0], args[1], { statePaths })) return;
+      throw new Error('Raw SSH/SCP transport is disabled; only configured fixed read-only moOde operations are authorized');
     }
   }
 
@@ -103,7 +105,7 @@ function installProcessBoundary({ capabilities, statePaths, childProcessModule }
     const original = childProcessModule?.[name];
     if (typeof original !== 'function') continue;
     const guarded = function guardedRuntimeProcess(command, ...args) {
-      assertProcessAllowed(command);
+      assertProcessAllowed(command, name, args);
       return original.call(this, command, ...args);
     };
     const customPromisify = original[promisify.custom];
@@ -114,7 +116,7 @@ function installProcessBoundary({ capabilities, statePaths, childProcessModule }
       Object.defineProperty(guarded, promisify.custom, {
         configurable: true,
         value: function guardedRuntimePromise(command, ...args) {
-          assertProcessAllowed(command);
+          assertProcessAllowed(command, name, args);
           return customPromisify.call(this, command, ...args);
         },
       });

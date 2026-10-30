@@ -21,6 +21,7 @@ function contained(root, candidate) {
 }
 
 export const MOODE_REMOTE_COMMANDS = Object.freeze({
+  'audio-info-snapshot-read': { access: 'read', capability: 'ssh.read-diagnostics' },
   'audio-status': { access: 'read', capability: 'ssh.read-status' },
   'browse-index': { access: 'read', capability: 'ssh.read-browse' },
   'library-health-read': { access: 'read', capability: 'ssh.read-library' },
@@ -96,6 +97,7 @@ export function resolveMoodeSshProfile({
     immutable: true,
     user,
     host,
+    readOnlyProtocol: text(env.SONUVI_MOODE_READONLY_PROTOCOL),
     sshRoot,
     identityPath,
     knownHostsPath,
@@ -131,4 +133,65 @@ export function assertMoodeRemoteTransport(commandId, {
     throw error;
   }
   return command;
+}
+
+// This is intentionally separate from assertMoodeRemoteTransport. Existing
+// shell-based callers remain denied in immutable releases even when a fixed
+// read-only operation is enabled by an installed forced-command dispatcher.
+export const MOODE_READONLY_OPERATIONS = Object.freeze({
+  'audio-info-snapshot': 'audio-info-snapshot-read',
+});
+
+function deniedManagedTransport() {
+  const error = new Error('Managed read-only moOde authorization is not configured');
+  error.code = 'SONUVI_SSH_TRANSPORT_UNAUTHORIZED';
+  return error;
+}
+
+export function moodeReadOnlyArgs(operation, {
+  profile = resolveMoodeSshProfile(),
+  capabilities = runtimeCapabilities(),
+} = {}) {
+  const commandId = Object.hasOwn(MOODE_READONLY_OPERATIONS, operation)
+    ? MOODE_READONLY_OPERATIONS[operation]
+    : null;
+  if (!commandId) throw new Error('The requested moOde read-only operation is not approved');
+  assertMoodeRemoteCommand(commandId, { capabilities });
+
+  const host = text(profile?.host);
+  const user = text(profile?.user);
+  if (!profile?.immutable
+    || profile.readOnlyProtocol !== 'v1'
+    || !/^[a-zA-Z0-9][a-zA-Z0-9._:-]*$/.test(host)
+    || !/^[a-z_][a-z0-9_-]*$/i.test(user)) {
+    throw deniedManagedTransport();
+  }
+
+  return [
+    '-n',
+    '-T',
+    '-o', 'ClearAllForwardings=yes',
+    '-o', 'PermitLocalCommand=no',
+    ...profile.argsFor(),
+    `sonuvi-readonly-v1 ${operation}`,
+  ];
+}
+
+export function isManagedReadOnlyInvocation(command, args, options, {
+  env = process.env,
+  statePaths = runtimeStatePaths({ env }),
+} = {}) {
+  if (command !== '/usr/bin/ssh' || !Array.isArray(args)) return false;
+  if (options && typeof options === 'object'
+    && (options.shell || options.env || options.uid != null || options.gid != null)) return false;
+
+  try {
+    const profile = resolveMoodeSshProfile({ env, statePaths });
+    return Object.keys(MOODE_READONLY_OPERATIONS).some((operation) => {
+      const expected = moodeReadOnlyArgs(operation, { profile });
+      return args.length === expected.length && args.every((value, index) => value === expected[index]);
+    });
+  } catch {
+    return false;
+  }
 }

@@ -17,6 +17,8 @@ These files are live-system overrides on `moode@10.0.0.254` and are mirrored her
 - `etc/systemd/system/upmpdcli.service.d/10-qobuz-session-permissions.conf`
 - `upmpdcli-qobuz-oauth.patch`
 - `test-upmpdcli-qobuz-oauth-hardening.py`
+- `sonuvi-readonly/dispatcher.py` (reviewed candidate update; not deployed by
+  this repository change)
 
 ## Why
 
@@ -57,6 +59,30 @@ If the patch does not apply cleanly, stop and review the new package source.
 Never print the Qobuz cache or paste authorization material into a terminal
 log or chat. Keep Qobuz authorization/policy review separate from this local
 security override.
+
+## Sonuvi read-only Audio Info dispatcher
+
+`sonuvi-readonly/dispatcher.py` is the proposed next revision of the existing
+forced-command dispatcher for the Server's dedicated moOde key. It adds exactly
+one literal read operation: `sonuvi-readonly-v1 audio-info-snapshot`.
+
+That operation has no caller-supplied paths, SQL, URLs, shell fragments, or
+subprocess arguments. It reads the current moOde session internally, requests
+the local `audioinfo.php` page with that session, reads MPD state, and reads
+active ALSA procfs parameters. Its response deliberately excludes the session
+identifier. Per-stage failures are returned as bounded status codes so the
+Server can distinguish unavailable collection from stopped playback.
+
+This tracked artifact does **not** authorize or perform an installation on
+moOde. A separately approved, controlled moOde override update is required
+before a Server release can enable the matching
+`SONUVI_MOODE_READONLY_PROTOCOL=v1` client path. Preserve the forced-command
+and `restrict` key options; do not replace them with an unrestricted shell or
+sudo access.
+
+The staged, independently reversible rollout and acceptance plan is
+[`sonuvi-readonly/ROLLOUT.md`](./sonuvi-readonly/ROLLOUT.md). It is a
+supervised runbook only; it does not authorize a production change.
 
 ## Current behavior
 

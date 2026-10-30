@@ -91,7 +91,7 @@ const qobuz = {
   outputFormatDetails: { codec: 'PCM', bitDepth: 32, sampleRateHz: 96000, channels: 2 },
 };
 
-const alsa = normalizeAlsaHardwareProbe([
+const alsaProbe = [
   'CARD\tcard2\tDAC',
   'PCM\t/proc/asound/card2/pcm0p\tcard2\tDAC\tUSB Audio\tRUNNING',
   'HW\t/proc/asound/card2/pcm0p\taccess: RW_INTERLEAVED',
@@ -99,7 +99,35 @@ const alsa = normalizeAlsaHardwareProbe([
   'HW\t/proc/asound/card2/pcm0p\tchannels: 2',
   'HW\t/proc/asound/card2/pcm0p\trate: 96000 (96000/1)',
   'STATUS\t/proc/asound/card2/pcm0p\tstate: RUNNING',
-].join('\n'));
+].join('\n');
+
+const alsa = normalizeAlsaHardwareProbe(alsaProbe);
+
+const availableCollection = {
+  session: { status: 'available' },
+  rendererReport: { status: 'available' },
+  mpd: { status: 'available' },
+  alsa: { status: 'available' },
+};
+
+function snapshot({
+  html = normalMoodeHtml,
+  probe = alsaProbe,
+  collection = availableCollection,
+  mpd = {
+    state: 'play',
+    source: 'USB/SamsungMoode/Album/01 - Track.flac',
+    decoded: { sampleRateHz: 96000, bitDepth: 24, bitDepthKind: 'integer', channels: 2 },
+  },
+} = {}) {
+  return {
+    capturedAt: '2026-10-30T13:16:01.000Z',
+    audioInfoHtml: html,
+    alsaProbe: probe,
+    mpd,
+    collection,
+  };
+}
 
 test('Audio Info HTML parser preserves legacy moOde rows', () => {
   const rows = parseAudioInfoHtml(moodeHtml);
@@ -275,50 +303,34 @@ test('Qobuz Audio Info does not claim hardware output when ALSA is closed', () =
   assert.match(built.rows.find((row) => row.key === 'Hardware playback state').value, /not-open/);
 });
 
-test('Audio Info route adds Qobuz diagnostics without changing its MPD fallback shape', async () => {
+test('Audio Info route adds Qobuz diagnostics from the bounded snapshot', async () => {
   const app = createApp();
-  let fetchOptions;
   registerConfigMoodeAudioInfoRoutes(app, {
     requireTrackKey: () => true,
     getQobuzNowPlaying: async () => qobuz,
-    probeAlsaHardware: async () => alsa,
-    fetchMoodeDeviceMeta: async () => ({
-      deviceName: 'CAVALLI DAC',
-      piModel: 'Raspberry Pi 5',
-      sessionId: 'stored-moode-session',
-    }),
+    readMoodeAudioInfoSnapshot: async () => snapshot({ html: moodeHtml }),
   });
 
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (_url, options) => {
-    fetchOptions = options;
-    return new Response(moodeHtml, { status: 200 });
-  };
-  try {
-    const response = createResponse();
-    await app.routes.get('GET /config/moode/audio-info')?.({ query: { view: 'rows' } }, response);
-    assert.equal(response.statusCode, 200);
-    assert.equal(response.body.playback.source, 'qobuz-connect');
-    assert.equal(response.body.audio.sourceFormat.provenance, 'pibuz-qobuz-metadata');
-    assert.equal(response.body.rows.find((row) => row.key === 'Output format').value, 'PCM S32_LE 96 kHz 2ch');
-    assert.equal(response.body.sections, undefined);
-    assert.equal(fetchOptions.headers.cookie, 'PHPSESSID=stored-moode-session');
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+  const response = createResponse();
+  await app.routes.get('GET /config/moode/audio-info')?.({ query: { view: 'rows' } }, response);
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.playback.source, 'qobuz-connect');
+  assert.equal(response.body.audio.sourceFormat.provenance, 'pibuz-qobuz-metadata');
+  assert.equal(response.body.rows.find((row) => row.key === 'Output format').value, 'PCM S32_LE 96 kHz 2ch');
+  assert.equal(response.body.sections, undefined);
+  assert.equal(response.body.rows.find((row) => row.key === 'Session-backed moOde report').value, 'Available');
 });
 
-test('Audio Info route reuses the ALSA probe for normal MPD only when diagnostics are requested', async () => {
+test('Audio Info route uses one session-backed snapshot for normal MPD diagnostics', async () => {
   const app = createApp();
-  let probeCount = 0;
+  let snapshotCount = 0;
   let sourceProbeInput = '';
-  let fetchOptions;
   registerConfigMoodeAudioInfoRoutes(app, {
     requireTrackKey: () => true,
     getQobuzNowPlaying: async () => null,
-    probeAlsaHardware: async () => {
-      probeCount += 1;
-      return alsa;
+    readMoodeAudioInfoSnapshot: async () => {
+      snapshotCount += 1;
+      return snapshot();
     },
     getSourceAudio: async (file) => {
       sourceProbeInput = file;
@@ -332,40 +344,26 @@ test('Audio Info route reuses the ALSA probe for normal MPD only when diagnostic
         channels: 2,
       };
     },
-    fetchMoodeDeviceMeta: async () => ({
-      deviceName: 'CAVALLI DAC',
-      piModel: 'Raspberry Pi 5',
-      sessionId: 'stored-moode-session',
-    }),
   });
 
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (_url, options) => {
-    fetchOptions = options;
-    return new Response(normalMoodeHtml, { status: 200 });
-  };
-  try {
-    const legacyResponse = createResponse();
-    await app.routes.get('GET /config/moode/audio-info')?.({ query: { view: 'rows' } }, legacyResponse);
-    assert.equal(legacyResponse.statusCode, 200);
-    assert.equal(legacyResponse.body.diagnostics, undefined);
-    assert.equal(probeCount, 0);
+  const legacyResponse = createResponse();
+  await app.routes.get('GET /config/moode/audio-info')?.({ query: { view: 'rows' } }, legacyResponse);
+  assert.equal(legacyResponse.statusCode, 200);
+  assert.equal(legacyResponse.body.diagnostics, undefined);
+  assert.equal(snapshotCount, 1);
 
-    const diagnosticResponse = createResponse();
-    await app.routes.get('GET /config/moode/audio-info')?.({
-      query: { view: 'rows', diagnostics: '1' },
-    }, diagnosticResponse);
-    assert.equal(diagnosticResponse.statusCode, 200);
-    assert.equal(probeCount, 1);
-    assert.equal(diagnosticResponse.body.diagnostics.version, 'audio-info.v1');
-    assert.equal(diagnosticResponse.body.diagnostics.hardwareOutput.format, 'S32_LE');
-    assert.equal(diagnosticResponse.body.diagnostics.sourceFile.bitDepthStatus, 'verified');
-    assert.equal(sourceProbeInput, 'USB/SamsungMoode/Album/01 - Track.flac');
-    assert.equal(fetchOptions.headers.cookie, 'PHPSESSID=stored-moode-session');
-    assert.doesNotMatch(JSON.stringify(diagnosticResponse.body.diagnostics), /stored-moode-session/);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+  const diagnosticResponse = createResponse();
+  await app.routes.get('GET /config/moode/audio-info')?.({
+    query: { view: 'rows', diagnostics: '1' },
+  }, diagnosticResponse);
+  assert.equal(diagnosticResponse.statusCode, 200);
+  assert.equal(snapshotCount, 2);
+  assert.equal(diagnosticResponse.body.diagnostics.version, 'audio-info.v1');
+  assert.equal(diagnosticResponse.body.diagnostics.hardwareOutput.format, 'S32_LE');
+  assert.equal(diagnosticResponse.body.diagnostics.sourceFile.bitDepthStatus, 'verified');
+  assert.equal(diagnosticResponse.body.diagnostics.collection.rendererReport.status, 'available');
+  assert.equal(sourceProbeInput, 'USB/SamsungMoode/Album/01 - Track.flac');
+  assert.doesNotMatch(JSON.stringify(diagnosticResponse.body.diagnostics), /sessionid|PHPSESSID/i);
 });
 
 test('Audio Info diagnostics route verifies M4A codec and corrects only its user-facing legacy row', async () => {
@@ -373,7 +371,7 @@ test('Audio Info diagnostics route verifies M4A codec and corrects only its user
   registerConfigMoodeAudioInfoRoutes(app, {
     requireTrackKey: () => true,
     getQobuzNowPlaying: async () => null,
-    probeAlsaHardware: async () => alsa,
+    readMoodeAudioInfoSnapshot: async () => snapshot({ html: lossyMoodeHtml }),
     getSourceAudio: async () => ({
       codec: 'AAC-LC',
       codecKind: 'lossy',
@@ -385,26 +383,114 @@ test('Audio Info diagnostics route verifies M4A codec and corrects only its user
       encodedBitrateProvenance: 'ffprobe.stream',
       bitDepthStatus: 'not-applicable',
     }),
-    fetchMoodeDeviceMeta: async () => ({ sessionId: 'stored-moode-session' }),
   });
 
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => new Response(lossyMoodeHtml, { status: 200 });
-  try {
-    const legacyResponse = createResponse();
-    await app.routes.get('GET /config/moode/audio-info')?.({ query: { view: 'rows' } }, legacyResponse);
-    assert.equal(legacyResponse.body.rows.find((row) => row.key === 'Decoded to').value, 'PCM 24 bit 44.1 kHz, Stereo, 270 kbps');
+  const legacyResponse = createResponse();
+  await app.routes.get('GET /config/moode/audio-info')?.({ query: { view: 'rows' } }, legacyResponse);
+  assert.equal(legacyResponse.body.rows.find((row) => row.key === 'Decoded to').value, 'PCM 24 bit 44.1 kHz, Stereo, 270 kbps');
 
-    const diagnosticResponse = createResponse();
-    await app.routes.get('GET /config/moode/audio-info')?.({ query: { view: 'rows', diagnostics: '1' } }, diagnosticResponse);
-    assert.equal(diagnosticResponse.body.diagnostics.sourceFile.codec, 'AAC-LC');
-    assert.equal(diagnosticResponse.body.diagnostics.sourceFile.codecStatus, 'verified');
-    assert.equal(diagnosticResponse.body.diagnostics.sourceFile.bitDepthStatus, 'not-applicable');
-    assert.equal(diagnosticResponse.body.diagnostics.decodedAudio.pcmBitrateBps, 2116800);
-    assert.equal(diagnosticResponse.body.rows.find((row) => row.key === 'Decoded to').value, 'PCM 24 bit 44.1 kHz, Stereo');
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+  const diagnosticResponse = createResponse();
+  await app.routes.get('GET /config/moode/audio-info')?.({ query: { view: 'rows', diagnostics: '1' } }, diagnosticResponse);
+  assert.equal(diagnosticResponse.body.diagnostics.sourceFile.codec, 'AAC-LC');
+  assert.equal(diagnosticResponse.body.diagnostics.sourceFile.codecStatus, 'verified');
+  assert.equal(diagnosticResponse.body.diagnostics.sourceFile.bitDepthStatus, 'not-applicable');
+  assert.equal(diagnosticResponse.body.diagnostics.decodedAudio.pcmBitrateBps, 2116800);
+  assert.equal(diagnosticResponse.body.rows.find((row) => row.key === 'Decoded to').value, 'PCM 24 bit 44.1 kHz, Stereo');
+});
+
+test('denied collection reports the denial instead of fabricated stopped-player rows', async () => {
+  const app = createApp();
+  registerConfigMoodeAudioInfoRoutes(app, {
+    requireTrackKey: () => true,
+    getQobuzNowPlaying: async () => null,
+    readMoodeAudioInfoSnapshot: async () => {
+      const error = new Error('remote denial');
+      error.code = 'SONUVI_OPERATION_DENIED';
+      throw error;
+    },
+  });
+
+  const response = createResponse();
+  await app.routes.get('GET /config/moode/audio-info')?.({ query: { view: 'rows', diagnostics: '1' } }, response);
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.rows.find((row) => row.key === 'Source').value, 'Unavailable');
+  assert.doesNotMatch(JSON.stringify(response.body.rows), /Not playing/i);
+  assert.equal(response.body.rows.find((row) => row.key === 'Session-backed moOde report').value, 'Unavailable (SONUVI_OPERATION_DENIED)');
+  assert.equal(response.body.diagnostics.collection.rendererReport.code, 'SONUVI_OPERATION_DENIED');
+  assert.equal(response.body.diagnostics.hardwareOutput.measured, false);
+});
+
+test('malformed successful collection is reported as unavailable rather than failing the endpoint', async () => {
+  const app = createApp();
+  registerConfigMoodeAudioInfoRoutes(app, {
+    requireTrackKey: () => true,
+    getQobuzNowPlaying: async () => null,
+    readMoodeAudioInfoSnapshot: async () => [],
+  });
+
+  const response = createResponse();
+  await app.routes.get('GET /config/moode/audio-info')?.({ query: { view: 'rows', diagnostics: '1' } }, response);
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.rows.find((row) => row.key === 'Source').value, 'Unavailable');
+  assert.equal(response.body.rows.find((row) => row.key === 'Session-backed moOde report').value,
+    'Unavailable (SONUVI_MOODE_READ_UNAVAILABLE)');
+  assert.equal(response.body.diagnostics.collection.rendererReport.code, 'SONUVI_MOODE_READ_UNAVAILABLE');
+});
+
+test('missing moOde session preserves independently observed MPD source and ALSA output', async () => {
+  const app = createApp();
+  let sourceProbeInput = '';
+  registerConfigMoodeAudioInfoRoutes(app, {
+    requireTrackKey: () => true,
+    getQobuzNowPlaying: async () => null,
+    readMoodeAudioInfoSnapshot: async () => snapshot({
+      html: '',
+      collection: {
+        session: { status: 'unavailable', code: 'SONUVI_MOODE_SESSION_UNAVAILABLE' },
+        rendererReport: { status: 'unavailable', code: 'SONUVI_MOODE_SESSION_UNAVAILABLE' },
+        mpd: { status: 'available' },
+        alsa: { status: 'available' },
+      },
+    }),
+    getSourceAudio: async (source) => {
+      sourceProbeInput = source;
+      return {
+        codec: 'FLAC', codecKind: 'lossless', container: 'FLAC', bitDepth: 24,
+        bitDepthStatus: 'verified', sampleRateHz: 96000, channels: 2,
+      };
+    },
+  });
+
+  const response = createResponse();
+  await app.routes.get('GET /config/moode/audio-info')?.({ query: { view: 'rows', diagnostics: '1' } }, response);
+  assert.equal(response.body.rows.find((row) => row.key === 'Source').value, 'USB/SamsungMoode/Album/01 - Track.flac');
+  assert.equal(sourceProbeInput, 'USB/SamsungMoode/Album/01 - Track.flac');
+  assert.equal(response.body.diagnostics.sourceFile.codec, 'FLAC');
+  assert.equal(response.body.diagnostics.hardwareOutput.format, 'S32_LE');
+  assert.equal(response.body.diagnostics.collection.session.code, 'SONUVI_MOODE_SESSION_UNAVAILABLE');
+  assert.doesNotMatch(JSON.stringify(response.body.rows), /Cirrus|I2S|Not playing/i);
+});
+
+test('absent ALSA data is unavailable rather than a stale hardware measurement', async () => {
+  const app = createApp();
+  registerConfigMoodeAudioInfoRoutes(app, {
+    requireTrackKey: () => true,
+    getQobuzNowPlaying: async () => null,
+    readMoodeAudioInfoSnapshot: async () => snapshot({
+      probe: '',
+      collection: {
+        ...availableCollection,
+        alsa: { status: 'unavailable', code: 'SONUVI_ALSA_UNAVAILABLE' },
+      },
+    }),
+  });
+
+  const response = createResponse();
+  await app.routes.get('GET /config/moode/audio-info')?.({ query: { view: 'rows', diagnostics: '1' } }, response);
+  assert.equal(response.body.diagnostics.hardwareOutput.measured, false);
+  assert.equal(response.body.diagnostics.hardwareOutput.value, 'Not measured');
+  assert.equal(response.body.diagnostics.collection.alsa.code, 'SONUVI_ALSA_UNAVAILABLE');
+  assert.equal(response.body.rows.find((row) => row.key === 'ALSA hardware measurement').value, 'Unavailable (SONUVI_ALSA_UNAVAILABLE)');
 });
 
 test('live radio diagnostics use only the injected current-MPD stream and retain stream provenance', async () => {

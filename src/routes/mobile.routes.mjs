@@ -149,6 +149,22 @@ function sanitizeMobileAudioOutput(value) {
   };
 }
 
+function sanitizeMobileAudioCollectionStage(value) {
+  const input = isPlainObject(value) ? value : {};
+  const status = ['available', 'unavailable'].includes(text(input.status).toLowerCase())
+    ? text(input.status).toLowerCase()
+    : 'unavailable';
+  const code = text(input.code).toUpperCase();
+  return {
+    status,
+    code: /^SONUVI_[A-Z0-9_]{1,96}$/.test(code) ? code : null,
+    provenance: text(input.provenance) || 'unknown',
+    capturedAt: text(input.capturedAt) || null,
+    live: Boolean(input.live),
+    measured: false,
+  };
+}
+
 function sanitizeMobileAudioDiagnostics(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const safe = {
@@ -231,6 +247,15 @@ function sanitizeMobileAudioDiagnostics(value) {
       live: Boolean(value.conversion.live),
       measured: Boolean(value.conversion.measured),
       configured: Boolean(value.conversion.configured),
+    };
+  }
+
+  if (value.collection && typeof value.collection === 'object') {
+    safe.collection = {
+      session: sanitizeMobileAudioCollectionStage(value.collection.session),
+      rendererReport: sanitizeMobileAudioCollectionStage(value.collection.rendererReport),
+      mpd: sanitizeMobileAudioCollectionStage(value.collection.mpd),
+      alsa: sanitizeMobileAudioCollectionStage(value.collection.alsa),
     };
   }
 

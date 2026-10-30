@@ -524,11 +524,38 @@ function buildOutputMetadata({ hardwareOutput, activeDevice, capturedAt } = {}) 
   };
 }
 
+function collectionStage(value, capturedAt) {
+  const input = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const status = ['available', 'unavailable'].includes(text(input.status).toLowerCase())
+    ? text(input.status).toLowerCase()
+    : 'unavailable';
+  const code = text(input.code).toUpperCase();
+  return {
+    status,
+    code: /^SONUVI_[A-Z0-9_]{1,96}$/.test(code) ? code : null,
+    provenance: text(input.provenance) || 'sonuvi-moode-readonly-v1',
+    capturedAt,
+    live: status === 'available',
+    measured: false,
+  };
+}
+
+function buildCollectionMetadata(collection, capturedAt) {
+  const input = collection && typeof collection === 'object' && !Array.isArray(collection) ? collection : {};
+  return {
+    session: collectionStage(input.session, capturedAt),
+    rendererReport: collectionStage(input.rendererReport, capturedAt),
+    mpd: collectionStage(input.mpd, capturedAt),
+    alsa: collectionStage(input.alsa, capturedAt),
+  };
+}
+
 export function buildAudioInfoDiagnostics({
   moodeRows = [],
   alsa = null,
   qobuz = null,
   sourceAudio = null,
+  collection = null,
   capturedAt = new Date().toISOString(),
 } = {}) {
   const rows = Array.isArray(moodeRows) ? moodeRows : [];
@@ -630,6 +657,7 @@ export function buildAudioInfoDiagnostics({
       measured: false,
       configured: false,
     },
+    collection: buildCollectionMetadata(collection, capturedAt),
   };
 }
 
