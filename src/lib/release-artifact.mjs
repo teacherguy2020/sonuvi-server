@@ -46,6 +46,7 @@ const SNAPSHOT_EXCLUDED_EXTENSIONS = new Set([
 const RELEASE_ROOT_FILES = new Set([
   'build_moode_index.py',
   'lastfm_vibe_radio.py',
+  'vibe_planner.py',
   'moode-nowplaying-api.mjs',
   'package.json',
   'package-lock.json',
@@ -704,7 +705,7 @@ export async function buildReleaseArtifact({
     if (!await lstatOrNull(path.join(stage, 'scripts', 'verify-current-release.mjs'))) {
       throw new Error('release source snapshot did not contain the release verification startup script');
     }
-    for (const helper of ['build_moode_index.py', 'lastfm_vibe_radio.py']) {
+    for (const helper of ['build_moode_index.py', 'lastfm_vibe_radio.py', 'vibe_planner.py']) {
       if (!await lstatOrNull(path.join(stage, helper))) {
         throw new Error(`release source snapshot did not contain required Vibe helper: ${helper}`);
       }

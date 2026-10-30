@@ -40,6 +40,7 @@ async function sourceFixture(t) {
   await write(root, 'moode-nowplaying-api.mjs', 'export const fixtureApi = true;\n');
   await write(root, 'build_moode_index.py', 'print("fixture index")\n');
   await write(root, 'lastfm_vibe_radio.py', 'print("fixture vibe")\n');
+  await write(root, 'vibe_planner.py', 'print("fixture planner")\n');
   await write(root, 'src/config.mjs', 'export const fixtureConfig = true;\n');
   await write(root, 'src/lib/fixture.mjs', 'export const fixture = true;\n');
   await write(root, 'scripts/serve-public-web.mjs', 'console.log("fixture static server");\n');
@@ -90,6 +91,7 @@ async function releaseFixture(t, { label = 'one' } = {}) {
   const built = await buildReleaseArtifact({ sourceWorktree: source, outputRoot: output, dependencyRoot: dependencies });
   assert.deepEqual(built.manifest.requiredServices, ['sonuvi-api.service', 'sonuvi-web.service']);
   assert.match(built.manifest.requirements.configurationFiles.join(' '), /SONUVI_CONFIG_ROOT/);
+  assert.equal(await fs.readFile(path.join(output, 'vibe_planner.py'), 'utf8'), 'print("fixture planner")\n');
   return { source, dependencies, parent, output, built };
 }
 

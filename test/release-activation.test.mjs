@@ -49,6 +49,7 @@ async function createFixture(t) {
   await write(source, 'moode-nowplaying-api.mjs', 'export const api = "one";\n');
   await write(source, 'build_moode_index.py', 'print("index")\n');
   await write(source, 'lastfm_vibe_radio.py', 'print("vibe")\n');
+  await write(source, 'vibe_planner.py', 'print("planner")\n');
   await write(source, 'src/config.mjs', 'export const config = "one";\n');
   await write(source, 'scripts/serve-public-web.mjs', 'console.log("web");\n');
   await write(source, 'scripts/verify-current-release.mjs', 'console.log("verify");\n');
