@@ -84,6 +84,26 @@ test('audio snapshot client accepts only the fixed dispatcher response and never
   assert.doesNotMatch(JSON.stringify(snapshot), /PHPSESSID|sessionid/i);
 });
 
+test('audio snapshot client uses the configured endpoint when the immutable unit supplies only the protocol marker', async () => {
+  const environmentWithoutEndpoint = { ...environment };
+  delete environmentWithoutEndpoint.MOODE_SSH_HOST;
+  delete environmentWithoutEndpoint.MOODE_SSH_USER;
+  let invokedArgs = null;
+
+  const snapshot = await readMoodeAudioInfoSnapshot({
+    environment: environmentWithoutEndpoint,
+    profileDefaults: { host: '10.0.0.254', user: 'moode' },
+    execute: async (_command, args) => {
+      invokedArgs = args;
+      return { stdout: JSON.stringify(successfulPayload) };
+    },
+  });
+
+  assert.equal(snapshot.collection.session.status, 'available');
+  assert.equal(invokedArgs.at(-2), 'moode@10.0.0.254');
+  assert.equal(invokedArgs.at(-1), 'sonuvi-readonly-v1 audio-info-snapshot');
+});
+
 test('audio snapshot client fails closed for denied, malformed, and oversized responses', async () => {
   await assert.rejects(
     readMoodeAudioInfoSnapshot({

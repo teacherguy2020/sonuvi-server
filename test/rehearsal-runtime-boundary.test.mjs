@@ -7,6 +7,11 @@ import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 
+import { moodeReadOnlyArgs, resolveMoodeSshProfile } from '../src/lib/moode-ssh-profile.mjs';
+import { installRehearsalRuntimeBoundary } from '../src/lib/rehearsal-runtime-boundary.mjs';
+import { createRuntimeCapabilities } from '../src/lib/runtime-capabilities.mjs';
+import { createRuntimeStatePaths } from '../src/lib/runtime-state-paths.mjs';
+
 const execFileP = promisify(execFile);
 
 async function runImmutableBoundary(t, body, extraEnv = {}) {
@@ -99,6 +104,44 @@ test('custom promises cannot bypass immutable raw SSH transport guard', async (t
       }
     }
   `);
+});
+
+test('immutable boundary accepts the exact config-backed read-only invocation without an endpoint environment variable', () => {
+  const env = {
+    SONUVI_STATE_ROOT: '/tmp/sonuvi-config-backed-state',
+    SONUVI_SECRETS_ROOT: '/tmp/sonuvi-config-backed-secrets',
+    SONUVI_MOODE_READONLY_PROTOCOL: 'v1',
+  };
+  const profileDefaults = { host: 'moode.example.invalid', user: 'moode' };
+  const statePaths = createRuntimeStatePaths({
+    cwd: '/opt/sonuvi/releases/candidate',
+    env,
+  });
+  const profile = resolveMoodeSshProfile({ env, statePaths, profileDefaults });
+  const args = moodeReadOnlyArgs('audio-info-snapshot', { profile });
+  const invocations = [];
+  const childProcessModule = {
+    execFile(command, argv, options) {
+      invocations.push({ command, argv, options });
+      return 'allowed';
+    },
+  };
+
+  installRehearsalRuntimeBoundary({
+    environment: env,
+    capabilities: createRuntimeCapabilities({ env }),
+    statePaths,
+    childProcessModule,
+    globalObject: {},
+    moodeProfileDefaults: profileDefaults,
+  });
+
+  assert.equal(childProcessModule.execFile('/usr/bin/ssh', args, {}), 'allowed');
+  assert.equal(invocations.length, 1);
+  assert.throws(
+    () => childProcessModule.execFile('/usr/bin/ssh', [...args, 'id'], {}),
+    /Raw SSH\/SCP transport is disabled/,
+  );
 });
 
 test('custom promises cannot bypass rehearsal process denial', async (t) => {

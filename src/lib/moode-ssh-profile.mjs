@@ -38,10 +38,11 @@ export const MOODE_REMOTE_COMMANDS = Object.freeze({
 export function resolveMoodeSshProfile({
   env = process.env,
   statePaths = runtimeStatePaths({ env }),
+  profileDefaults = {},
 } = {}) {
   const immutable = Boolean(statePaths.sharedStateEnabled);
-  const user = text(env.MOODE_SSH_USER) || 'moode';
-  const host = text(env.MOODE_SSH_HOST);
+  const user = text(env.MOODE_SSH_USER) || text(profileDefaults?.user) || 'moode';
+  const host = text(env.MOODE_SSH_HOST) || text(profileDefaults?.host);
 
   if (!immutable) {
     return Object.freeze({
@@ -180,13 +181,14 @@ export function moodeReadOnlyArgs(operation, {
 export function isManagedReadOnlyInvocation(command, args, options, {
   env = process.env,
   statePaths = runtimeStatePaths({ env }),
+  profileDefaults = {},
 } = {}) {
   if (command !== '/usr/bin/ssh' || !Array.isArray(args)) return false;
   if (options && typeof options === 'object'
     && (options.shell || options.env || options.uid != null || options.gid != null)) return false;
 
   try {
-    const profile = resolveMoodeSshProfile({ env, statePaths });
+    const profile = resolveMoodeSshProfile({ env, statePaths, profileDefaults });
     return Object.keys(MOODE_READONLY_OPERATIONS).some((operation) => {
       const expected = moodeReadOnlyArgs(operation, { profile });
       return args.length === expected.length && args.every((value, index) => value === expected[index]);

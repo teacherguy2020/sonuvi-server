@@ -20,6 +20,9 @@ automated deployment tool.
   Recompute after every source change; do not deploy a different digest.
 - `sonuvi-api.service` currently runs as `brianwis`, has no drop-ins, and none
   of its protected environment files define `SONUVI_MOODE_READONLY_PROTOCOL`.
+- The persisted immutable runtime configuration remains the authority for the
+  moOde SSH endpoint. The Stage 2 marker enables only the fixed read-only
+  protocol; it must not duplicate or override the configured host/user.
 
 ## Security review
 
@@ -38,6 +41,10 @@ logged, or passed to a child process.
 The Server client permits only a pinned SSH argv with strict host checking, the
 protected identity, no forwarding, and the exact literal operation. It fails
 closed for denied, malformed, oversized, unavailable, and partial replies.
+Its endpoint resolution follows the normal Sonuvi precedence: an explicit
+environment override when present, otherwise the persisted immutable moOde
+configuration. The immutable process boundary derives the same exact argv, so
+it cannot approve a different target than the collector.
 
 ## Preconditions
 

@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
+import { MOODE_SSH_HOST, MOODE_SSH_USER } from '../config.mjs';
 import { moodeReadOnlyArgs, resolveMoodeSshProfile } from './moode-ssh-profile.mjs';
 
 const execFileP = promisify(execFile);
@@ -11,6 +12,10 @@ const SAFE_CODE = /^SONUVI_[A-Z0-9_]{1,96}$/;
 const STAGE_STATUS = new Set(['available', 'unavailable']);
 const MPD_STATES = new Set(['play', 'pause', 'stop', 'unknown']);
 const BIT_DEPTH_KINDS = new Set(['integer', 'float']);
+const CONFIGURED_MOODE_SSH_PROFILE = Object.freeze({
+  host: MOODE_SSH_HOST,
+  user: MOODE_SSH_USER,
+});
 
 function text(value) {
   return String(value ?? '').trim();
@@ -109,8 +114,12 @@ export function normalizeMoodeAudioInfoSnapshot(value) {
 async function readMoodeOperation(operation, {
   environment = process.env,
   execute = execFileP,
+  profileDefaults = CONFIGURED_MOODE_SSH_PROFILE,
 } = {}) {
-  const profile = resolveMoodeSshProfile({ env: environment });
+  const profile = resolveMoodeSshProfile({
+    env: environment,
+    profileDefaults,
+  });
   const args = moodeReadOnlyArgs(operation, { profile });
 
   let response;

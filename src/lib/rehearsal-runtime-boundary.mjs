@@ -4,6 +4,7 @@ import path from 'node:path';
 import { syncBuiltinESMExports } from 'node:module';
 import { promisify } from 'node:util';
 
+import { MOODE_SSH_HOST, MOODE_SSH_USER } from '../config.mjs';
 import { isManagedReadOnlyInvocation } from './moode-ssh-profile.mjs';
 import { runtimeCapabilities } from './runtime-capabilities.mjs';
 import { runtimeStatePaths } from './runtime-state-paths.mjs';
@@ -11,6 +12,10 @@ import { runtimeStatePaths } from './runtime-state-paths.mjs';
 const INSTALL_KEY = Symbol.for('sonuvi.rehearsal-runtime-boundary.v1');
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const RAW_IMMUTABLE_SSH_COMMANDS = new Set(['ssh', 'scp', 'sftp']);
+const CONFIGURED_MOODE_SSH_PROFILE = Object.freeze({
+  host: MOODE_SSH_HOST,
+  user: MOODE_SSH_USER,
+});
 
 function commandName(value) {
   return path.basename(String(value || 'external-command')).trim() || 'external-command';
@@ -91,12 +96,16 @@ function installStateWriteBoundary({ capabilities, fsModule }) {
   }
 }
 
-function installProcessBoundary({ capabilities, statePaths, childProcessModule }) {
+function installProcessBoundary({ capabilities, statePaths, childProcessModule, profileDefaults, environment }) {
   function assertProcessAllowed(command, method, args) {
     const executable = commandName(command);
     if (capabilities.rehearsal) capabilities.assertExternalMutation(`process.${executable}`);
     if (statePaths.sharedStateEnabled && RAW_IMMUTABLE_SSH_COMMANDS.has(executable)) {
-      if (method === 'execFile' && isManagedReadOnlyInvocation(command, args[0], args[1], { statePaths })) return;
+      if (method === 'execFile' && isManagedReadOnlyInvocation(command, args[0], args[1], {
+        env: environment,
+        statePaths,
+        profileDefaults,
+      })) return;
       throw new Error('Raw SSH/SCP transport is disabled; only configured fixed read-only moOde operations are authorized');
     }
   }
@@ -142,15 +151,25 @@ function installFetchBoundary({ capabilities, globalObject }) {
  * and SCP until a restricted remote-command protocol is separately approved.
  */
 export function installRehearsalRuntimeBoundary({
-  capabilities = runtimeCapabilities(),
-  statePaths = runtimeStatePaths(),
+  environment = process.env,
+  capabilities = runtimeCapabilities({ env: environment }),
+  statePaths = runtimeStatePaths({ env: environment }),
   childProcessModule = childProcess,
   fsModule = fs,
   globalObject = globalThis,
+  moodeProfileDefaults = CONFIGURED_MOODE_SSH_PROFILE,
 } = {}) {
   if (globalObject[INSTALL_KEY]) return globalObject[INSTALL_KEY];
   const requiresProcessBoundary = capabilities.rehearsal || statePaths.sharedStateEnabled;
-  if (requiresProcessBoundary) installProcessBoundary({ capabilities, statePaths, childProcessModule });
+  if (requiresProcessBoundary) {
+    installProcessBoundary({
+      capabilities,
+      statePaths,
+      childProcessModule,
+      profileDefaults: moodeProfileDefaults,
+      environment,
+    });
+  }
   if (capabilities.rehearsal) {
     installStateWriteBoundary({ capabilities, fsModule });
     installFetchBoundary({ capabilities, globalObject });
