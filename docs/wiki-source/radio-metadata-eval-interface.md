@@ -8,7 +8,7 @@ This page exists because `radio-eval.html` is not a listener-facing playback UI.
 
 Important historical note:
 - this page was also created as a live debugging surface at `http://10.0.0.4:8101/radio-eval.html`
-- its practical purpose was to track iTunes lookup success and failure during radio listening, using radio station metadata as the enrichment input
+- its practical purpose was to track Apple-enrichment success and failure during radio listening, using radio station metadata as the enrichment input
 
 It is best understood as a diagnostics-oriented quality-evaluation tool for the radio metadata pipeline.
 
@@ -17,6 +17,11 @@ Current important field expectation:
 - in current practice, that raw full value may come from the same original station metadata string currently represented in the raw title field, so the UI should prefer the exact original raw string instead of leaving `Full` blank
 - for classical/WFMT-style metadata, false-positive iTunes matches should be treated conservatively; if the matched work title does not meaningfully overlap the original raw station string, the match should be rejected rather than labeled `GOOD`
 - this conservative classical-title rejection logic is now landed in `now-playing/moode-nowplaying-api.mjs`, pushed to GitHub `main`, and deployed on `10.0.0.4`
+- ordinary non-classical metadata now tries the Server's authenticated Apple
+  Music Catalog Search authority before the public iTunes Search fallback.
+  Catalog results must pass strict artist/title matching; concurrent snapshots
+  share one lookup, and rate limiting honors the provider's bounded retry
+  window. The evaluation reason `ok:catalog-search` denotes that path.
 
 ## Why this page matters
 
@@ -234,7 +239,8 @@ This page should stay linked with:
 
 Future deeper verification should clarify:
 - where the backing `/debug/radio-metadata-log` rows are produced in app code
-- whether the iTunes-oriented fields shown here are still the primary enrichment path or only one of several
+- whether the Catalog-first / iTunes-fallback balance needs station-specific
+  tuning beyond the existing conservative classical controls
 - how closely the client-side `GOOD/PARTIAL/BAD` verdict aligns with operator expectations in practice
 - whether the page is used regularly during live metadata tuning or mainly as an occasional debug aid
 
@@ -256,4 +262,4 @@ them from the final artwork or provider URL.
 
 ## Timestamp
 
-Last updated: 2026-10-02 America/Chicago
+Last updated: 2026-10-31 America/Chicago

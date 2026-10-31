@@ -319,6 +319,7 @@ import { registerMultiphoneRoutes } from './src/routes/multiphone.routes.mjs';
 import { getMillsIntegrationState, registerMillsRoutes } from './src/routes/mills.routes.mjs';
 import { HarmonyHubClient, sendHarmonyIrCommand } from './src/services/harmony.service.mjs';
 import { createAppleAboutService } from './src/services/apple-about.service.mjs';
+import { createAppleCatalogSearchService } from './src/services/apple-catalog-search.service.mjs';
 import { createAppleMusicTokenProvider } from './src/lib/apple-music-token.mjs';
 import { ABOUT_STATUS, createAboutResolver } from './src/services/about.service.mjs';
 
@@ -447,6 +448,16 @@ const appleMusicTokenProvider = APPLE_MUSIC_KEY_ID && APPLE_MUSIC_TEAM_ID && APP
     privateKeyPath: APPLE_MUSIC_PRIVATE_KEY_PATH,
   })
   : null;
+
+const appleCatalogSearchService = createAppleCatalogSearchService({
+  // Use the same protected Media Services authority as About enrichment. A
+  // static developer token remains only as a development fallback.
+  developerToken: appleMusicTokenProvider ? '' : APPLE_MUSIC_DEVELOPER_TOKEN,
+  tokenProvider: appleMusicTokenProvider ? () => appleMusicTokenProvider.getToken() : null,
+  storefront: APPLE_MUSIC_COUNTRY,
+  timeoutMs: APPLE_MUSIC_TIMEOUT_MS,
+  fetchImpl: fetch,
+});
 
 const appleAboutService = createAppleAboutService({
   // A protected Media Services key is the production authority. The legacy
@@ -5797,6 +5808,111 @@ async function lookupItunesFirst(artist, title, debug = false, opts = {}) {
   }
 }
 
+// Catalog-first radio lookup coordination. The Catalog service has its own
+// per-identity result cache; this outer layer also coalesces the complete
+// Catalog + legacy-fallback operation so concurrent HTTP/mobile snapshots
+// cannot stampede the public iTunes Search endpoint.
+const radioAppleLookupCache = new Map();
+const radioAppleLookupPending = new Map();
+const RADIO_APPLE_LOOKUP_MAX_CACHE_ENTRIES = 2_000;
+const RADIO_APPLE_LOOKUP_TRANSIENT_TTL_MS = 30_000;
+
+function radioAppleLookupCacheKey(artist, title, opts = {}) {
+  return JSON.stringify({
+    artist: normLoose(artist),
+    title: normLoose(title),
+    strictArtist: !!opts?.strictArtist,
+    strictTitle: !!opts?.strictTitle,
+    radioAlbum: normLoose(opts?.radioAlbum),
+    albumHint: normLoose(opts?.albumHint),
+    ensembleHint: normLoose(opts?.ensembleHint),
+    conductorHint: normLoose(opts?.conductorHint),
+    soloistHint: normLoose(opts?.soloistHint),
+    labelHint: normLoose(opts?.labelHint),
+    programHint: normLoose(opts?.programHint),
+    curatedCollectionId: String(opts?.curatedCollectionId || '').trim(),
+    classicalAlbumSearch: !!opts?.classicalAlbumSearch,
+  });
+}
+
+function radioAppleLookupTtl(result) {
+  const hasAcceptedIdentity = Boolean(String(
+    result?.url || result?.trackUrl || result?.albumUrl || '',
+  ).trim());
+  if (hasAcceptedIdentity) {
+    return Math.max(RADIO_APPLE_LOOKUP_TRANSIENT_TTL_MS, Number(ITUNES_TTL_HIT_MS) || 0);
+  }
+  const reason = String(result?.reason || '').toLowerCase();
+  if (/(?:backoff|rate-limited|timeout|unavailable|error)/.test(reason)) {
+    return RADIO_APPLE_LOOKUP_TRANSIENT_TTL_MS;
+  }
+  return Math.max(
+    RADIO_APPLE_LOOKUP_TRANSIENT_TTL_MS,
+    Math.min(1000 * 60 * 10, Number(ITUNES_TTL_MISS_MS) || RADIO_APPLE_LOOKUP_TRANSIENT_TTL_MS),
+  );
+}
+
+function catalogLookupIsSafeForRadioContext(opts = {}) {
+  // The specialized classical paths carry curated album/performer evidence
+  // that the generic Catalog query cannot evaluate. Preserve their existing
+  // stricter iTunes matcher rather than replacing it with a looser result.
+  return !(
+    opts?.curatedCollectionId
+    || opts?.classicalAlbumSearch
+    || opts?.strictTitle
+    || opts?.ensembleHint
+    || opts?.conductorHint
+    || opts?.soloistHint
+  );
+}
+
+async function lookupAppleCatalogFirst(artist, title, debug = false, opts = {}) {
+  const cacheKey = radioAppleLookupCacheKey(artist, title, opts);
+  const now = Date.now();
+  const cached = radioAppleLookupCache.get(cacheKey);
+  if (cached && !debug && (now - Number(cached.ts || 0)) < Number(cached.ttl || 0)) {
+    return { ...cached.result };
+  }
+  if (cached) radioAppleLookupCache.delete(cacheKey);
+
+  if (!debug && radioAppleLookupPending.has(cacheKey)) {
+    return radioAppleLookupPending.get(cacheKey);
+  }
+
+  const lookup = (async () => {
+    let catalog = null;
+    if (catalogLookupIsSafeForRadioContext(opts)) {
+      catalog = await appleCatalogSearchService.lookup({ artist, title });
+      if (catalog?.matched) return catalog;
+    }
+
+    const fallback = await lookupItunesFirst(artist, title, debug, opts);
+    if (!debug) return fallback;
+    return {
+      ...fallback,
+      catalogReason: String(catalog?.reason || (catalog ? 'catalog-no-match' : 'catalog-skipped')),
+    };
+  })();
+
+  if (!debug) radioAppleLookupPending.set(cacheKey, lookup);
+  try {
+    const result = await lookup;
+    if (!debug) {
+      if (radioAppleLookupCache.size >= RADIO_APPLE_LOOKUP_MAX_CACHE_ENTRIES) {
+        radioAppleLookupCache.delete(radioAppleLookupCache.keys().next().value);
+      }
+      radioAppleLookupCache.set(cacheKey, {
+        ts: Date.now(),
+        ttl: radioAppleLookupTtl(result),
+        result: { ...result },
+      });
+    }
+    return result;
+  } finally {
+    if (!debug) radioAppleLookupPending.delete(cacheKey);
+  }
+}
+
 
 /* =========================
  * AirPlay aplmeta.txt
@@ -6880,7 +6996,7 @@ async function lookupMobileRadioMetadata({ artist = '', title = '', album = '', 
     lookupContext.composer,
     lookupTitle,
   );
-  const result = await lookupItunesFirst(lookupArtist, lookupTitle, false, {
+  const result = await lookupAppleCatalogFirst(lookupArtist, lookupTitle, false, {
     strictArtist: !classical,
     strictTitle: classical,
     radioAlbum: lookupContext.lookupAlbumHint,
@@ -6932,7 +7048,7 @@ async function enrichNowPlayingAbout({ artist = '', title = '', album = '', trac
   let acceptedTrackUrl = String(trackUrl || '').trim();
   let acceptedAlbumUrl = String(albumUrl || '').trim();
   if (!acceptedTrackUrl && !acceptedAlbumUrl) {
-    const match = await lookupItunesFirst(artist, title, false, {
+    const match = await lookupAppleCatalogFirst(artist, title, false, {
       strictArtist: true,
       albumHint: album,
     });
@@ -8029,7 +8145,7 @@ app.get('/now-playing', async (req, res) => {
         const classicalContextOk = !!String(lookupCtx.ensembleHint || lookupCtx.conductorHint || lookupCtx.soloistHint || soloistHintRaw || '').trim() || !!String(albumForLookup || '').trim();
         const it = (likelyClassical && !classicalContextOk)
           ? { url:'', album:'', year:'', trackUrl:'', albumUrl:'', matchedArtist:'', matchedTitle:'', reason:'insufficient-metadata' }
-          : await lookupItunesFirst(lookupArtist, lookupTitle, debug, {
+          : await lookupAppleCatalogFirst(lookupArtist, lookupTitle, debug, {
               radioAlbum: albumForLookup,
               albumHint: albumForLookup,
               composerShort: lookupCtx.composerShort || '',
@@ -8060,7 +8176,7 @@ app.get('/now-playing', async (req, res) => {
           const aTry = String(lookupArtist || '').trim();
           const tTry = String(lookupTitle || '').trim();
           if (aTry && tTry) {
-            const swapped = await lookupItunesFirst(tTry, aTry, debug, {
+            const swapped = await lookupAppleCatalogFirst(tTry, aTry, debug, {
               radioAlbum: albumForLookup,
               albumHint: albumForLookup,
               composerShort: lookupCtx.composerShort || '',
@@ -8134,7 +8250,7 @@ app.get('/now-playing', async (req, res) => {
           const classicalContextOk2 = !!String(albumForLookup || '').trim();
           let it = (likelyClassical2 && !classicalContextOk2)
             ? { url:'', album:'', year:'', trackUrl:'', albumUrl:'', matchedArtist:'', matchedTitle:'', reason:'insufficient-metadata' }
-            : await lookupItunesFirst(String(s2.artist || '').trim(), s2Title, debug, {
+            : await lookupAppleCatalogFirst(String(s2.artist || '').trim(), s2Title, debug, {
                 radioAlbum: albumForLookup,
                 albumHint: albumForLookup,
                 composerShort: '',
@@ -8194,7 +8310,7 @@ app.get('/now-playing', async (req, res) => {
     if (stream && stationLogoUrl) altArtUrl = stationLogoUrl;
 
     // =========================
-    // ✅ RADIO: Apple Music link lookup (USING lookupItunesFirst)
+    // ✅ RADIO: Apple Catalog lookup first, iTunes fallback second.
     // - No undefined helper
     // - Never blanks links on error
     // - Only fills if missing (won't clobber values from earlier steps)
@@ -8236,7 +8352,7 @@ app.get('/now-playing', async (req, res) => {
         const classicalContextOk3 = !!String(s3.ensembleHint || s3.conductorHint || s3.soloistHint || soloistHint2 || '').trim() || !!String(albumForTerm || '').trim();
         let ap = (likelyClassical3 && !classicalContextOk3)
           ? { url:'', album:'', year:'', trackUrl:'', albumUrl:'', matchedArtist:'', matchedTitle:'', reason:'insufficient-metadata' }
-          : await lookupItunesFirst(String(s3.lookupArtist || '').trim(), s3Title, debug, {
+          : await lookupAppleCatalogFirst(String(s3.lookupArtist || '').trim(), s3Title, debug, {
               radioAlbum: albumForTerm,
               albumHint: albumForTerm,
               composerShort: String(s3.composerShort || '').trim(),
@@ -8950,7 +9066,7 @@ async function resolveBestArtForCurrentSong(song, statusRaw) {
       const decodedTitle = decodeHtmlEntities(song.title || '');
       const parts = decodedTitle.split(' - ').map(s => s.trim()).filter(Boolean);
       if (parts.length >= 2) {
-        const it = await lookupItunesFirst(parts[0], parts.slice(1).join(' - '), false);
+        const it = await lookupAppleCatalogFirst(parts[0], parts.slice(1).join(' - '), false);
         if (it?.url) best = String(it.url).trim();
       }
     }

@@ -79,11 +79,20 @@ the full count without pretending to know an Alexa track position.
 For a music-bearing radio stream, the ordinary `title`, `artist`, `album`, and
 `artworkUrl` fields reflect the existing conservative server-side metadata
 pipeline. That pipeline cleans station metadata, rejects likely talk/news/
-sports content, and only promotes a verified iTunes/Apple Music match. When a
-match exists, `radioYear` is populated when available and `appleMusicUrl`
-contains the exact matched track URL (falling back to the matched album URL).
-The mobile route only emits HTTPS URLs on Apple-controlled `music.apple.com`
-or `itunes.apple.com` hosts; untrusted or non-Apple links become `null`.
+sports content, and only promotes a verified Apple match. Ordinary
+non-classical artist/title pairs try the Server's authenticated Apple Music
+Catalog Search authority first, using strict artist/title acceptance, fixed
+Apple endpoints, no redirect following, and short per-track single-flight
+coordination. The older public iTunes matcher remains the bounded fallback;
+the specialized classical/curated paths retain its existing context-aware
+rules rather than accepting a generic Catalog result.
+
+When a match exists, `radioYear` is populated when available and
+`appleMusicUrl` contains the exact matched track URL (falling back to the
+matched album URL). The mobile route only emits HTTPS URLs on Apple-controlled
+`music.apple.com` or `itunes.apple.com` hosts; untrusted or non-Apple links
+become `null`. Provider tokens, raw stream URLs, redirect targets, and
+provider error bodies are never part of the mobile contract.
 
 For radio streams, `stationName` and `stationLogoUrl` identify the live
 station independently of the current song. `artworkUrl` may therefore be
@@ -511,4 +520,4 @@ invoking the native APNs bridge. This keeps podcast paths out of the client
 while allowing podcast starts to receive the same track-change notification
 behavior as music.
 
-*Last reviewed: 2026-10-28 America/Chicago*
+*Last reviewed: 2026-10-31 America/Chicago*
