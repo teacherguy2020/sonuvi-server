@@ -34,6 +34,7 @@ import {
   buildMobileLocalRecentHistory,
   buildMobileHomeRows,
   mobileHomeSourcePath,
+  orderedMobileHomeRowIDs,
   sanitizeMobileHomeProfile,
 } from '../lib/mobile-home-rows.mjs';
 import {
@@ -927,7 +928,9 @@ export function registerMobileRoutes(app, deps = {}) {
     const profile = sanitizeMobileHomeProfile(profileResult?.json?.profile || {});
     const baseUrl = requestBaseUrl(req, mobileBaseUrl);
     const sourcePayloads = new Map();
-    const sourceIDs = [...new Set([...profile.recentRows, 'local-recenttracks'])];
+    const sourceIDs = profile.showRecent
+      ? [...new Set([...orderedMobileHomeRowIDs(profile), 'local-recenttracks'])]
+      : ['local-recenttracks'];
     await Promise.all(sourceIDs.map(async (source) => {
       if (source === 'queue') {
         const queue = await loadMobileQueue(req).catch(() => null);

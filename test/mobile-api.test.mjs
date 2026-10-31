@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import { registerMobileRoutes } from '../src/routes/mobile.routes.mjs';
 import { createMobileRefreshToken, createMobileSessionToken, verifyMobileToken } from '../src/lib/mobile-auth.mjs';
+import { MOBILE_HOME_ROW_IDS } from '../src/lib/mobile-home-rows.mjs';
 
 function createApp() {
   const routes = new Map();
@@ -1269,7 +1270,12 @@ test('mobile home exposes local recent history without displaying its shelf', as
   }), response);
 
   assert.equal(response.statusCode, 200);
-  assert.deepEqual(response.body.rows.map((row) => row.id), profile.recentRows);
+  assert.deepEqual(response.body.rows.map((row) => row.id), [
+    ...profile.recentRows,
+    ...MOBILE_HOME_ROW_IDS.filter((row) => !profile.recentRows.includes(row)),
+  ]);
+  assert.ok(calls.includes('/config/lastfm/top-albums?limit=18'));
+  assert.ok(calls.includes('/config/listening-history/top-tracks?limit=18'));
   assert.equal(response.body.localRecentHistory.id, 'local-recenttracks');
   assert.equal(response.body.localRecentHistory.items[0].track.genre, 'Test');
   assert.ok(calls.includes('/config/listening-history/recent-tracks?limit=18'));
