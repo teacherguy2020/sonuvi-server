@@ -315,10 +315,11 @@ It is not just a diagnostics readout. It is a live API console plus multi-surfac
 The `GET /config/moode/audio-info?view=rows` surface is source-aware when
 Qobuz Connect owns the renderer. The Qobuz source format and decoded PCM are
 reported by the existing Pibuz/moOde `get_qbzmeta` cache. The hardware output
-is separate: Sonuvi reads ALSA playback `hw_params`/`status` files over the
-existing read-only moOde SSH path and reports `Not measured` when no open
-stream exposes parameters. It does not treat MPD being stopped as proof that
-the DAC is idle.
+is separate: Sonuvi receives bounded ALSA playback `hw_params`/`status` facts
+only through the fixed `audio-info-snapshot` operation of the existing
+restricted moOde dispatcher. It reports `Not measured` when no open stream
+exposes parameters. It does not treat MPD being stopped as proof that the DAC
+is idle.
 
 The endpoint labels the moOde `audioinfo.php` ALSA mode and audio chain as
 configured moOde/MPD path information, not verified Qobuz signal-path facts.
@@ -330,11 +331,17 @@ file paths, PHP session identifiers, or renderer credentials.
 
 ## Audio Info diagnostics contract
 
-`GET /config/moode/audio-info?view=rows&diagnostics=1` reuses the existing
-bounded, read-only ALSA probe on demand. It reads active playback
-`hw_params`/`status` from `/proc/asound` over the configured moOde SSH path; it
-does not open an ALSA device, seize playback, or restart a service. The legacy
-rows remain available and unchanged when `diagnostics=1` is omitted.
+`GET /config/moode/audio-info?view=rows&diagnostics=1` collects one bounded
+snapshot through the pinned, fixed-command
+`sonuvi-readonly-v1 audio-info-snapshot` operation. The root-owned dispatcher
+establishes the stored moOde session locally, reads MPD state and bounded
+`/proc/asound` playback facts, and returns a structured non-secret response.
+The Server never turns client input into a remote command, path, URL, session
+identifier, or redirect target. Collection-stage unavailability remains
+explicit rather than being rewritten as a stopped player or a measured output.
+The collector does not open an ALSA device, seize playback, or restart a
+service. The legacy rows remain available and unchanged when `diagnostics=1`
+is omitted.
 
 The optional `diagnostics` object is versioned as `audio-info.v1`. The bearer
 `GET /v1/mobile/audio-info` route requests this view when Audio Info is opened
@@ -373,6 +380,9 @@ accuracy:
   as decoded throughput.
 - `output`: the same actual ALSA observation as `hardwareOutput`, with device,
   interface, format, rate, and channels grouped under the output role.
+- `collection`: non-secret availability/provenance for the dispatcher session,
+  renderer report, MPD status, and ALSA observation. This is diagnostic
+  transport evidence, not audio-format evidence.
 
 ### Active radio-stream source evidence
 

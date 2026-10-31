@@ -498,10 +498,16 @@ test('live radio diagnostics use only the injected current-MPD stream and retain
   let activeRadioCalls = 0;
   let liveProbeCalls = 0;
   let localSourceCalls = 0;
+  const radioHtml = `
+<div class="h5">Input / Output</div>
+<li><span class="left">Source</span><span class="right">https://row.example.invalid/not-used</span></li>
+<li><span class="left">Source format</span><span class="right">Not playing</span></li>
+<li><span class="left">Decoded to</span><span class="right">PCM 24 bit 44.1 kHz, Stereo, 256 kbps</span></li>
+<li><span class="left">Output format</span><span class="right">PCM 32 bit 44.1 kHz, Stereo</span></li>`;
   registerConfigMoodeAudioInfoRoutes(app, {
     requireTrackKey: () => true,
     getQobuzNowPlaying: async () => null,
-    probeAlsaHardware: async () => alsa,
+    readMoodeAudioInfoSnapshot: async () => snapshot({ html: radioHtml }),
     getSourceAudio: async () => {
       localSourceCalls += 1;
       return null;
@@ -538,41 +544,28 @@ test('live radio diagnostics use only the injected current-MPD stream and retain
         verified: true,
       };
     },
-    fetchMoodeDeviceMeta: async () => ({ sessionId: 'stored-moode-session' }),
   });
 
-  const radioHtml = `
-<div class="h5">Input / Output</div>
-<li><span class="left">Source</span><span class="right">https://row.example.invalid/not-used</span></li>
-<li><span class="left">Source format</span><span class="right">Not playing</span></li>
-<li><span class="left">Decoded to</span><span class="right">PCM 24 bit 44.1 kHz, Stereo, 256 kbps</span></li>
-<li><span class="left">Output format</span><span class="right">PCM 32 bit 44.1 kHz, Stereo</span></li>`;
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => new Response(radioHtml, { status: 200 });
-  try {
-    const legacyResponse = createResponse();
-    await app.routes.get('GET /config/moode/audio-info')?.({ query: { view: 'rows' } }, legacyResponse);
-    assert.equal(activeRadioCalls, 0);
-    assert.equal(liveProbeCalls, 0);
+  const legacyResponse = createResponse();
+  await app.routes.get('GET /config/moode/audio-info')?.({ query: { view: 'rows' } }, legacyResponse);
+  assert.equal(activeRadioCalls, 0);
+  assert.equal(liveProbeCalls, 0);
 
-    const response = createResponse();
-    await app.routes.get('GET /config/moode/audio-info')?.({ query: { view: 'rows', diagnostics: '1' } }, response);
-    const source = response.body.diagnostics.sourceFile;
-    assert.equal(activeRadioCalls, 1);
-    assert.equal(liveProbeCalls, 1);
-    assert.equal(localSourceCalls, 0);
-    assert.equal(source.codec, 'AAC-LC');
-    assert.equal(source.sampleRateHz, 44100);
-    assert.equal(source.channels, 2);
-    assert.equal(source.encodedBitrateBps, 256000);
-    assert.equal(source.bitDepthStatus, 'not-applicable');
-    assert.equal(source.provenance, 'live-upstream-probe');
-    assert.equal(source.valueType, 'live-stream');
-    assert.equal(source.verified, true);
-    assert.equal(response.body.rows.find((row) => row.key === 'Decoded to').value, 'PCM 24 bit 44.1 kHz, Stereo');
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+  const response = createResponse();
+  await app.routes.get('GET /config/moode/audio-info')?.({ query: { view: 'rows', diagnostics: '1' } }, response);
+  const source = response.body.diagnostics.sourceFile;
+  assert.equal(activeRadioCalls, 1);
+  assert.equal(liveProbeCalls, 1);
+  assert.equal(localSourceCalls, 0);
+  assert.equal(source.codec, 'AAC-LC');
+  assert.equal(source.sampleRateHz, 44100);
+  assert.equal(source.channels, 2);
+  assert.equal(source.encodedBitrateBps, 256000);
+  assert.equal(source.bitDepthStatus, 'not-applicable');
+  assert.equal(source.provenance, 'live-upstream-probe');
+  assert.equal(source.valueType, 'live-stream');
+  assert.equal(source.verified, true);
+  assert.equal(response.body.rows.find((row) => row.key === 'Decoded to').value, 'PCM 24 bit 44.1 kHz, Stereo');
 });
 
 test('Qobuz diagnostics bypass the live-radio source probe', async () => {
