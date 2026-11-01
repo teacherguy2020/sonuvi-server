@@ -305,7 +305,8 @@ import { createUpnpPlaybackSessionManager } from './src/lib/upnp-playback-sessio
 import { createUpnpPlaybackQueueManager } from './src/lib/upnp-playback-queue.mjs';
 import { registerAllConfigRoutes } from './src/routes/config.routes.index.mjs';
 import { registerUpnpRoutes } from './src/routes/upnp.routes.mjs';
-import { createDlnaMediaServer } from './src/lib/dlna-media-server.mjs';
+import { createDlnaMediaServer, selectLanAddress } from './src/lib/dlna-media-server.mjs';
+import { startDlnaSsdpResponder } from './src/lib/dlna-ssdp.mjs';
 import { registerPodcastSubscriptionRoutes } from './src/routes/podcasts-subscriptions.routes.mjs';
 import { registerPodcastRefreshRoutes } from './src/routes/podcasts-refresh.routes.mjs';
 import { registerPodcastEpisodeRoutes } from './src/routes/podcasts-episodes.routes.mjs';
@@ -9984,7 +9985,13 @@ app.listen(PORT, '0.0.0.0', () => {
   log.debug(`Public: ${PUBLIC_BASE_URL}`);
   log.debug(`Alexa routes enabled? ${ENABLE_ALEXA ? 'YES' : 'NO'}`);
   if (dlnaMediaServer.enabled) {
-    dlnaMediaServer.start().then((started) => {
+    dlnaMediaServer.start().then(async (started) => {
+      if (started) await startDlnaSsdpResponder({
+        udn: dlnaMediaServer.udn,
+        baseUrl: dlnaMediaServer.baseUrl,
+        localAddress: selectLanAddress({ preferred: LOCAL_ADDRESS }),
+        log,
+      });
       log.info?.(`[dlna] MediaServer ${started ? 'advertising' : 'not started'}${dlnaMediaServer.baseUrl ? ` at ${dlnaMediaServer.baseUrl}` : ''}`);
     }).catch((error) => log.warn?.('[dlna] MediaServer startup failed', error?.message || error));
   }
