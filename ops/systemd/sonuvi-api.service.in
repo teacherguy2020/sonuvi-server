@@ -22,7 +22,6 @@ Environment=SONUVI_RELEASE_ID=@RELEASE_ID@
 Environment=SONUVI_ACTIVATION_STATE=/var/lib/sonuvi/checkpoints/release-activation-state.json
 Environment=MUSIC_LIBRARY_ROOT=@MUSIC_LIBRARY_ROOT@
 Environment=PI4_MOUNT_BASE=@MUSIC_LIBRARY_ROOT@
-EnvironmentFile=-/var/lib/sonuvi/protected/legacy-config.env
 EnvironmentFile=-/var/lib/sonuvi/protected/now-playing.env
 EnvironmentFile=-/etc/now-playing/apns-provider.env
 EnvironmentFile=-/var/lib/sonuvi/protected/runtime-paths.env
