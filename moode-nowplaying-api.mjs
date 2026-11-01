@@ -9213,6 +9213,7 @@ registerMobileRoutes(app, {
   mobileBaseUrl: MOBILE_PUBLIC_BASE_URL,
   mobileTrackCacheDir: MOBILE_TRACK_CACHE_DIR,
   transcodeTracks: MOBILE_TRANSCODE_TRACKS,
+  dlnaMediaServer,
   musicLibraryRoot: PI4_MOUNT_BASE,
   videoCatalog: mobileVideoCatalog,
   listeningHistory,

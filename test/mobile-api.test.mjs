@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { registerMobileRoutes } from '../src/routes/mobile.routes.mjs';
-import { createMobileRefreshToken, createMobileSessionToken, verifyMobileToken } from '../src/lib/mobile-auth.mjs';
+import { createMobileRefreshToken, createMobileSessionToken, createMobileTrackId, verifyMobileToken } from '../src/lib/mobile-auth.mjs';
 import { MOBILE_HOME_ROW_IDS } from '../src/lib/mobile-home-rows.mjs';
 
 function createApp() {
@@ -118,6 +118,30 @@ function registerFixture(extra = {}) {
   });
   return app;
 }
+
+test('mobile DLNA capability and opaque track resource routes require bearer auth', async () => {
+  const app = registerFixture({
+    dlnaMediaServer: {
+      async capabilities() { return { supported: true, enabled: true, udn: 'uuid:11111111-1111-4111-8111-111111111111', deviceType: 'urn:schemas-upnp-org:device:MediaServer:1', friendlyName: 'Sonuvi Music Library', deviceDescriptionUrl: 'http://10.0.0.4:3101/dlna/device.xml', mediaBaseUrl: 'http://10.0.0.4:3101/dlna/media' }; },
+      async resourceForFile() { return { objectId: 'track:opaque', mediaUrl: 'http://10.0.0.4:3101/dlna/media/track%3Aopaque', mimeType: 'audio/mpeg', protocolInfo: 'http-get:*:audio/mpeg:*', didlLite: '<DIDL-Lite/>' }; },
+    },
+  });
+  const denied = createResponse();
+  await app.routes.get('GET /v1/mobile/dlna/capabilities')?.(request(), denied);
+  assert.equal(denied.statusCode, 401);
+  const session = createResponse();
+  await app.routes.get('POST /v1/mobile/session')?.(request({ headers: { 'x-mobile-enrollment-code': 'one-time-code' }, body: { deviceId: 'dlna-test' } }), session);
+  const headers = { authorization: `Bearer ${session.body.accessToken}` };
+  const capability = createResponse();
+  await app.routes.get('GET /v1/mobile/dlna/capabilities')?.(request({ headers }), capability);
+  assert.equal(capability.body.udn, 'uuid:11111111-1111-4111-8111-111111111111');
+  const resource = createResponse();
+  const trackId = createMobileTrackId({ secret: 'track-secret-for-test', trackIdentity: 'mbtrack:track-one|album:mbalbum:album-one|folder:usb/samsungmoode/test album' });
+  await app.routes.get('GET /v1/mobile/dlna/tracks/:trackId/resource')?.(request({ headers, params: { trackId } }), resource);
+  assert.equal(resource.statusCode, 200);
+  assert.equal(resource.body.resource.objectId, 'track:opaque');
+  assert.equal(JSON.stringify(resource.body).includes('SamsungMoode'), false);
+});
 
 test('mobile session enrollment uses its own credential and issues a scoped token', async () => {
   const app = registerFixture();

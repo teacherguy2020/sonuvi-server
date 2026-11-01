@@ -636,6 +636,11 @@ export function registerMobileRoutes(app, deps = {}) {
     ? deps.getUpnpPlaybackQueue
     : () => deps.upnpPlaybackQueue || null;
   const expectedRendererHost = text(deps.expectedRendererHost) || '10.0.0.254';
+  const dlnaMediaServer = deps.dlnaMediaServer
+    && typeof deps.dlnaMediaServer.capabilities === 'function'
+    && typeof deps.dlnaMediaServer.resourceForFile === 'function'
+    ? deps.dlnaMediaServer
+    : null;
   // The browser pairing widget authenticates with the existing Track Key.
   // An already-paired native device has an equivalent trusted credential in
   // its bearer session, so it can host the same QR/approval flow without
@@ -2324,6 +2329,34 @@ export function registerMobileRoutes(app, deps = {}) {
       return errorResponse(res, 500, 'mobile API request failed');
     }
   };
+
+  // This describes the Server's own optional MediaServer. It deliberately
+  // exposes neither a filesystem path nor an importable library record: the
+  // paired iOS provider remains the catalog owner.
+  app.get('/v1/mobile/dlna/capabilities', asyncRoute(async (req, res) => {
+    if (!requireSession(req, res)) return;
+    if (!dlnaMediaServer) return res.json({ ok: true, supported: false, enabled: false });
+    return res.json({ ok: true, ...(await dlnaMediaServer.capabilities()) });
+  }));
+
+  app.get('/v1/mobile/dlna/tracks/:trackId/resource', asyncRoute(async (req, res) => {
+    if (!requireSession(req, res)) return;
+    if (!dlnaMediaServer) return errorResponse(res, 404, 'native DLNA MediaServer is unavailable');
+    const catalog = await loadCatalog();
+    const track = catalog.byTrackId.get(text(req?.params?.trackId));
+    if (!track) return errorResponse(res, 404, 'track not found');
+    const capabilities = await dlnaMediaServer.capabilities();
+    if (!capabilities.enabled) return errorResponse(res, 409, 'native DLNA MediaServer is disabled');
+    const resource = await dlnaMediaServer.resourceForFile(track.file);
+    if (!resource) return errorResponse(res, 422, 'track is unavailable for DLNA delivery');
+    return res.json({
+      ok: true,
+      trackId: track.id,
+      udn: capabilities.udn,
+      available: true,
+      resource,
+    });
+  }));
 
   registerMobileUpnpRoutes(app, {
     requireEnabled,
