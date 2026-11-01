@@ -233,7 +233,7 @@ import {
   FFMPEG, CURL, MPD_PLAYLIST_DIR, FAVORITES_PATH, MOODE_SSH_USER, MOODE_SSH_HOST, PORT,
   MOODE_BASE_URL, PUBLIC_BASE_URL, LOCAL_ADDRESS, MPD_HOST, MPD_PORT, MOODE_USB_PREFIX,
   PI4_MOUNT_BASE, METAFLAC, TRACK_KEY, LASTFM_API_KEY, LASTFM_API_SECRET, LASTFM_SESSION_KEY, LASTFM_MPD_MODE,
-  ENABLE_ALEXA, TRANSCODE_TRACKS, TRACK_CACHE_DIR,
+  ENABLE_ALEXA, ENABLE_DLNA_MEDIA_SERVER, TRANSCODE_TRACKS, TRACK_CACHE_DIR,
   FAVORITES_PLAYLIST_NAME, FAVORITES_REFRESH_MS, ITUNES_SEARCH_URL, ITUNES_COUNTRY,
   ITUNES_TIMEOUT_MS, ITUNES_TTL_HIT_MS, ITUNES_TTL_MISS_MS,
   APPLE_MUSIC_DEVELOPER_TOKEN, APPLE_MUSIC_COUNTRY, APPLE_MUSIC_TIMEOUT_MS,
@@ -305,6 +305,7 @@ import { createUpnpPlaybackSessionManager } from './src/lib/upnp-playback-sessio
 import { createUpnpPlaybackQueueManager } from './src/lib/upnp-playback-queue.mjs';
 import { registerAllConfigRoutes } from './src/routes/config.routes.index.mjs';
 import { registerUpnpRoutes } from './src/routes/upnp.routes.mjs';
+import { createDlnaMediaServer } from './src/lib/dlna-media-server.mjs';
 import { registerPodcastSubscriptionRoutes } from './src/routes/podcasts-subscriptions.routes.mjs';
 import { registerPodcastRefreshRoutes } from './src/routes/podcasts-refresh.routes.mjs';
 import { registerPodcastEpisodeRoutes } from './src/routes/podcasts-episodes.routes.mjs';
@@ -4259,6 +4260,20 @@ function mpdFileToLocalPath(mpdFile) {
 function safeIsFile(p) {
   try { return fs.statSync(p).isFile(); } catch { return false; }
 }
+
+// Native MediaServer reads the existing persisted Browse Index only. It is
+// intentionally separate from the UPnP control point and never controls MPD.
+const dlnaMediaServer = createDlnaMediaServer({
+  enabled: ENABLE_DLNA_MEDIA_SERVER && !RUNTIME_CAPABILITIES.rehearsal,
+  getBrowseIndex: () => getBrowseIndex(MPD_HOST),
+  resolveFile: async (file) => mpdFileToLocalPath(file),
+  mountRoot: PI4_MOUNT_BASE,
+  identityPath: RUNTIME_STATE_PATHS.dlnaMediaServerIdentityPath,
+  localAddress: LOCAL_ADDRESS,
+  port: PORT,
+  log,
+});
+dlnaMediaServer.register(app, express);
 
 const sourceAudioProbe = createSourceAudioProbe({
   resolveFile: async (file) => {
@@ -9968,4 +9983,9 @@ app.listen(PORT, '0.0.0.0', () => {
   log.debug(`Endpoint: http://${LOCAL_ADDRESS}:${PORT}/next-up`);
   log.debug(`Public: ${PUBLIC_BASE_URL}`);
   log.debug(`Alexa routes enabled? ${ENABLE_ALEXA ? 'YES' : 'NO'}`);
+  if (dlnaMediaServer.enabled) {
+    dlnaMediaServer.start().then((started) => {
+      log.info?.(`[dlna] MediaServer ${started ? 'advertising' : 'not started'}${dlnaMediaServer.baseUrl ? ` at ${dlnaMediaServer.baseUrl}` : ''}`);
+    }).catch((error) => log.warn?.('[dlna] MediaServer startup failed', error?.message || error));
+  }
 });

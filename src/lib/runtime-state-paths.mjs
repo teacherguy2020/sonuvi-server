@@ -180,6 +180,7 @@ export function createRuntimeStatePaths({ cwd = process.cwd(), env = process.env
     }),
     audioQualityCatalogPath: defaultPath(dataRoot, 'audio-quality-catalog.json', 'AUDIO_QUALITY_CATALOG_PATH'),
     audioQualityCheckpointPath: defaultPath(dataRoot, 'audio-quality-checkpoint.json', 'AUDIO_QUALITY_CHECKPOINT_PATH'),
+    dlnaMediaServerIdentityPath: defaultPath(dataRoot, 'dlna-media-server-identity.json', 'DLNA_MEDIA_SERVER_IDENTITY_PATH'),
 
     // User-visible history, profile, playlists, radio, and controller state.
     listeningHistoryPath: defaultPath(dataRoot, 'listening-history.jsonl', 'LISTENING_HISTORY_PATH'),

@@ -311,6 +311,12 @@
                   </div>
                 </div>
 
+                <div class="cfgCard gateCard" id="dlnaMediaServerCard">
+                  <h3>DLNA MediaServer</h3>
+                  <div class="cfgField"><label><input id="featureDlnaMediaServer" type="checkbox" /> Enable DLNA MediaServer</label></div>
+                  <div class="cfgHint">Advertises <strong>Sonuvi Music Library</strong> on the local network after the next Sonuvi Server restart. It serves original library files read-only for compatible DLNA and OpenHome controllers.</div>
+                </div>
+
                 <div class="cfgCard gateCard" id="qobuzAccountSection">
                   <h3>Qobuz Account</h3>
                   <div class="cfgHint">Connect your Qobuz account to browse albums, favorites, and playlists through Sonuvi Music Sources.</div>
@@ -1358,6 +1364,7 @@ async function loadCfg(){
   syncPodcastsUi();
   document.getElementById('featureRatings').checked = !!c.features?.ratings;
   document.getElementById('featureRadio').checked = !!c.features?.radio;
+  document.getElementById('featureDlnaMediaServer').checked = !!c.features?.dlnaMediaServer;
   document.getElementById('featureAlbumPersonnel').checked = !!(c.features?.albumPersonnel ?? true);
   document.getElementById('featureShowAboutWhenNoPersonnel').checked = !!(c.features?.showAboutWhenNoPersonnel ?? true);
   document.getElementById('featureMoodeDisplayTakeover').checked = !!(c.features?.moodeDisplayTakeover ?? true);

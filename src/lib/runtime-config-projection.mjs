@@ -82,6 +82,7 @@ function projectedFeatures(cfg) {
     showAboutWhenNoPersonnel: bool(features.showAboutWhenNoPersonnel, true),
     moodeDisplayTakeover: bool(features.moodeDisplayTakeover, true),
     lastfm: bool(features.lastfm, false),
+    dlnaMediaServer: bool(features.dlnaMediaServer, false),
   };
 }
 
@@ -307,7 +308,7 @@ export function sanitizeRuntimeConfigUpdate(value) {
   if (hasOwn(incoming, 'features')) {
     const features = object(incoming.features);
     out.features = {};
-    for (const field of ['podcasts', 'ratings', 'radio', 'albumPersonnel', 'showAboutWhenNoPersonnel', 'moodeDisplayTakeover', 'lastfm']) {
+    for (const field of ['podcasts', 'ratings', 'radio', 'albumPersonnel', 'showAboutWhenNoPersonnel', 'moodeDisplayTakeover', 'lastfm', 'dlnaMediaServer']) {
       if (hasOwn(features, field)) out.features[field] = bool(features[field], false);
     }
   }

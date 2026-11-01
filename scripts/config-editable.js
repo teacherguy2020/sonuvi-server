@@ -11,6 +11,7 @@
     featureShowAboutWhenNoPersonnel: ['features', 'showAboutWhenNoPersonnel', 'bool'],
     featureMoodeDisplayTakeover: ['features', 'moodeDisplayTakeover', 'bool'],
     featureLastfm: ['features', 'lastfm', 'bool'],
+    featureDlnaMediaServer: ['features', 'dlnaMediaServer', 'bool'],
     apiNodeIp: ['', 'apiHost'], apiPort: ['ports', 'api', 'number'], uiPort: ['ports', 'ui', 'number'],
     mpdHost: ['mpd', 'host'], mpdPort: ['mpd', 'port', 'number'],
     moodeSshHost: ['moode', 'sshHost'], moodeSshUser: ['moode', 'sshUser'],
