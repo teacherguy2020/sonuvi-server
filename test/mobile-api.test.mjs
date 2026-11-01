@@ -56,6 +56,15 @@ function fixtureIndex() {
         mbTrackId: 'track-one',
         mbAlbumId: 'album-one',
         mbArtistId: 'artist-one',
+        audioQuality: {
+          status: 'verified',
+          verificationStatus: 'verified',
+          provenance: 'ffprobe.source-file',
+          badgeEligibility: 'hi-res',
+          bitDepth: 24,
+          sampleRateHz: 96000,
+          channels: 2,
+        },
       },
       {
         file: 'USB/SamsungMoode/Test Album/02 - Second.flac',
@@ -299,11 +308,13 @@ test('mobile catalog returns opaque IDs and never returns the MPD file path', as
   assert.doesNotMatch(JSON.stringify(res.body), /SamsungMoode|01 - First|\.flac/);
 });
 
-test('mobile catalog includes verified source audio properties when available', async () => {
+test('mobile catalog reads stored quality without a lazy source probe', async () => {
+  let probeCalls = 0;
   const app = registerFixture({
-    getSourceAudio: async (file) => file.endsWith('First.mp3')
-      ? { sampleRateHz: 96000, bitDepth: 24, channels: 2 }
-      : null,
+    getSourceAudio: async () => {
+      probeCalls += 1;
+      return { sampleRateHz: 96000, bitDepth: 24, channels: 2 };
+    },
   });
   const sessionRes = createResponse();
   await app.routes.get('POST /v1/mobile/session')?.(request({
@@ -321,9 +332,15 @@ test('mobile catalog includes verified source audio properties when available', 
     bitDepth: 24,
     channels: 2,
   });
+  assert.equal(res.body.items[0].audioQuality.badgeEligibility, 'hi-res');
+  assert.equal(probeCalls, 0);
 
+  let nowProbeCalls = 0;
   const nowPlayingApp = registerFixture({
-    getSourceAudio: async () => ({ sampleRateHz: 96000, bitDepth: 24, channels: 2 }),
+    getSourceAudio: async () => {
+      nowProbeCalls += 1;
+      return { sampleRateHz: 96000, bitDepth: 24, channels: 2 };
+    },
     mpdQueryRaw: async (command) => command === 'status'
       ? 'state: play\nsong: 0\nsongid: 1\n'
       : 'file: USB/SamsungMoode/Test Album/01 - First.mp3\nPos: 0\nId: 1\n',
@@ -347,6 +364,8 @@ test('mobile catalog includes verified source audio properties when available', 
     bitDepth: 24,
     channels: 2,
   });
+  assert.equal(nowResponse.body.track.audioQuality.badgeEligibility, 'hi-res');
+  assert.equal(nowProbeCalls, 0);
 });
 
 test('mobile album catalog exposes safe added timestamps from the existing library metadata', async () => {

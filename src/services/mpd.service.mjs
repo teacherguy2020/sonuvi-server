@@ -121,18 +121,22 @@ export async function mpdStop() {
   return true;
 }
 
-export function mpdQueryRaw(command, timeoutMs = 3000) {
+export function mpdQueryRawAt(command, {
+  host = MPD_HOST,
+  port = MPD_PORT,
+  timeoutMs = 3000,
+  capabilities = runtimeCapabilities(),
+} = {}) {
   return new Promise((resolve, reject) => {
     try {
       const capability = mpdCommandCapability(command);
-      const runtime = runtimeCapabilities();
-      if (capability.readOnly) runtime.assertExternalRead(capability.capability);
-      else runtime.assertExternalMutation(capability.capability);
+      if (capability.readOnly) capabilities.assertExternalRead(capability.capability);
+      else capabilities.assertExternalMutation(capability.capability);
     } catch (error) {
       reject(error);
       return;
     }
-    const sock = net.createConnection({ host: MPD_HOST, port: MPD_PORT });
+    const sock = net.createConnection({ host, port });
 
     let buf = '';
     let finished = false;
@@ -175,4 +179,8 @@ export function mpdQueryRaw(command, timeoutMs = 3000) {
 
     sock.on('end', () => finish());
   });
+}
+
+export function mpdQueryRaw(command, timeoutMs = 3000) {
+  return mpdQueryRawAt(command, { host: MPD_HOST, port: MPD_PORT, timeoutMs });
 }

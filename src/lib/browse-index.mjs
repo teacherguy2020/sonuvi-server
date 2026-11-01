@@ -4,6 +4,15 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { runtimeStatePaths } from './runtime-state-paths.mjs';
 import { CapabilityDeniedError, runtimeCapabilities } from './runtime-capabilities.mjs';
+import { mpdQueryRawAt } from '../services/mpd.service.mjs';
+import {
+  audioQualityIndexCounts,
+  audioQualityNeedsEnrichment,
+  audioQualitySummaryForTracks,
+  failedAudioQuality,
+  pendingAudioQuality,
+  verifiedAudioQuality,
+} from './browse-index-quality.mjs';
 
 const execFileP = promisify(execFile);
 
@@ -27,6 +36,25 @@ function parseTrackNo(track = '') {
   return Number.isFinite(n) ? n : 0;
 }
 
+function parseMpdFileRevisions(raw) {
+  const revisions = new Map();
+  let file = '';
+  for (const line of String(raw || '').split(/\r?\n/)) {
+    const separator = line.indexOf(':');
+    if (separator <= 0) continue;
+    const key = line.slice(0, separator).trim().toLowerCase();
+    const value = line.slice(separator + 1).trim();
+    if (key === 'file') {
+      file = value;
+      continue;
+    }
+    if (key !== 'last-modified' || !file) continue;
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) revisions.set(file, new Date(parsed).toISOString());
+  }
+  return revisions;
+}
+
 function contained(root, candidate) {
   const relative = path.relative(root, candidate);
   return relative === '' || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`));
@@ -37,7 +65,7 @@ function validRehearsalBrowseIndex(index) {
   return Boolean(
     index
       && typeof index === 'object'
-      && index.schema === 'now-playing.browse-index.v2'
+      && (index.schema === 'now-playing.browse-index.v2' || index.schema === 'now-playing.browse-index.v3')
       && Array.isArray(index.artists)
       && Array.isArray(index.albums)
       && Array.isArray(index.tracks)
@@ -87,10 +115,82 @@ export function createBrowseIndexAdapter({
   runExecFile = execFileP,
   rehearsalStateRoot = process.env.SONUVI_REHEARSAL_STATE_ROOT,
   now = () => Date.now(),
+  getAudioQualityRecord = null,
+  qualityBatchSize = 24,
+  qualityBatchDelayMs = 1_000,
+  schedule = setTimeout,
+  mpdPort = 6600,
+  readMpdRaw = mpdQueryRawAt,
 } = {}) {
   const indexPath = String(statePaths?.browseIndexPath || '').trim();
   if (!indexPath || !path.isAbsolute(indexPath)) throw new Error('browse index path must be absolute');
   let mem = { ts: 0, host: '', index: null, inflight: null, dbCheckTs: 0, dbUpdateIso: '' };
+  const qualityRecord = typeof getAudioQualityRecord === 'function' ? getAudioQualityRecord : null;
+  const boundedBatchSize = Math.max(1, Math.min(100, Number(qualityBatchSize) || 24));
+  const boundedBatchDelayMs = Math.max(100, Math.min(60_000, Number(qualityBatchDelayMs) || 1_000));
+  let qualityTimer = null;
+  let qualityRunning = false;
+
+  const isoNow = () => new Date(Number(now())).toISOString();
+
+  async function writeIndex(index) {
+    await fsApi.mkdir(path.dirname(indexPath), { recursive: true });
+    const temporary = indexPath + '.' + process.pid + '.' + Date.now() + '.' + Math.random().toString(16).slice(2) + '.tmp';
+    await fsApi.writeFile(temporary, JSON.stringify(index) + '\n', 'utf8');
+    await fsApi.rename(temporary, indexPath);
+  }
+
+  async function readPersistedIndex() {
+    try {
+      const parsed = JSON.parse(await fsApi.readFile(indexPath, 'utf8'));
+      return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function qualityForRebuiltTrack(previousQuality, mpdLastModified) {
+    const previous = previousQuality && typeof previousQuality === 'object' && !Array.isArray(previousQuality)
+      ? previousQuality
+      : null;
+    const previousRevision = previous?.sourceRevision && typeof previous.sourceRevision === 'object'
+      ? previous.sourceRevision
+      : null;
+    const oldMpdModified = String(previousRevision?.mpdLastModified || '').trim();
+    if (previous && (!mpdLastModified || (oldMpdModified && oldMpdModified === mpdLastModified))) return previous;
+    return pendingAudioQuality({
+      sourceRevision: mpdLastModified ? { mpdLastModified } : null,
+      reason: previous ? 'source-revision-changed' : 'not-yet-analyzed',
+    });
+  }
+
+  function refreshQualityMetadata(index) {
+    const tracks = Array.isArray(index?.tracks) ? index.tracks : [];
+    const byAlbum = new Map();
+    for (const track of tracks) {
+      const key = String(track?.albumKey || '').trim();
+      if (!key) continue;
+      if (!byAlbum.has(key)) byAlbum.set(key, []);
+      byAlbum.get(key).push(track);
+    }
+    for (const album of Array.isArray(index?.albums) ? index.albums : []) {
+      album.audioQuality = audioQualitySummaryForTracks(byAlbum.get(String(album?.key || '')) || []);
+    }
+    const counts = audioQualityIndexCounts(tracks);
+    index.audioQuality = {
+      contract: 'now-playing.browse-index.audio-quality.v1',
+      ...counts,
+      updatedAt: isoNow(),
+    };
+    index.qualityMaintenance = {
+      contract: 'now-playing.browse-index-quality-maintenance.v1',
+      pendingTracks: counts.pendingTracks,
+      failedTracks: counts.failedTracks,
+      batchSize: boundedBatchSize,
+      updatedAt: isoNow(),
+    };
+    return counts;
+  }
 
   async function getMpdDbUpdateIso(mpdHost = 'moode.local') {
     try {
@@ -111,13 +211,32 @@ export function createBrowseIndexAdapter({
     }
   }
 
-  async function buildBrowseIndex(mpdHost = 'moode.local') {
+  async function getMpdFileRevisions(mpdHost = 'moode.local') {
+    try {
+      const raw = await readMpdRaw('listallinfo', {
+        host: String(mpdHost || 'moode.local'),
+        port: Number(mpdPort) || 6600,
+        timeoutMs: 60_000,
+      });
+      return parseMpdFileRevisions(raw);
+    } catch {
+      return new Map();
+    }
+  }
+
+  async function buildBrowseIndex(mpdHost = 'moode.local', { previousIndex = null } = {}) {
     if (capabilities?.rehearsal) throw new CapabilityDeniedError('browse-index.mpd-refresh');
-    const dbUpdateAt = await getMpdDbUpdateIso(mpdHost);
+    const [dbUpdateAt, fileRevisions] = await Promise.all([
+      getMpdDbUpdateIso(mpdHost),
+      getMpdFileRevisions(mpdHost),
+    ]);
     const fmt = '%file%\t%artist%\t%albumartist%\t%album%\t%title%\t%track%\t%genre%\t%time%\t%MUSICBRAINZ_TRACKID%\t%MUSICBRAINZ_ALBUMID%\t%MUSICBRAINZ_ARTISTID%';
     const { stdout } = await runExecFile('mpc', ['-h', String(mpdHost || 'moode.local'), '-f', fmt, 'listall'], {
       maxBuffer: 96 * 1024 * 1024,
     });
+    const previousByFile = new Map((Array.isArray(previousIndex?.tracks) ? previousIndex.tracks : [])
+      .map((track) => [String(track?.file || '').trim(), track?.audioQuality])
+      .filter(([file]) => file));
 
     const artists = new Map();
     const albums = new Map();
@@ -137,6 +256,7 @@ export function createBrowseIndexAdapter({
       const track = String(trackRaw || '').trim();
       const genre = String(genreRaw || '').trim();
       const durationSec = parseMpdDuration(timeRaw);
+      const mpdLastModified = String(fileRevisions.get(filePath) || '').trim();
 
       const artistKey = norm(artist || albumArtist);
       const albumKey = `${norm(albumArtist || artist)}|${norm(album)}`;
@@ -183,13 +303,15 @@ export function createBrowseIndexAdapter({
         mbTrackId: String(mbTrackRaw || '').trim(),
         mbAlbumId: String(mbAlbumRaw || '').trim(),
         mbArtistId: String(mbArtistRaw || '').trim(),
+        ...(mpdLastModified ? { mpdLastModified } : {}),
+        audioQuality: qualityForRebuiltTrack(previousByFile.get(filePath), mpdLastModified),
         rating: 0,
       });
     }
 
     const index = {
-      schema: 'now-playing.browse-index.v2',
-      builtAt: new Date().toISOString(),
+      schema: 'now-playing.browse-index.v3',
+      builtAt: isoNow(),
       dbUpdateAt,
       mpdHost: String(mpdHost || ''),
       counts: { artists: artists.size, albums: albums.size, tracks: tracks.length },
@@ -198,9 +320,74 @@ export function createBrowseIndexAdapter({
       tracks,
     };
 
-    await fsApi.mkdir(path.dirname(indexPath), { recursive: true });
-    await fsApi.writeFile(indexPath, JSON.stringify(index), 'utf8');
+    refreshQualityMetadata(index);
+    await writeIndex(index);
     return index;
+  }
+
+  async function runQualityBatch(mpdHost = 'moode.local', { limit = boundedBatchSize } = {}) {
+    if (capabilities?.rehearsal || !qualityRecord) return { processed: 0, remaining: 0, counts: null };
+    const host = String(mpdHost || 'moode.local');
+    const index = await getBrowseIndex(host);
+    if (index?.schema !== 'now-playing.browse-index.v3') return { processed: 0, remaining: 0, counts: null };
+    const budget = Math.max(1, Math.min(boundedBatchSize, Number(limit) || boundedBatchSize));
+    const candidates = (Array.isArray(index.tracks) ? index.tracks : [])
+      .filter((track) => audioQualityNeedsEnrichment(track?.audioQuality, now()))
+      .slice(0, budget);
+    if (!candidates.length) return { processed: 0, remaining: 0, counts: index.audioQuality || null };
+
+    const changedAlbums = new Set();
+    for (const track of candidates) {
+      let result;
+      try {
+        result = await qualityRecord(track.file);
+      } catch {
+        result = { status: 'failed', reason: 'probe-failed' };
+      }
+      const sourceRevision = {
+        ...(result?.sourceRevision && typeof result.sourceRevision === 'object' ? result.sourceRevision : {}),
+        ...(track.mpdLastModified ? { mpdLastModified: track.mpdLastModified } : {}),
+      };
+      track.audioQuality = result?.status === 'verified'
+        ? verifiedAudioQuality({ sourceAudio: result.sourceAudio, sourceRevision, verifiedAt: isoNow() })
+        : failedAudioQuality({ sourceRevision, reason: String(result?.reason || 'probe-failed'), retryAfter: result?.retryAfter });
+      changedAlbums.add(String(track.albumKey || ''));
+    }
+
+    const tracksByAlbum = new Map();
+    for (const track of index.tracks) {
+      const key = String(track?.albumKey || '');
+      if (!changedAlbums.has(key)) continue;
+      if (!tracksByAlbum.has(key)) tracksByAlbum.set(key, []);
+      tracksByAlbum.get(key).push(track);
+    }
+    for (const album of index.albums) {
+      const key = String(album?.key || '');
+      if (changedAlbums.has(key)) album.audioQuality = audioQualitySummaryForTracks(tracksByAlbum.get(key) || []);
+    }
+    const counts = refreshQualityMetadata(index);
+    await writeIndex(index);
+    mem = { ...mem, ts: now(), host, index };
+    return { processed: candidates.length, remaining: counts.pendingTracks, counts };
+  }
+
+  function scheduleQualityEnrichment(mpdHost) {
+    if (capabilities?.rehearsal || !qualityRecord || qualityTimer || qualityRunning) return;
+    qualityTimer = schedule(async () => {
+      qualityTimer = null;
+      qualityRunning = true;
+      let shouldContinue = false;
+      try {
+        const result = await runQualityBatch(mpdHost);
+        shouldContinue = Number(result?.remaining || 0) > 0;
+      } catch {
+        // A later browse/index refresh retries; browsing itself remains read-only.
+      } finally {
+        qualityRunning = false;
+      }
+      if (shouldContinue) scheduleQualityEnrichment(mpdHost);
+    }, boundedBatchDelayMs);
+    qualityTimer?.unref?.();
   }
 
   async function getBrowseIndex(mpdHost = 'moode.local', { force = false } = {}) {
@@ -216,11 +403,15 @@ export function createBrowseIndexAdapter({
     const sameHost = mem.host === host;
 
     // Fast memory return unless forced. Keep this very cheap.
-    if (!force && mem.index && sameHost && (timestamp - mem.ts) < 60_000) return mem.index;
+    if (!force && mem.index && sameHost && (timestamp - mem.ts) < 60_000) {
+      scheduleQualityEnrichment(host);
+      return mem.index;
+    }
     if (mem.inflight) return mem.inflight;
 
     mem.inflight = (async () => {
       let idx = null;
+      let previousIndex = null;
 
       if (!force) {
         if (mem.index && sameHost) {
@@ -229,10 +420,11 @@ export function createBrowseIndexAdapter({
           try {
             const raw = await fsApi.readFile(indexPath, 'utf8');
             const parsed = JSON.parse(raw || '{}');
-            if (parsed && (parsed.schema === 'now-playing.browse-index.v1' || parsed.schema === 'now-playing.browse-index.v2')) idx = parsed;
+            if (parsed?.schema === 'now-playing.browse-index.v3') idx = parsed;
           } catch {}
         }
       }
+      if (idx) previousIndex = idx;
 
       // Lightweight staleness check against MPD DB update time every ~30s.
       if (!force && idx) {
@@ -247,6 +439,7 @@ export function createBrowseIndexAdapter({
             const dbMs = Date.parse(dbUpdateIso);
             const idxMs = Date.parse(marker);
             if (Number.isFinite(dbMs) && Number.isFinite(idxMs) && dbMs > idxMs) {
+              previousIndex = idx;
               idx = null; // stale; force rebuild below
             }
           }
@@ -256,7 +449,10 @@ export function createBrowseIndexAdapter({
         }
       }
 
-      if (!idx) idx = await buildBrowseIndex(host);
+      if (!idx) {
+        if (!previousIndex) previousIndex = await readPersistedIndex();
+        idx = await buildBrowseIndex(host, { previousIndex });
+      }
 
       mem = {
         ts: now(),
@@ -267,6 +463,7 @@ export function createBrowseIndexAdapter({
         dbUpdateIso: mem.dbUpdateIso || String(idx?.dbUpdateAt || ''),
       };
 
+      scheduleQualityEnrichment(host);
       return idx;
     })();
 
@@ -277,10 +474,15 @@ export function createBrowseIndexAdapter({
     }
   }
 
-  return Object.freeze({ getBrowseIndex, buildBrowseIndex });
+  return Object.freeze({ getBrowseIndex, buildBrowseIndex, runQualityBatch });
 }
 
-const defaultBrowseIndexAdapter = createBrowseIndexAdapter();
+let defaultBrowseIndexAdapter = createBrowseIndexAdapter();
+
+export function configureBrowseIndexQuality(options = {}) {
+  defaultBrowseIndexAdapter = createBrowseIndexAdapter(options);
+  return defaultBrowseIndexAdapter;
+}
 
 export function buildBrowseIndex(mpdHost = 'moode.local') {
   return defaultBrowseIndexAdapter.buildBrowseIndex(mpdHost);

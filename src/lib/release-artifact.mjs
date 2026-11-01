@@ -779,7 +779,7 @@ export async function buildReleaseArtifact({
       requirements: defaultManifestRequirements(),
       externalRuntimeDependencies: externalRuntimeDependencies(),
       compatibleCatalogSchemas: {
-        browseIndex: ['now-playing.browse-index.v1', 'now-playing.browse-index.v2'],
+        browseIndex: ['now-playing.browse-index.v1', 'now-playing.browse-index.v2', 'now-playing.browse-index.v3'],
       },
       requiredServices: ['sonuvi-api.service', 'sonuvi-web.service'],
       entrypoints: {

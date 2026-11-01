@@ -273,7 +273,7 @@ import { registerQueueRoutes } from './src/routes/queue.routes.mjs';
 import { registerTrackRoutes } from './src/routes/track.routes.mjs';
 import { registerArtRoutes, serveTrackArtwork } from './src/routes/art.routes.mjs';
 import { registerMobileRoutes } from './src/routes/mobile.routes.mjs';
-import { getBrowseIndex } from './src/lib/browse-index.mjs';
+import { configureBrowseIndexQuality, getBrowseIndex } from './src/lib/browse-index.mjs';
 import { buildMobileCatalog } from './src/lib/mobile-track-identity.mjs';
 import { createSourceAudioProbe } from './src/lib/source-audio.mjs';
 import { createLiveRadioAudioProbe } from './src/lib/live-radio-audio.mjs';
@@ -4266,6 +4266,13 @@ const sourceAudioProbe = createSourceAudioProbe({
     return localPath && safeIsFile(localPath) ? localPath : '';
   },
   cachePath: RUNTIME_STATE_PATHS.sourceAudioCachePath,
+});
+
+// Browse Index v3 owns quality enrichment. Browse responses only read its
+// stored records; this bounded worker is the sole caller that may validate or
+// run ffprobe for library-quality data.
+configureBrowseIndexQuality({
+  getAudioQualityRecord: sourceAudioProbe.getRecord,
 });
 
 const liveRadioAudioProbe = createLiveRadioAudioProbe({
