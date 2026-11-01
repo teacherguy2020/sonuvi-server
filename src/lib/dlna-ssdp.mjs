@@ -8,6 +8,8 @@ import {
 
 const SSDP_GROUP = '239.255.255.250';
 const SSDP_PORT = 1900;
+const SSDP_MAX_AGE_SECONDS = 1800;
+const SSDP_ALIVE_INTERVAL_MS = 15 * 60 * 1000;
 
 export function parseSsdpSearchTarget(request) {
   if (!/^M-SEARCH \*/i.test(request) || !/(?:^|\r?\n)MAN:\s*"ssdp:discover"/i.test(request)) return '';
@@ -28,18 +30,25 @@ function response({ target, udn, baseUrl }) {
   ].join('\r\n');
 }
 
-function alive({ udn, baseUrl }) {
-  return [
+export function ssdpAliveAnnouncements({ udn, baseUrl }) {
+  const identities = [
+    { target: 'upnp:rootdevice', usn: `${udn}::upnp:rootdevice` },
+    { target: udn, usn: udn },
+    { target: DLNA_DEVICE_TYPE, usn: `${udn}::${DLNA_DEVICE_TYPE}` },
+    { target: CONTENT_DIRECTORY_TYPE, usn: `${udn}::${CONTENT_DIRECTORY_TYPE}` },
+    { target: CONNECTION_MANAGER_TYPE, usn: `${udn}::${CONNECTION_MANAGER_TYPE}` },
+  ];
+  return identities.map(({ target, usn }) => [
     'NOTIFY * HTTP/1.1',
     `HOST: ${SSDP_GROUP}:${SSDP_PORT}`,
-    'CACHE-CONTROL: max-age=1800',
+    `CACHE-CONTROL: max-age=${SSDP_MAX_AGE_SECONDS}`,
     `LOCATION: ${baseUrl}/dlna/device.xml`,
-    'NT: upnp:rootdevice',
+    `NT: ${target}`,
     'NTS: ssdp:alive',
-    `USN: ${udn}::upnp:rootdevice`,
+    `USN: ${usn}`,
     '',
     '',
-  ].join('\r\n');
+  ].join('\r\n'));
 }
 
 /**
@@ -65,6 +74,12 @@ export async function startDlnaSsdpResponder({ udn, baseUrl, localAddress, log =
   socket.addMembership(SSDP_GROUP, localAddress);
   socket.setMulticastInterface(localAddress);
   socket.setMulticastTTL(2);
-  socket.send(alive({ udn, baseUrl }), SSDP_PORT, SSDP_GROUP);
+  const announce = () => {
+    for (const message of ssdpAliveAnnouncements({ udn, baseUrl })) socket.send(message, SSDP_PORT, SSDP_GROUP);
+  };
+  announce();
+  const refresh = setInterval(announce, SSDP_ALIVE_INTERVAL_MS);
+  refresh.unref();
+  socket.once('close', () => clearInterval(refresh));
   return socket;
 }

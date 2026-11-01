@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { createDlnaMediaServer, persistentUdn, selectLanAddress } from '../src/lib/dlna-media-server.mjs';
-import { parseSsdpSearchTarget } from '../src/lib/dlna-ssdp.mjs';
+import { parseSsdpSearchTarget, ssdpAliveAnnouncements } from '../src/lib/dlna-ssdp.mjs';
 
 const fixtureIndex = {
   schema: 'now-playing.browse-index.v3', builtAt: '2026-11-01T12:00:00.000Z',
@@ -32,6 +32,17 @@ test('SSDP parser reads the ST header rather than the ST substring in HOST', () 
   ].join('\r\n');
   assert.equal(parseSsdpSearchTarget(request), 'urn:schemas-upnp-org:device:MediaServer:1');
   assert.equal(parseSsdpSearchTarget(request.replace('MAN: "ssdp:discover"', 'MAN: "other"')), '');
+});
+
+test('SSDP announces every MediaServer identity clients can discover', () => {
+  const udn = 'uuid:11111111-2222-3333-4444-555555555555';
+  const announcements = ssdpAliveAnnouncements({ udn, baseUrl: 'http://10.0.0.4:3101' });
+  assert.equal(announcements.length, 5);
+  assert.ok(announcements.some((message) => message.includes('NT: upnp:rootdevice')));
+  assert.ok(announcements.some((message) => message.includes(`NT: ${udn}`) && message.includes(`USN: ${udn}\r\n`)));
+  assert.ok(announcements.some((message) => message.includes('NT: urn:schemas-upnp-org:device:MediaServer:1')));
+  assert.ok(announcements.some((message) => message.includes('NT: urn:schemas-upnp-org:service:ContentDirectory:1')));
+  assert.ok(announcements.some((message) => message.includes('NT: urn:schemas-upnp-org:service:ConnectionManager:1')));
 });
 
 test('DLNA device identity is stable across restarts', async () => {
