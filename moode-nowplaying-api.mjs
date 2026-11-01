@@ -9985,14 +9985,14 @@ app.listen(PORT, '0.0.0.0', () => {
   log.debug(`Public: ${PUBLIC_BASE_URL}`);
   log.debug(`Alexa routes enabled? ${ENABLE_ALEXA ? 'YES' : 'NO'}`);
   if (dlnaMediaServer.enabled) {
-    dlnaMediaServer.start().then(async (started) => {
-      if (started) await startDlnaSsdpResponder({
-        udn: dlnaMediaServer.udn,
+    dlnaMediaServer.initialize().then(async (udn) => {
+      await startDlnaSsdpResponder({
+        udn,
         baseUrl: dlnaMediaServer.baseUrl,
         localAddress: selectLanAddress({ preferred: LOCAL_ADDRESS }),
         log,
       });
-      log.info?.(`[dlna] MediaServer ${started ? 'advertising' : 'not started'}${dlnaMediaServer.baseUrl ? ` at ${dlnaMediaServer.baseUrl}` : ''}`);
+      log.info?.(`[dlna] MediaServer advertising at ${dlnaMediaServer.baseUrl}`);
     }).catch((error) => log.warn?.('[dlna] MediaServer startup failed', error?.message || error));
   }
 });
