@@ -9,6 +9,11 @@ import {
 const SSDP_GROUP = '239.255.255.250';
 const SSDP_PORT = 1900;
 
+export function parseSsdpSearchTarget(request) {
+  if (!/^M-SEARCH \*/i.test(request) || !/(?:^|\r?\n)MAN:\s*"ssdp:discover"/i.test(request)) return '';
+  return (request.match(/(?:^|\r?\n)ST:\s*([^\r\n]+)/i) || [])[1]?.trim() || '';
+}
+
 function response({ target, udn, baseUrl }) {
   return [
     'HTTP/1.1 200 OK',
@@ -49,8 +54,7 @@ export async function startDlnaSsdpResponder({ udn, baseUrl, localAddress, log =
   socket.on('error', (error) => log.warn?.('[dlna] SSDP socket error', error?.message || error));
   socket.on('message', (message, remote) => {
     const request = message.toString('utf8');
-    if (!/^M-SEARCH \*/i.test(request) || !/MAN:\s*"ssdp:discover"/i.test(request)) return;
-    const target = (request.match(/ST:\s*([^\r\n]+)/i) || [])[1]?.trim() || '';
+    const target = parseSsdpSearchTarget(request);
     if (!['ssdp:all', 'upnp:rootdevice', DLNA_DEVICE_TYPE, CONTENT_DIRECTORY_TYPE, CONNECTION_MANAGER_TYPE].includes(target)) return;
     socket.send(response({ target, udn, baseUrl }), remote.port, remote.address);
   });

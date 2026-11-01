@@ -6,6 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { createDlnaMediaServer, persistentUdn, selectLanAddress } from '../src/lib/dlna-media-server.mjs';
+import { parseSsdpSearchTarget } from '../src/lib/dlna-ssdp.mjs';
 
 const fixtureIndex = {
   schema: 'now-playing.browse-index.v3', builtAt: '2026-11-01T12:00:00.000Z',
@@ -17,6 +18,20 @@ const fixtureIndex = {
 test('DLNA MediaServer uses private LAN address only', () => {
   assert.equal(selectLanAddress({ preferred: '10.0.0.4' }), '10.0.0.4');
   assert.equal(selectLanAddress({ preferred: 'sonuvi.local', interfaces: {} }), '');
+});
+
+test('SSDP parser reads the ST header rather than the ST substring in HOST', () => {
+  const request = [
+    'M-SEARCH * HTTP/1.1',
+    'HOST: 239.255.255.250:1900',
+    'MAN: "ssdp:discover"',
+    'MX: 1',
+    'ST: urn:schemas-upnp-org:device:MediaServer:1',
+    '',
+    '',
+  ].join('\r\n');
+  assert.equal(parseSsdpSearchTarget(request), 'urn:schemas-upnp-org:device:MediaServer:1');
+  assert.equal(parseSsdpSearchTarget(request.replace('MAN: "ssdp:discover"', 'MAN: "other"')), '');
 });
 
 test('DLNA device identity is stable across restarts', async () => {
