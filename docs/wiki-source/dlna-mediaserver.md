@@ -22,8 +22,10 @@ URLs and DIDL-Lite metadata to an OpenHome renderer; the renderer owns its
 own persistent queue and fetches audio directly from Sonuvi Server.
 
 The implementation must never modify MPD, moOde, BubbleUPnP, a renderer queue,
-or music files. It reads the read-only `/mnt/SamsungMoode` mount and existing
-Browse Index v3 only. In particular, DLNA browsing never runs ffprobe, scans
+or music files. The production mount intentionally remains read-write for
+separate Library Health metadata-editing capability, but DLNA is strictly
+application-level read-only and reads the existing Browse Index v3 only. In
+particular, DLNA browsing never runs ffprobe, scans
 the filesystem, or changes the bounded quality-enrichment checkpoint.
 
 ## Configuration and lifecycle
@@ -51,9 +53,18 @@ paths. The hierarchy is:
 
 The ContentDirectory service supports `Browse`, metadata/direct-children
 navigation, pagination, and DIDL-Lite output. Its declared search/sort
-capabilities are empty; it does not claim proprietary search behavior.
-ConnectionManager advertises the original supported local audio MIME types.
-There is no transcode path.
+capabilities are empty; it does not claim proprietary search behavior. Its
+SCPD declares each action's arguments, directions, related state variables,
+data types, and Browse flag constraints. ConnectionManager likewise exposes a
+complete SCPD, reports connection ID `0`, and supplies limited standard
+MediaServer output connection information for that ID; invalid IDs return the
+UPnP `706 No Such Connection` fault. It advertises the original supported
+local audio MIME types. There is no transcode path.
+
+When enabled, DLNA SOAP control requests produce one narrowly scoped service
+log event containing only service name, action, and HTTP status. The logger
+never records SOAP bodies, music metadata, paths, or credentials. This is for
+bounded interoperability diagnostics and is not an access log.
 
 ## Media delivery and security
 
@@ -69,8 +80,10 @@ invalid range); nothing permits arbitrary host file reads or writes.
 ## Validation boundary
 
 Unit coverage in `test/dlna-media-server.test.mjs` covers disabled isolation,
-private LAN selection, durable UDNs, Browse/DIDL pagination and escaping,
-range delivery, and path isolation. Physical controller/OpenHome validation
+private LAN selection, durable UDNs, complete SCPD/action consistency,
+ConnectionManager ID-0 and invalid-ID faults, SOAP diagnostics privacy,
+Browse/DIDL pagination and escaping, range delivery, and path isolation.
+Physical controller/OpenHome validation
 requires a separately authorized test activation because it would advertise a
 live Sonuvi source on the home LAN. moOde's existing MediaServer remains
 enabled until that acceptance sequence passes.

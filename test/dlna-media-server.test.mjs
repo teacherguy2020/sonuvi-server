@@ -55,6 +55,64 @@ test('DLNA device identity is stable across restarts', async () => {
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 
+test('DLNA SCPDs match implemented ContentDirectory and ConnectionManager actions', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'sonuvi-dlna-scpc-'));
+  const app = express();
+  const soapLogs = [];
+  const service = createDlnaMediaServer({
+    enabled: true, getBrowseIndex: async () => fixtureIndex, resolveFile: async () => '', mountRoot: root,
+    identityPath: path.join(root, 'identity.json'), localAddress: '10.0.0.4', port: 3101,
+    log: { info: (...entry) => soapLogs.push(entry), warn() {} },
+  });
+  await service.initialize();
+  service.register(app, express);
+  const server = await new Promise((resolve) => { const next = app.listen(0, '127.0.0.1', () => resolve(next)); });
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const [contentScpd, connectionScpd] = await Promise.all([
+      (await fetch(`${base}/dlna/content-directory.xml`)).text(),
+      (await fetch(`${base}/dlna/connection-manager.xml`)).text(),
+    ]);
+    for (const scpd of [contentScpd, connectionScpd]) {
+      assert.match(scpd, /<argumentList>/);
+      assert.match(scpd, /<relatedStateVariable>/);
+      assert.match(scpd, /<sendEventsAttribute>/);
+      assert.doesNotMatch(scpd, /sendEvents=/);
+    }
+    assert.match(contentScpd, /<name>RequestedCount<\/name><direction>in<\/direction><relatedStateVariable>A_ARG_TYPE_Browse_RequestedCount/);
+    assert.match(connectionScpd, /<name>ConnectionID<\/name><direction>in<\/direction><relatedStateVariable>A_ARG_TYPE_ConnectionID/);
+    const soap = async (pathName, type, action, body = '') => {
+      const response = await fetch(`${base}${pathName}`, { method: 'POST', headers: { 'content-type': 'text/xml', SOAPAction: `"${type}#${action}"` }, body });
+      return { status: response.status, body: await response.text() };
+    };
+    const contentType = 'urn:schemas-upnp-org:service:ContentDirectory:1';
+    const connectionType = 'urn:schemas-upnp-org:service:ConnectionManager:1';
+    for (const action of ['Browse', 'GetSearchCapabilities', 'GetSortCapabilities', 'GetSystemUpdateID']) {
+      const result = await soap('/dlna/content-directory/control', contentType, action, '<ObjectID>0</ObjectID><BrowseFlag>BrowseDirectChildren</BrowseFlag><StartingIndex>0</StartingIndex><RequestedCount>1</RequestedCount>');
+      assert.equal(result.status, 200, action);
+    }
+    for (const action of ['GetProtocolInfo', 'GetCurrentConnectionIDs']) {
+      const result = await soap('/dlna/connection-manager/control', connectionType, action);
+      assert.equal(result.status, 200, action);
+    }
+    const connection = await soap('/dlna/connection-manager/control', connectionType, 'GetCurrentConnectionInfo', '<ConnectionID>0</ConnectionID>');
+    assert.equal(connection.status, 200);
+    assert.match(connection.body, /<Direction>Output<\/Direction>/);
+    assert.match(connection.body, /<Status>OK<\/Status>/);
+    const missing = await soap('/dlna/connection-manager/control', connectionType, 'GetCurrentConnectionInfo', '<ConnectionID>9</ConnectionID>');
+    assert.equal(missing.status, 500);
+    assert.match(missing.body, /<errorCode>706<\/errorCode>/);
+    const unsupported = await soap('/dlna/connection-manager/control', connectionType, 'UnsupportedAction');
+    assert.equal(unsupported.status, 500);
+    assert.match(unsupported.body, /<errorCode>401<\/errorCode>/);
+    assert.deepEqual(soapLogs.at(-1), ['[dlna] SOAP', { service: 'ConnectionManager', action: 'UnsupportedAction', status: 500 }]);
+    assert.doesNotMatch(JSON.stringify(soapLogs), /ObjectID|Track Key|track:/i);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('DLNA browse and media routes expose only indexed read-only files', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'sonuvi-dlna-media-'));
   const musicPath = path.join(root, 'Artist', 'Album', '01 - <Track>.flac');
@@ -64,7 +122,7 @@ test('DLNA browse and media routes expose only indexed read-only files', async (
   const service = createDlnaMediaServer({
     enabled: true, getBrowseIndex: async () => fixtureIndex,
     resolveFile: async () => musicPath, mountRoot: root,
-    identityPath: path.join(root, 'identity.json'), localAddress: '10.0.0.4', port: 3101,
+    identityPath: path.join(root, 'identity.json'), localAddress: '10.0.0.4', port: 3101, log: { info() {}, warn() {} },
   });
   await service.initialize();
   service.register(app, express);
