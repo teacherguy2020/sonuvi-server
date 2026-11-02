@@ -194,7 +194,7 @@ test('activation preflight rejects missing configuration, unwritable shared stat
   } finally {
     await fs.chmod(dataDirectory, 0o700);
   }
-  await write(fixture.layoutRoot, 'shared/data/library-browse-index.json', '{"schema":"now-playing.browse-index.v3"}\n');
+  await write(fixture.layoutRoot, 'shared/data/library-browse-index.json', '{"schema":"now-playing.browse-index.v4"}\n');
   await assert.rejects(
     activateReleaseTransaction({ layoutRoot: fixture.layoutRoot, releaseId: fixture.second.releaseId, adapter: healthyAdapter([]) }),
     /not compatible/,

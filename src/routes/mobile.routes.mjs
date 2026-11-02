@@ -34,6 +34,7 @@ import {
   buildMobileLocalRecentHistory,
   buildMobileHomeRows,
   mobileHomeSourcePath,
+  orderedMobileHomeRowIDs,
   sanitizeMobileHomeProfile,
 } from '../lib/mobile-home-rows.mjs';
 import {
@@ -635,6 +636,11 @@ export function registerMobileRoutes(app, deps = {}) {
     ? deps.getUpnpPlaybackQueue
     : () => deps.upnpPlaybackQueue || null;
   const expectedRendererHost = text(deps.expectedRendererHost) || '10.0.0.254';
+  const dlnaMediaServer = deps.dlnaMediaServer
+    && typeof deps.dlnaMediaServer.capabilities === 'function'
+    && typeof deps.dlnaMediaServer.resourceForFile === 'function'
+    ? deps.dlnaMediaServer
+    : null;
   // The browser pairing widget authenticates with the existing Track Key.
   // An already-paired native device has an equivalent trusted credential in
   // its bearer session, so it can host the same QR/approval flow without
@@ -644,9 +650,6 @@ export function registerMobileRoutes(app, deps = {}) {
   const getIndex = typeof deps.getBrowseIndex === 'function'
     ? deps.getBrowseIndex
     : (host) => getBrowseIndex(host);
-  const getSourceAudio = typeof deps.getSourceAudio === 'function'
-    ? deps.getSourceAudio
-    : null;
   const mpdFileToLocalPath = typeof deps.mpdFileToLocalPath === 'function'
     ? deps.mpdFileToLocalPath
     : () => '';
@@ -764,13 +767,6 @@ export function registerMobileRoutes(app, deps = {}) {
       };
     }
     return catalogCache.catalog;
-  };
-
-  const enrichSourceAudio = async (track) => {
-    if (!track || track.sourceAudio || !getSourceAudio) return track;
-    const sourceAudio = await getSourceAudio(track.file).catch(() => null);
-    if (sourceAudio) track.sourceAudio = sourceAudio;
-    return track;
   };
 
   const albumMetadataKey = (artist, album) => (
@@ -927,7 +923,9 @@ export function registerMobileRoutes(app, deps = {}) {
     const profile = sanitizeMobileHomeProfile(profileResult?.json?.profile || {});
     const baseUrl = requestBaseUrl(req, mobileBaseUrl);
     const sourcePayloads = new Map();
-    const sourceIDs = [...new Set([...profile.recentRows, 'local-recenttracks'])];
+    const sourceIDs = profile.showRecent
+      ? [...new Set([...orderedMobileHomeRowIDs(profile), 'local-recenttracks'])]
+      : ['local-recenttracks'];
     await Promise.all(sourceIDs.map(async (source) => {
       if (source === 'queue') {
         const queue = await loadMobileQueue(req).catch(() => null);
@@ -1625,7 +1623,6 @@ export function registerMobileRoutes(app, deps = {}) {
     });
     const isPlaying = Boolean(payload.isPlaying) || state === 'play';
     const currentMobileTrack = await resolveMobileCurrentTrack(candidateFile);
-    await enrichSourceAudio(currentMobileTrack.track);
     const currentItemIsLocal = !payload.isAirplay
       && !currentMobileTrack.disabled
       && Boolean(currentMobileTrack.track);
@@ -2332,6 +2329,34 @@ export function registerMobileRoutes(app, deps = {}) {
       return errorResponse(res, 500, 'mobile API request failed');
     }
   };
+
+  // This describes the Server's own optional MediaServer. It deliberately
+  // exposes neither a filesystem path nor an importable library record: the
+  // paired iOS provider remains the catalog owner.
+  app.get('/v1/mobile/dlna/capabilities', asyncRoute(async (req, res) => {
+    if (!requireSession(req, res)) return;
+    if (!dlnaMediaServer) return res.json({ ok: true, supported: false, enabled: false });
+    return res.json({ ok: true, ...(await dlnaMediaServer.capabilities()) });
+  }));
+
+  app.get('/v1/mobile/dlna/tracks/:trackId/resource', asyncRoute(async (req, res) => {
+    if (!requireSession(req, res)) return;
+    if (!dlnaMediaServer) return errorResponse(res, 404, 'native DLNA MediaServer is unavailable');
+    const catalog = await loadCatalog();
+    const track = catalog.byTrackId.get(text(req?.params?.trackId));
+    if (!track) return errorResponse(res, 404, 'track not found');
+    const capabilities = await dlnaMediaServer.capabilities();
+    if (!capabilities.enabled) return errorResponse(res, 409, 'native DLNA MediaServer is disabled');
+    const resource = await dlnaMediaServer.resourceForFile(track.file);
+    if (!resource) return errorResponse(res, 422, 'track is unavailable for DLNA delivery');
+    return res.json({
+      ok: true,
+      trackId: track.id,
+      udn: capabilities.udn,
+      available: true,
+      resource,
+    });
+  }));
 
   registerMobileUpnpRoutes(app, {
     requireEnabled,
@@ -4660,10 +4685,9 @@ export function registerMobileRoutes(app, deps = {}) {
     return res.json({
       ok: true,
       album: publicMobileAlbum(album, catalog, { baseUrl }),
-      tracks: (await Promise.all(album.trackIds
+      tracks: album.trackIds
         .map((trackId) => catalog.byTrackId.get(trackId))
         .filter(Boolean)
-        .map((track) => enrichSourceAudio(track))))
         .map((track) => publicMobileTrack(track, { baseUrl })),
     });
   }));
@@ -4673,7 +4697,6 @@ export function registerMobileRoutes(app, deps = {}) {
     const catalog = await loadCatalog();
     const track = catalog.byTrackId.get(text(req?.params?.trackId));
     if (!track) return errorResponse(res, 404, 'track not found');
-    await enrichSourceAudio(track);
     return res.json({ ok: true, track: publicMobileTrack(track, { baseUrl: requestBaseUrl(req, mobileBaseUrl) }) });
   }));
 
@@ -4768,8 +4791,7 @@ export function registerMobileRoutes(app, deps = {}) {
     if (!q) return errorResponse(res, 400, 'q is required');
     const tracks = catalog.tracks
       .filter((track) => `${track.title} ${track.artist} ${track.album}`.toLocaleLowerCase().includes(q))
-    const enriched = await Promise.all(tracks.map((track) => enrichSourceAudio(track)));
-    return res.json({ ok: true, ...page(enriched.map((track) => publicMobileTrack(track, { baseUrl: requestBaseUrl(req, mobileBaseUrl) })), pageArgs(req.query)) });
+    return res.json({ ok: true, ...page(tracks.map((track) => publicMobileTrack(track, { baseUrl: requestBaseUrl(req, mobileBaseUrl) })), pageArgs(req.query)) });
   }));
 
   app.get('/v1/mobile/catalog/videos', asyncRoute(async (req, res) => {

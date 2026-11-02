@@ -84,6 +84,11 @@ export const ENABLE_ALEXA =
   process.env.ENABLE_ALEXA != null
     ? String(process.env.ENABLE_ALEXA).trim() === '1'
     : Boolean(alexaEnabledFromConfig ?? true);
+// DLNA is intentionally opt-in. This is read once at service startup so a
+// config save has the same predictable restart boundary as other services.
+export const ENABLE_DLNA_MEDIA_SERVER = process.env.ENABLE_DLNA_MEDIA_SERVER != null
+  ? /^(1|true|yes|on)$/i.test(String(process.env.ENABLE_DLNA_MEDIA_SERVER).trim())
+  : Boolean(MASTER_CONFIG?.features?.dlnaMediaServer);
 export const TRANSCODE_TRACKS = String(process.env.TRANSCODE_TRACKS || '0').trim() === '1';
 export const TRACK_CACHE_DIR = configuredWritableStatePath(runtimeCfg?.trackCacheDir, {
   fallback: RUNTIME_STATE_PATHS.trackCacheDir,

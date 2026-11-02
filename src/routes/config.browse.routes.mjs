@@ -239,7 +239,12 @@ export function registerConfigBrowseRoutes(app, deps) {
       if (!requireTrackKey(req, res)) return;
       const mpdHost = String(MPD_HOST || 'moode.local');
       const idx = await getBrowseIndex(mpdHost);
-      return res.json({ ok: true, builtAt: String(idx?.builtAt || ''), counts: idx?.counts || {} });
+      return res.json({
+        ok: true,
+        builtAt: String(idx?.builtAt || ''),
+        counts: idx?.counts || {},
+        ...(idx?.audioQuality ? { audioQuality: idx.audioQuality } : {}),
+      });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e?.message || String(e) });
     }
@@ -250,7 +255,12 @@ export function registerConfigBrowseRoutes(app, deps) {
       if (!requireTrackKey(req, res)) return;
       const mpdHost = String(MPD_HOST || 'moode.local');
       const idx = await getBrowseIndex(mpdHost, { force: true });
-      return res.json({ ok: true, builtAt: String(idx?.builtAt || ''), counts: idx?.counts || {} });
+      return res.json({
+        ok: true,
+        builtAt: String(idx?.builtAt || ''),
+        counts: idx?.counts || {},
+        ...(idx?.audioQuality ? { audioQuality: idx.audioQuality } : {}),
+      });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e?.message || String(e) });
     }

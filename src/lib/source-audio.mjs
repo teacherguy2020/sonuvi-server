@@ -103,17 +103,22 @@ export function createSourceAudioProbe({
   resolveFile,
   cachePath,
   ffprobePath = process.env.FFPROBE || '/usr/bin/ffprobe',
+  fsApi = fs,
+  runExecFile = execFileP,
+  now = () => Date.now(),
+  retryDelayMs = 30 * 60 * 1000,
 } = {}) {
   const probeVersion = 2;
   const configuredCachePath = path.resolve(String(cachePath || runtimeStatePaths().sourceAudioCachePath));
   let cache = null;
   const inflight = new Map();
   let persistOperation = Promise.resolve();
+  const boundedRetryDelayMs = Math.max(60_000, Math.min(24 * 60 * 60 * 1000, Number(retryDelayMs) || 30 * 60 * 1000));
 
   const load = async () => {
     if (cache) return cache;
     try {
-      const parsed = JSON.parse(await fs.readFile(configuredCachePath, 'utf8'));
+      const parsed = JSON.parse(await fsApi.readFile(configuredCachePath, 'utf8'));
       cache = parsed?.files && typeof parsed.files === 'object' ? parsed.files : {};
     } catch {
       cache = {};
@@ -123,43 +128,70 @@ export function createSourceAudioProbe({
 
   const persist = async () => {
     const write = persistOperation.then(async () => {
-      await fs.mkdir(path.dirname(configuredCachePath), { recursive: true });
-      const temporary = `${configuredCachePath}.${process.pid}.tmp`;
-      await fs.writeFile(temporary, `${JSON.stringify({ version: 1, files: cache }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
-      await fs.rename(temporary, configuredCachePath);
+      await fsApi.mkdir(path.dirname(configuredCachePath), { recursive: true });
+      const temporary = `${configuredCachePath}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
+      await fsApi.writeFile(temporary, `${JSON.stringify({ version: 2, files: cache }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+      await fsApi.rename(temporary, configuredCachePath);
     });
     persistOperation = write.catch(() => {});
     await write;
   };
 
-  const get = async (mpdFile) => {
+  const sourceRevision = (stat) => ({
+    sizeBytes: Number(stat.size),
+    modifiedMs: Number(stat.mtimeMs),
+    probeVersion,
+  });
+
+  const retryAfter = () => new Date(Number(now()) + boundedRetryDelayMs).toISOString();
+
+  const failed = (reason, revision = null, retryAt = retryAfter()) => ({
+    status: 'failed',
+    reason,
+    retryAfter: retryAt,
+    ...(revision ? { sourceRevision: revision } : {}),
+  });
+
+  const cacheMatches = (previous, revision) => (
+    previous
+      && Number(previous.probeVersion) === probeVersion
+      && Number(previous.sizeBytes) === Number(revision.sizeBytes)
+      && Number(previous.modifiedMs) === Number(revision.modifiedMs)
+  );
+
+  const getRecord = async (mpdFile, { force = false } = {}) => {
     const key = String(mpdFile || '').trim();
-    if (!key || typeof resolveFile !== 'function') return null;
+    if (!key || typeof resolveFile !== 'function') return failed('source-unavailable');
     if (inflight.has(key)) return inflight.get(key);
 
     const task = (async () => {
       const filePath = await resolveFile(key);
-      if (!filePath) return null;
+      if (!filePath) return failed('source-unavailable');
       let stat;
       try {
-        stat = await fs.stat(filePath);
-        if (!stat.isFile()) return null;
+        stat = await fsApi.stat(filePath);
+        if (!stat.isFile()) return failed('source-unavailable');
       } catch {
-        return null;
+        return failed('source-unavailable');
       }
 
+      const revision = sourceRevision(stat);
       const entries = await load();
       const previous = entries[key];
-      if (previous
-        && Number(previous.probeVersion) === probeVersion
-        && Number(previous.sizeBytes) === Number(stat.size)
-        && Number(previous.modifiedMs) === Number(stat.mtimeMs)) {
-        return previous.sourceAudio || null;
+      if (!force && cacheMatches(previous, revision) && previous?.sourceAudio && typeof previous.sourceAudio === 'object') {
+        return { status: 'verified', sourceAudio: previous.sourceAudio, sourceRevision: revision };
+      }
+      if (!force && cacheMatches(previous, revision) && previous?.probeStatus === 'failed') {
+        const retryAt = Date.parse(String(previous.retryAfter || ''));
+        if (Number.isFinite(retryAt) && retryAt > Number(now())) {
+          return failed(String(previous.failureReason || 'probe-failed'), revision, new Date(retryAt).toISOString());
+        }
       }
 
       let sourceAudio = null;
+      let failureReason = '';
       try {
-        const { stdout } = await execFileP(ffprobePath, [
+        const { stdout } = await runExecFile(ffprobePath, [
           '-v', 'error',
           '-select_streams', 'a:0',
           '-show_entries', 'stream=codec_name,profile,sample_rate,channels,bits_per_raw_sample,bits_per_sample,bit_rate:format=format_name,format_long_name,bit_rate',
@@ -167,23 +199,35 @@ export function createSourceAudioProbe({
           filePath,
         ], { timeout: 15_000, maxBuffer: 128 * 1024 });
         sourceAudio = normalizeProbe(JSON.parse(String(stdout || '{}')));
-      } catch {}
+        if (!sourceAudio) failureReason = 'unrecognized-audio';
+      } catch {
+        failureReason = 'probe-failed';
+      }
 
       entries[key] = {
         probeVersion,
-        sizeBytes: Number(stat.size),
-        modifiedMs: Number(stat.mtimeMs),
+        sizeBytes: revision.sizeBytes,
+        modifiedMs: revision.modifiedMs,
         sourceAudio,
+        probeStatus: sourceAudio ? 'verified' : 'failed',
+        ...(sourceAudio ? {} : { failureReason: failureReason || 'probe-failed', retryAfter: retryAfter() }),
       };
       await persist().catch(() => {});
-      return sourceAudio;
+      return sourceAudio
+        ? { status: 'verified', sourceAudio, sourceRevision: revision }
+        : failed(failureReason || 'probe-failed', revision, entries[key].retryAfter);
     })().finally(() => inflight.delete(key));
 
     inflight.set(key, task);
     return task;
   };
 
-  return { get };
+  const get = async (mpdFile) => {
+    const record = await getRecord(mpdFile);
+    return record?.status === 'verified' ? record.sourceAudio || null : null;
+  };
+
+  return { get, getRecord };
 }
 
 export { normalizeProbe as normalizeSourceAudioProbe };

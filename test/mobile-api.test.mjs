@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { registerMobileRoutes } from '../src/routes/mobile.routes.mjs';
-import { createMobileRefreshToken, createMobileSessionToken, verifyMobileToken } from '../src/lib/mobile-auth.mjs';
+import { createMobileRefreshToken, createMobileSessionToken, createMobileTrackId, verifyMobileToken } from '../src/lib/mobile-auth.mjs';
+import { MOBILE_HOME_ROW_IDS } from '../src/lib/mobile-home-rows.mjs';
 
 function createApp() {
   const routes = new Map();
@@ -55,6 +56,15 @@ function fixtureIndex() {
         mbTrackId: 'track-one',
         mbAlbumId: 'album-one',
         mbArtistId: 'artist-one',
+        audioQuality: {
+          status: 'verified',
+          verificationStatus: 'verified',
+          provenance: 'ffprobe.source-file',
+          badgeEligibility: 'hi-res',
+          bitDepth: 24,
+          sampleRateHz: 96000,
+          channels: 2,
+        },
       },
       {
         file: 'USB/SamsungMoode/Test Album/02 - Second.flac',
@@ -108,6 +118,32 @@ function registerFixture(extra = {}) {
   });
   return app;
 }
+
+test('mobile DLNA capability and opaque track resource routes require bearer auth', async () => {
+  const app = registerFixture({
+    dlnaMediaServer: {
+      async capabilities() { return { supported: true, enabled: true, udn: 'uuid:11111111-1111-4111-8111-111111111111', deviceType: 'urn:schemas-upnp-org:device:MediaServer:1', friendlyName: 'Sonuvi Music Library', deviceDescriptionUrl: 'http://10.0.0.4:3101/dlna/device.xml', mediaBaseUrl: 'http://10.0.0.4:3101/dlna/media' }; },
+      async resourceForFile() { return { objectId: 'track:opaque', mediaUrl: 'http://10.0.0.4:3101/dlna/media/track%3Aopaque', mimeType: 'audio/mpeg', protocolInfo: 'http-get:*:audio/mpeg:*', didlLite: '<DIDL-Lite xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/"><item><upnp:albumArtURI>http://10.0.0.4:3101/dlna/artwork/track%3Aopaque</upnp:albumArtURI></item></DIDL-Lite>' }; },
+    },
+  });
+  const denied = createResponse();
+  await app.routes.get('GET /v1/mobile/dlna/capabilities')?.(request(), denied);
+  assert.equal(denied.statusCode, 401);
+  const session = createResponse();
+  await app.routes.get('POST /v1/mobile/session')?.(request({ headers: { 'x-mobile-enrollment-code': 'one-time-code' }, body: { deviceId: 'dlna-test' } }), session);
+  const headers = { authorization: `Bearer ${session.body.accessToken}` };
+  const capability = createResponse();
+  await app.routes.get('GET /v1/mobile/dlna/capabilities')?.(request({ headers }), capability);
+  assert.equal(capability.body.udn, 'uuid:11111111-1111-4111-8111-111111111111');
+  const resource = createResponse();
+  const trackId = createMobileTrackId({ secret: 'track-secret-for-test', trackIdentity: 'mbtrack:track-one|album:mbalbum:album-one|folder:usb/samsungmoode/test album' });
+  await app.routes.get('GET /v1/mobile/dlna/tracks/:trackId/resource')?.(request({ headers, params: { trackId } }), resource);
+  assert.equal(resource.statusCode, 200);
+  assert.equal(resource.body.resource.objectId, 'track:opaque');
+  assert.match(resource.body.resource.didlLite, /upnp:albumArtURI/);
+  assert.match(resource.body.resource.didlLite, /\/dlna\/artwork\/track%3Aopaque/);
+  assert.equal(JSON.stringify(resource.body).includes('SamsungMoode'), false);
+});
 
 test('mobile session enrollment uses its own credential and issues a scoped token', async () => {
   const app = registerFixture();
@@ -298,11 +334,13 @@ test('mobile catalog returns opaque IDs and never returns the MPD file path', as
   assert.doesNotMatch(JSON.stringify(res.body), /SamsungMoode|01 - First|\.flac/);
 });
 
-test('mobile catalog includes verified source audio properties when available', async () => {
+test('mobile catalog reads stored quality without a lazy source probe', async () => {
+  let probeCalls = 0;
   const app = registerFixture({
-    getSourceAudio: async (file) => file.endsWith('First.mp3')
-      ? { sampleRateHz: 96000, bitDepth: 24, channels: 2 }
-      : null,
+    getSourceAudio: async () => {
+      probeCalls += 1;
+      return { sampleRateHz: 96000, bitDepth: 24, channels: 2 };
+    },
   });
   const sessionRes = createResponse();
   await app.routes.get('POST /v1/mobile/session')?.(request({
@@ -320,9 +358,15 @@ test('mobile catalog includes verified source audio properties when available', 
     bitDepth: 24,
     channels: 2,
   });
+  assert.equal(res.body.items[0].audioQuality.badgeEligibility, 'hi-res');
+  assert.equal(probeCalls, 0);
 
+  let nowProbeCalls = 0;
   const nowPlayingApp = registerFixture({
-    getSourceAudio: async () => ({ sampleRateHz: 96000, bitDepth: 24, channels: 2 }),
+    getSourceAudio: async () => {
+      nowProbeCalls += 1;
+      return { sampleRateHz: 96000, bitDepth: 24, channels: 2 };
+    },
     mpdQueryRaw: async (command) => command === 'status'
       ? 'state: play\nsong: 0\nsongid: 1\n'
       : 'file: USB/SamsungMoode/Test Album/01 - First.mp3\nPos: 0\nId: 1\n',
@@ -346,6 +390,8 @@ test('mobile catalog includes verified source audio properties when available', 
     bitDepth: 24,
     channels: 2,
   });
+  assert.equal(nowResponse.body.track.audioQuality.badgeEligibility, 'hi-res');
+  assert.equal(nowProbeCalls, 0);
 });
 
 test('mobile album catalog exposes safe added timestamps from the existing library metadata', async () => {
@@ -1269,7 +1315,12 @@ test('mobile home exposes local recent history without displaying its shelf', as
   }), response);
 
   assert.equal(response.statusCode, 200);
-  assert.deepEqual(response.body.rows.map((row) => row.id), profile.recentRows);
+  assert.deepEqual(response.body.rows.map((row) => row.id), [
+    ...profile.recentRows,
+    ...MOBILE_HOME_ROW_IDS.filter((row) => !profile.recentRows.includes(row)),
+  ]);
+  assert.ok(calls.includes('/config/lastfm/top-albums?limit=18'));
+  assert.ok(calls.includes('/config/listening-history/top-tracks?limit=18'));
   assert.equal(response.body.localRecentHistory.id, 'local-recenttracks');
   assert.equal(response.body.localRecentHistory.items[0].track.genre, 'Test');
   assert.ok(calls.includes('/config/listening-history/recent-tracks?limit=18'));

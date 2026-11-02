@@ -233,7 +233,7 @@ import {
   FFMPEG, CURL, MPD_PLAYLIST_DIR, FAVORITES_PATH, MOODE_SSH_USER, MOODE_SSH_HOST, PORT,
   MOODE_BASE_URL, PUBLIC_BASE_URL, LOCAL_ADDRESS, MPD_HOST, MPD_PORT, MOODE_USB_PREFIX,
   PI4_MOUNT_BASE, METAFLAC, TRACK_KEY, LASTFM_API_KEY, LASTFM_API_SECRET, LASTFM_SESSION_KEY, LASTFM_MPD_MODE,
-  ENABLE_ALEXA, TRANSCODE_TRACKS, TRACK_CACHE_DIR,
+  ENABLE_ALEXA, ENABLE_DLNA_MEDIA_SERVER, TRANSCODE_TRACKS, TRACK_CACHE_DIR,
   FAVORITES_PLAYLIST_NAME, FAVORITES_REFRESH_MS, ITUNES_SEARCH_URL, ITUNES_COUNTRY,
   ITUNES_TIMEOUT_MS, ITUNES_TTL_HIT_MS, ITUNES_TTL_MISS_MS,
   APPLE_MUSIC_DEVELOPER_TOKEN, APPLE_MUSIC_COUNTRY, APPLE_MUSIC_TIMEOUT_MS,
@@ -271,9 +271,9 @@ import {
 import { registerRatingRoutes } from './src/routes/rating.routes.mjs';
 import { registerQueueRoutes } from './src/routes/queue.routes.mjs';
 import { registerTrackRoutes } from './src/routes/track.routes.mjs';
-import { registerArtRoutes, serveTrackArtwork } from './src/routes/art.routes.mjs';
+import { readTrackArtwork, registerArtRoutes, serveTrackArtwork } from './src/routes/art.routes.mjs';
 import { registerMobileRoutes } from './src/routes/mobile.routes.mjs';
-import { getBrowseIndex } from './src/lib/browse-index.mjs';
+import { configureBrowseIndexQuality, getBrowseIndex } from './src/lib/browse-index.mjs';
 import { buildMobileCatalog } from './src/lib/mobile-track-identity.mjs';
 import { createSourceAudioProbe } from './src/lib/source-audio.mjs';
 import { createLiveRadioAudioProbe } from './src/lib/live-radio-audio.mjs';
@@ -305,6 +305,8 @@ import { createUpnpPlaybackSessionManager } from './src/lib/upnp-playback-sessio
 import { createUpnpPlaybackQueueManager } from './src/lib/upnp-playback-queue.mjs';
 import { registerAllConfigRoutes } from './src/routes/config.routes.index.mjs';
 import { registerUpnpRoutes } from './src/routes/upnp.routes.mjs';
+import { createDlnaMediaServer, selectLanAddress } from './src/lib/dlna-media-server.mjs';
+import { startDlnaSsdpResponder } from './src/lib/dlna-ssdp.mjs';
 import { registerPodcastSubscriptionRoutes } from './src/routes/podcasts-subscriptions.routes.mjs';
 import { registerPodcastRefreshRoutes } from './src/routes/podcasts-refresh.routes.mjs';
 import { registerPodcastEpisodeRoutes } from './src/routes/podcasts-episodes.routes.mjs';
@@ -4260,12 +4262,43 @@ function safeIsFile(p) {
   try { return fs.statSync(p).isFile(); } catch { return false; }
 }
 
+// Native MediaServer reads the existing persisted Browse Index only. It is
+// intentionally separate from the UPnP control point and never controls MPD.
+const dlnaMediaServer = createDlnaMediaServer({
+  enabled: ENABLE_DLNA_MEDIA_SERVER && !RUNTIME_CAPABILITIES.rehearsal,
+  getBrowseIndex: () => getBrowseIndex(MPD_HOST),
+  resolveFile: async (file) => mpdFileToLocalPath(file),
+  readArtworkForTrack: (file) => readTrackArtwork(file, {
+    MOODE_BASE_URL,
+    normalizeArtKey,
+    updateArtCacheIfNeeded,
+    artPath640ForKey,
+    safeIsFile,
+    normalizeCoverUrl,
+    dispatcherForUrl,
+    agentForUrl,
+  }),
+  mountRoot: PI4_MOUNT_BASE,
+  identityPath: RUNTIME_STATE_PATHS.dlnaMediaServerIdentityPath,
+  localAddress: LOCAL_ADDRESS,
+  port: PORT,
+  log,
+});
+dlnaMediaServer.register(app, express);
+
 const sourceAudioProbe = createSourceAudioProbe({
   resolveFile: async (file) => {
     const localPath = mpdFileToLocalPath(file);
     return localPath && safeIsFile(localPath) ? localPath : '';
   },
   cachePath: RUNTIME_STATE_PATHS.sourceAudioCachePath,
+});
+
+// Browse Index v3 owns quality enrichment. Browse responses only read its
+// stored records; this bounded worker is the sole caller that may validate or
+// run ffprobe for library-quality data.
+configureBrowseIndexQuality({
+  getAudioQualityRecord: sourceAudioProbe.getRecord,
 });
 
 const liveRadioAudioProbe = createLiveRadioAudioProbe({
@@ -9190,6 +9223,7 @@ registerMobileRoutes(app, {
   mobileBaseUrl: MOBILE_PUBLIC_BASE_URL,
   mobileTrackCacheDir: MOBILE_TRACK_CACHE_DIR,
   transcodeTracks: MOBILE_TRANSCODE_TRACKS,
+  dlnaMediaServer,
   musicLibraryRoot: PI4_MOUNT_BASE,
   videoCatalog: mobileVideoCatalog,
   listeningHistory,
@@ -9961,4 +9995,15 @@ app.listen(PORT, '0.0.0.0', () => {
   log.debug(`Endpoint: http://${LOCAL_ADDRESS}:${PORT}/next-up`);
   log.debug(`Public: ${PUBLIC_BASE_URL}`);
   log.debug(`Alexa routes enabled? ${ENABLE_ALEXA ? 'YES' : 'NO'}`);
+  if (dlnaMediaServer.enabled) {
+    dlnaMediaServer.initialize().then(async (udn) => {
+      await startDlnaSsdpResponder({
+        udn,
+        baseUrl: dlnaMediaServer.baseUrl,
+        localAddress: selectLanAddress({ preferred: LOCAL_ADDRESS }),
+        log,
+      });
+      log.info?.(`[dlna] MediaServer advertising at ${dlnaMediaServer.baseUrl}`);
+    }).catch((error) => log.warn?.('[dlna] MediaServer startup failed', error?.message || error));
+  }
 });

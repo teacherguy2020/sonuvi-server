@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { createMobileTrackId } from './mobile-auth.mjs';
+import { audioQualitySummaryForTracks, sourceAudioFromQuality } from './browse-index-quality.mjs';
 
 function norm(value) {
   return String(value || '').trim().toLocaleLowerCase();
@@ -23,6 +24,65 @@ function isRemoteOrPseudoFile(file) {
   return !value
     || /^https?:\/\//.test(value)
     || /^rtmp:|^rtsp:|^mms:|^spotify:|^airplay:|^upnp:/.test(value);
+}
+
+function safeQualityReason(value) {
+  const reason = clean(value);
+  return new Set([
+    'not-yet-analyzed', 'source-revision-changed', 'source-unavailable',
+    'probe-failed', 'unrecognized-audio',
+  ]).has(reason) ? reason : null;
+}
+
+function publicAudioQuality(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const positive = (item) => Number.isInteger(Number(item)) && Number(item) > 0 ? Number(item) : null;
+  const finite = (item) => Number.isFinite(Number(item)) && Number(item) >= 0 ? Number(item) : null;
+  const revision = value.sourceRevision && typeof value.sourceRevision === 'object' && !Array.isArray(value.sourceRevision)
+    ? {
+      sizeBytes: positive(value.sourceRevision.sizeBytes),
+      modifiedMs: finite(value.sourceRevision.modifiedMs),
+      mpdLastModified: clean(value.sourceRevision.mpdLastModified) || null,
+      probeVersion: positive(value.sourceRevision.probeVersion),
+    }
+    : null;
+  return {
+    status: clean(value.status) || 'pending',
+    verificationStatus: clean(value.verificationStatus) || clean(value.status) || 'pending',
+    reason: safeQualityReason(value.reason),
+    provenance: clean(value.provenance) || 'library-maintenance',
+    badgeEligibility: ['hi-res', 'lossless'].includes(clean(value.badgeEligibility)) ? clean(value.badgeEligibility) : 'none',
+    codec: clean(value.codec) || null,
+    codecKind: ['lossless', 'lossy', 'unknown'].includes(clean(value.codecKind)) ? clean(value.codecKind) : 'unknown',
+    container: clean(value.container) || null,
+    bitDepth: positive(value.bitDepth),
+    bitDepthStatus: clean(value.bitDepthStatus) || null,
+    sampleRateHz: positive(value.sampleRateHz),
+    channels: positive(value.channels),
+    encodedBitrateBps: positive(value.encodedBitrateBps),
+    encodedBitrateStatus: clean(value.encodedBitrateStatus) || null,
+    encodedBitrateProvenance: clean(value.encodedBitrateProvenance) || null,
+    ...(clean(value.verifiedAt) ? { verifiedAt: clean(value.verifiedAt) } : {}),
+    ...(clean(value.retryAfter) ? { retryAfter: clean(value.retryAfter) } : {}),
+    ...(revision ? { sourceRevision: revision } : {}),
+  };
+}
+
+function publicAlbumAudioQuality(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const nonNegative = (item) => Number.isInteger(Number(item)) && Number(item) >= 0 ? Number(item) : 0;
+  return {
+    trackCount: nonNegative(value.trackCount),
+    verifiedTrackCount: nonNegative(value.verifiedTrackCount),
+    pendingTrackCount: nonNegative(value.pendingTrackCount),
+    failedTrackCount: nonNegative(value.failedTrackCount),
+    lossyTrackCount: nonNegative(value.lossyTrackCount),
+    losslessTrackCount: nonNegative(value.losslessTrackCount),
+    hiResTrackCount: nonNegative(value.hiResTrackCount),
+    unknownTrackCount: nonNegative(value.unknownTrackCount),
+    verificationStatus: clean(value.verificationStatus) || 'incomplete',
+    badgeEligibility: ['hi-res', 'lossless'].includes(clean(value.badgeEligibility)) ? clean(value.badgeEligibility) : 'none',
+  };
 }
 
 function albumIdentity(track) {
@@ -89,6 +149,7 @@ export function buildMobileCatalog(index, { trackIdSecret } = {}) {
     const trackId = createMobileTrackId({ secret, trackIdentity: trackIdentity(source) });
     const albumId = createMobileTrackId({ secret, trackIdentity: albumIdentity(source) }).replace(/^trk_/, 'alb_');
     const artistId = createMobileTrackId({ secret, trackIdentity: artistIdentity(source) }).replace(/^trk_/, 'art_');
+    const indexedSourceAudio = sourceAudioFromQuality(source?.audioQuality);
     const record = {
       id: trackId,
       albumId,
@@ -101,9 +162,12 @@ export function buildMobileCatalog(index, { trackIdSecret } = {}) {
       track: clean(source?.track),
       genre: clean(source?.genre),
       durationSec: Number(source?.durationSec || 0) || 0,
+      ...(source?.audioQuality && typeof source.audioQuality === 'object'
+        ? { audioQuality: source.audioQuality }
+        : {}),
       ...(source?.sourceAudio && typeof source.sourceAudio === 'object'
         ? { sourceAudio: source.sourceAudio }
-        : {}),
+        : (indexedSourceAudio ? { sourceAudio: indexedSourceAudio } : {})),
       format: extension(file),
       musicBrainz: {
         trackId: clean(source?.mbTrackId),
@@ -152,6 +216,7 @@ export function buildMobileCatalog(index, { trackIdSecret } = {}) {
       ...album,
       trackIds: album.trackIds.sort((a, b) => (byTrackId.get(a)?.trackNumber || 0) - (byTrackId.get(b)?.trackNumber || 0)),
       trackCount: album.trackIds.length,
+      audioQuality: audioQualitySummaryForTracks(album.trackIds.map((trackId) => byTrackId.get(trackId)).filter(Boolean)),
     }))
     .sort((a, b) => `${a.artist}|${a.album}`.localeCompare(`${b.artist}|${b.album}`));
 
@@ -186,6 +251,7 @@ export function publicMobileTrack(record, { baseUrl = '' } = {}) {
     trackNumber: record.trackNumber,
     genre: record.genre,
     durationSec: record.durationSec,
+    ...(publicAudioQuality(record.audioQuality) ? { audioQuality: publicAudioQuality(record.audioQuality) } : {}),
     ...(record.sourceAudio ? { sourceAudio: record.sourceAudio } : {}),
     format: record.format,
     musicBrainz: record.musicBrainz,
@@ -205,6 +271,7 @@ export function publicMobileAlbum(album, catalog, { baseUrl = '' } = {}) {
     genre: album.genre,
     durationSec: album.durationSec,
     trackCount: album.trackCount,
+    ...(publicAlbumAudioQuality(album.audioQuality) ? { audioQuality: publicAlbumAudioQuality(album.audioQuality) } : {}),
     addedAt: Number.isFinite(Number(album.addedAt)) && Number(album.addedAt) > 0
       ? Number(album.addedAt)
       : null,
