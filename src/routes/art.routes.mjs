@@ -39,6 +39,13 @@ async function sendJpeg(res, buf, max) {
 }
 
 async function serveCachedOrResizedSquare(res, best, size, cachePathForKey, deps) {
+  const out = await readCachedOrResizedSquare(best, size, cachePathForKey, deps);
+  res.set('Content-Type', 'image/jpeg');
+  res.set('Cache-Control', 'no-store');
+  return res.status(200).send(out);
+}
+
+async function readCachedOrResizedSquare(best, size, cachePathForKey, deps) {
   const { normalizeArtKey, updateArtCacheIfNeeded, safeIsFile } = deps;
 
   const key = normalizeArtKey(best);
@@ -47,14 +54,16 @@ async function serveCachedOrResizedSquare(res, best, size, cachePathForKey, deps
 
     const p = cachePathForKey(key);
     if (safeIsFile(p)) {
-      res.set('Content-Type', 'image/jpeg');
-      res.set('Cache-Control', 'no-store');
-      return res.status(200).send(await fs.promises.readFile(p));
+      return fs.promises.readFile(p);
     }
   }
 
   const buf = await fetchMoodeCoverBytes(best, deps);
-  return sendJpeg(res, buf, size);
+  return sharp(buf)
+    .rotate()
+    .resize(size, size, { fit: 'inside', withoutEnlargement: true })
+    .jpeg({ quality: 82, mozjpeg: true })
+    .toBuffer();
 }
 
 async function serveCachedOrBlurredBg(res, best, size, cacheBgPathForKey, deps) {
@@ -88,17 +97,25 @@ async function serveCachedOrBlurredBg(res, best, size, cacheBgPathForKey, deps) 
 // Mobile clients identify tracks with opaque IDs. This helper keeps the
 // MPD-relative file path inside the server while reusing the existing cover
 // resolver/cache for an already-authorized local track.
-export async function serveTrackArtwork(res, file, deps, size = 640) {
+export async function readTrackArtwork(file, deps, size = 640) {
   const sourceFile = String(file || '').trim();
-  if (!sourceFile) return res.status(404).end();
+  if (!sourceFile) return null;
   const source = `/coverart.php/${encodeURIComponent(sourceFile)}`;
-  return serveCachedOrResizedSquare(
-    res,
+  const body = await readCachedOrResizedSquare(
     source,
     Math.max(64, Math.min(1024, Number(size) || 640)),
     deps.artPath640ForKey,
     deps,
   );
+  return Object.freeze({ body, contentType: 'image/jpeg' });
+}
+
+export async function serveTrackArtwork(res, file, deps, size = 640) {
+  const artwork = await readTrackArtwork(file, deps, size);
+  if (!artwork?.body?.length) return res.status(404).end();
+  res.set('Content-Type', artwork.contentType);
+  res.set('Cache-Control', 'no-store');
+  return res.status(200).send(artwork.body);
 }
 
 export function registerArtRoutes(app, deps) {

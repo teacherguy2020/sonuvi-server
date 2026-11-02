@@ -11,8 +11,11 @@ import { parseSsdpSearchTarget, ssdpAliveAnnouncements } from '../src/lib/dlna-s
 const fixtureIndex = {
   schema: 'now-playing.browse-index.v3', builtAt: '2026-11-01T12:00:00.000Z',
   artists: [{ key: 'Artist', name: 'Artist' }],
-  albums: [{ key: 'Artist|Album', title: 'Album', artist: 'Artist' }],
-  tracks: [{ file: 'USB/SamsungMoode/Artist/Album/01 - <Track>.flac', albumKey: 'Artist|Album', title: '<Track>', artist: 'Artist', album: 'Album', genre: 'Jazz', track: '1', duration: 61 }],
+  albums: [{ key: 'Artist|Album', title: 'Album', artist: 'Artist' }, { key: 'Artist|No Art', title: 'No Art', artist: 'Artist' }],
+  tracks: [
+    { file: 'USB/SamsungMoode/Artist/Album/01 - <Track>.flac', albumKey: 'Artist|Album', title: '<Track>', artist: 'Artist', album: 'Album', genre: 'Jazz', track: '1', duration: 61 },
+    { file: 'USB/SamsungMoode/Artist/No Art/01 - No Art.flac', albumKey: 'Artist|No Art', title: 'No Art', artist: 'Artist', album: 'No Art', genre: 'Jazz', track: '1', duration: 61 },
+  ],
 };
 
 test('DLNA MediaServer uses private LAN address only', () => {
@@ -116,12 +119,19 @@ test('DLNA SCPDs match implemented ContentDirectory and ConnectionManager action
 test('DLNA browse and media routes expose only indexed read-only files', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'sonuvi-dlna-media-'));
   const musicPath = path.join(root, 'Artist', 'Album', '01 - <Track>.flac');
+  const noArtworkPath = path.join(root, 'Artist', 'No Art', '01 - No Art.flac');
   await fs.mkdir(path.dirname(musicPath), { recursive: true });
+  await fs.mkdir(path.dirname(noArtworkPath), { recursive: true });
   await fs.writeFile(musicPath, 'abcdef');
+  await fs.writeFile(noArtworkPath, 'ghijkl');
   const app = express();
   const service = createDlnaMediaServer({
     enabled: true, getBrowseIndex: async () => fixtureIndex,
-    resolveFile: async () => musicPath, mountRoot: root,
+    resolveFile: async (file) => file === fixtureIndex.tracks[0].file ? musicPath : noArtworkPath,
+    readArtworkForTrack: async (file) => file === fixtureIndex.tracks[0].file
+      ? { body: Buffer.from('jpeg'), contentType: 'image/jpeg' }
+      : null,
+    mountRoot: root,
     identityPath: path.join(root, 'identity.json'), localAddress: '10.0.0.4', port: 3101, log: { info() {}, warn() {} },
   });
   await service.initialize();
@@ -149,7 +159,38 @@ test('DLNA browse and media routes expose only indexed read-only files', async (
     });
     const albumXml = await albumResponse.text();
     assert.match(albumXml, /&amp;lt;Track&amp;gt;/);
+    assert.match(albumXml, /upnp:albumArtURI/);
     const trackId = `track:${Buffer.from(fixtureIndex.tracks[0].file).toString('base64url')}`;
+    const artworkPath = `/dlna/artwork/${encodeURIComponent(trackId)}`;
+    assert.match(albumXml, new RegExp(artworkPath));
+    const metadataResponse = await fetch(`${base}/dlna/content-directory/control`, {
+      method: 'POST', headers: { 'content-type': 'text/xml', SOAPAction: '"urn:schemas-upnp-org:service:ContentDirectory:1#Browse"' },
+      body: `<ObjectID>${trackId}</ObjectID><BrowseFlag>BrowseMetadata</BrowseFlag>`,
+    });
+    const metadataXml = await metadataResponse.text();
+    assert.equal(metadataResponse.status, 200);
+    assert.match(metadataXml, /upnp:albumArtURI/);
+    assert.match(metadataXml, new RegExp(artworkPath));
+    const artwork = await fetch(`${base}${artworkPath}`);
+    assert.equal(artwork.status, 200);
+    assert.equal(artwork.headers.get('content-type'), 'image/jpeg');
+    assert.equal(artwork.headers.get('content-length'), '4');
+    assert.equal(await artwork.text(), 'jpeg');
+    const artworkHead = await fetch(`${base}${artworkPath}`, { method: 'HEAD' });
+    assert.equal(artworkHead.status, 200);
+    assert.equal(artworkHead.headers.get('content-length'), '4');
+    assert.equal(await artworkHead.text(), '');
+    const artworkPost = await fetch(`${base}${artworkPath}`, { method: 'POST' });
+    assert.equal(artworkPost.status, 405);
+    assert.equal(artworkPost.headers.get('allow'), 'GET, HEAD');
+    const resource = await service.resourceForFile(fixtureIndex.tracks[0].file);
+    assert.match(resource.didlLite, /upnp:albumArtURI/);
+    assert.match(resource.didlLite, new RegExp(artworkPath));
+    const noArtworkResource = await service.resourceForFile(fixtureIndex.tracks[1].file);
+    assert.doesNotMatch(noArtworkResource.didlLite, /upnp:albumArtURI/);
+    const noArtworkId = `track:${Buffer.from(fixtureIndex.tracks[1].file).toString('base64url')}`;
+    assert.equal((await fetch(`${base}/dlna/artwork/${encodeURIComponent(noArtworkId)}`)).status, 404);
+    assert.equal((await fetch(`${base}/dlna/artwork/${encodeURIComponent('track:Li4vZXRjL3Bhc3N3ZA')}`)).status, 404);
     const media = await fetch(`${base}/dlna/media/${encodeURIComponent(trackId)}`, { headers: { Range: 'bytes=1-3' } });
     assert.equal(media.status, 206);
     assert.equal(media.headers.get('content-type'), 'audio/flac');

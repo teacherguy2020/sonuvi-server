@@ -271,7 +271,7 @@ import {
 import { registerRatingRoutes } from './src/routes/rating.routes.mjs';
 import { registerQueueRoutes } from './src/routes/queue.routes.mjs';
 import { registerTrackRoutes } from './src/routes/track.routes.mjs';
-import { registerArtRoutes, serveTrackArtwork } from './src/routes/art.routes.mjs';
+import { readTrackArtwork, registerArtRoutes, serveTrackArtwork } from './src/routes/art.routes.mjs';
 import { registerMobileRoutes } from './src/routes/mobile.routes.mjs';
 import { configureBrowseIndexQuality, getBrowseIndex } from './src/lib/browse-index.mjs';
 import { buildMobileCatalog } from './src/lib/mobile-track-identity.mjs';
@@ -4268,6 +4268,16 @@ const dlnaMediaServer = createDlnaMediaServer({
   enabled: ENABLE_DLNA_MEDIA_SERVER && !RUNTIME_CAPABILITIES.rehearsal,
   getBrowseIndex: () => getBrowseIndex(MPD_HOST),
   resolveFile: async (file) => mpdFileToLocalPath(file),
+  readArtworkForTrack: (file) => readTrackArtwork(file, {
+    MOODE_BASE_URL,
+    normalizeArtKey,
+    updateArtCacheIfNeeded,
+    artPath640ForKey,
+    safeIsFile,
+    normalizeCoverUrl,
+    dispatcherForUrl,
+    agentForUrl,
+  }),
   mountRoot: PI4_MOUNT_BASE,
   identityPath: RUNTIME_STATE_PATHS.dlnaMediaServerIdentityPath,
   localAddress: LOCAL_ADDRESS,

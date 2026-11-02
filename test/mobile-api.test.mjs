@@ -123,7 +123,7 @@ test('mobile DLNA capability and opaque track resource routes require bearer aut
   const app = registerFixture({
     dlnaMediaServer: {
       async capabilities() { return { supported: true, enabled: true, udn: 'uuid:11111111-1111-4111-8111-111111111111', deviceType: 'urn:schemas-upnp-org:device:MediaServer:1', friendlyName: 'Sonuvi Music Library', deviceDescriptionUrl: 'http://10.0.0.4:3101/dlna/device.xml', mediaBaseUrl: 'http://10.0.0.4:3101/dlna/media' }; },
-      async resourceForFile() { return { objectId: 'track:opaque', mediaUrl: 'http://10.0.0.4:3101/dlna/media/track%3Aopaque', mimeType: 'audio/mpeg', protocolInfo: 'http-get:*:audio/mpeg:*', didlLite: '<DIDL-Lite/>' }; },
+      async resourceForFile() { return { objectId: 'track:opaque', mediaUrl: 'http://10.0.0.4:3101/dlna/media/track%3Aopaque', mimeType: 'audio/mpeg', protocolInfo: 'http-get:*:audio/mpeg:*', didlLite: '<DIDL-Lite xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/"><item><upnp:albumArtURI>http://10.0.0.4:3101/dlna/artwork/track%3Aopaque</upnp:albumArtURI></item></DIDL-Lite>' }; },
     },
   });
   const denied = createResponse();
@@ -140,6 +140,8 @@ test('mobile DLNA capability and opaque track resource routes require bearer aut
   await app.routes.get('GET /v1/mobile/dlna/tracks/:trackId/resource')?.(request({ headers, params: { trackId } }), resource);
   assert.equal(resource.statusCode, 200);
   assert.equal(resource.body.resource.objectId, 'track:opaque');
+  assert.match(resource.body.resource.didlLite, /upnp:albumArtURI/);
+  assert.match(resource.body.resource.didlLite, /\/dlna\/artwork\/track%3Aopaque/);
   assert.equal(JSON.stringify(resource.body).includes('SamsungMoode'), false);
 });
 

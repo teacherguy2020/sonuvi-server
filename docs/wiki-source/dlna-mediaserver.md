@@ -7,7 +7,7 @@ topics:
   - media-library
   - openhome
 confidence: high
-updated: 2026-11-01
+updated: 2026-11-02
 ---
 
 # Native DLNA MediaServer
@@ -61,6 +61,15 @@ MediaServer output connection information for that ID; invalid IDs return the
 UPnP `706 No Such Connection` fault. It advertises the original supported
 local audio MIME types. There is no transcode path.
 
+For a track whose existing Server artwork resolver returns a valid image,
+DIDL-Lite includes the standard, namespace-qualified
+`upnp:albumArtURI` element. The URI is an absolute renderer-facing
+`http://<LAN-IP>:3101/dlna/artwork/<opaque-track-id>` reference. Native
+ContentDirectory responses and the authenticated mobile DLNA resource payload
+use the same serializer, so an OpenHome controller receives the identical
+metadata it would receive from native Browse. Tracks with no resolved artwork
+omit the element rather than advertising a placeholder or broken URI.
+
 When enabled, DLNA SOAP control requests produce one narrowly scoped service
 log event containing only service name, action, and HTTP status. The logger
 never records SOAP bodies, music metadata, paths, or credentials. This is for
@@ -77,13 +86,38 @@ single RFC 7233 byte range with correct `206`, `Content-Range`,
 unsupported formats, and traversal attempts receive `404` (or `416` for an
 invalid range); nothing permits arbitrary host file reads or writes.
 
+`/dlna/artwork/:trackId` is intentionally separate from the bearer-protected
+mobile artwork API: a renderer must retrieve an advertised cover without a
+mobile token. It accepts only `GET` and `HEAD` for an opaque ID that resolves
+to a current Browse Index track, never a filesystem path or arbitrary artwork
+URL. The Server resolves that approved track through the existing moOde cover
+cache/resizer and returns a JPEG only when an image is available; absent or
+unknown artwork returns `404`. The route is registered only while the optional
+DLNA MediaServer is enabled. Artwork resolution has a bounded 64-entry,
+five-minute cache, and a Browse response performs no more than 24 uncached
+album-art lookups, so large catalog browsing cannot trigger an unbounded burst
+of image work. Audio delivery, byte-range behavior, and mobile bearer
+authentication are unchanged.
+
 ## Validation boundary
 
 Unit coverage in `test/dlna-media-server.test.mjs` covers disabled isolation,
 private LAN selection, durable UDNs, complete SCPD/action consistency,
 ConnectionManager ID-0 and invalid-ID faults, SOAP diagnostics privacy,
 Browse/DIDL pagination and escaping, range delivery, and path isolation.
+It also verifies standard artwork metadata in both native Browse and the
+mobile DLNA resource payload; the renderer-facing image route supports
+`GET`/`HEAD`, rejects unsupported methods and unknown IDs, and omits artwork
+cleanly when unavailable.
 Physical controller/OpenHome validation
 requires a separately authorized test activation because it would advertise a
 live Sonuvi source on the home LAN. moOde's existing MediaServer remains
 enabled until that acceptance sequence passes.
+
+## Compatibility status
+
+UnPlay on Apple TV has verified Sonuvi FLAC playback and track title/artist
+display. Before this Server correction, read-only inspection of its active
+OpenHome queue showed no `upnp:albumArtURI`; physical Apple TV artwork
+acceptance remains pending after an authorized deployment and feature-enabled
+test.
