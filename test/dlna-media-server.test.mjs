@@ -141,6 +141,7 @@ test('DLNA browse and media routes expose only indexed read-only files', async (
     const base = `http://127.0.0.1:${server.address().port}`;
     const device = await (await fetch(`${base}/dlna/device.xml`)).text();
     assert.match(device, /<friendlyName>Sonuvi Music Library<\/friendlyName>/);
+    assert.match(device, /<iconList><icon><mimetype>image\/png<\/mimetype><width>192<\/width><height>192<\/height><depth>32<\/depth><url>\/icons\/app-192\.png<\/url><\/icon><\/iconList>/);
     assert.match(device, /urn:schemas-upnp-org:service:ContentDirectory:1/);
     assert.match(device, new RegExp(service.udn));
     const rootResponse = await fetch(`${base}/dlna/content-directory/control`, {

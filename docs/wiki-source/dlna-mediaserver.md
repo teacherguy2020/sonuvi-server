@@ -43,6 +43,12 @@ uses the configured API private IPv4 address (or a detected private interface)
 so legacy renderers can retrieve durable `http://<LAN-IP>:3101/dlna/media/...`
 references without the originating controller remaining open.
 
+The device description also advertises the canonical 192×192 Sonuvi app icon
+(`image/png`, 32-bit, `/icons/app-192.png`) through the standard UPnP
+`iconList`. Controllers such as BubbleUPnP can therefore present the Sonuvi
+mark instead of a generic MediaServer/Bubble fallback icon. The immutable
+release builder includes this allowlisted public icon in every release.
+
 ## Catalog and protocol surface
 
 `src/lib/dlna-media-server.mjs` is the service implementation. It reuses the
@@ -112,12 +118,16 @@ cleanly when unavailable.
 Physical controller/OpenHome validation
 requires a separately authorized test activation because it would advertise a
 live Sonuvi source on the home LAN. moOde's existing MediaServer remains
-enabled until that acceptance sequence passes.
+enabled until that acceptance sequence passes. UnPlay on Apple TV has
+subsequently confirmed the renderer-safe artwork path after the authorized
+Server deployment.
 
 ## Compatibility status
 
-UnPlay on Apple TV has verified Sonuvi FLAC playback and track title/artist
-display. Before this Server correction, read-only inspection of its active
-OpenHome queue showed no `upnp:albumArtURI`; physical Apple TV artwork
-acceptance remains pending after an authorized deployment and feature-enabled
-test.
+UnPlay on Apple TV has verified Sonuvi FLAC playback, track title/artist
+display, and album artwork after a fresh Sonuvi item was sent following the
+authorized Server deployment. The earlier active OpenHome queue had no
+`upnp:albumArtURI`; stale queue items retain their old DIDL metadata until
+they are re-added.
+
+*Last reviewed: 2026-11-02 America/Chicago*
