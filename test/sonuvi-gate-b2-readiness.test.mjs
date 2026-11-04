@@ -38,10 +38,12 @@ test('fixed target installer has no caller-controlled paths or commands', async 
   const request = { attemptId, targetIdentity, releaseId, serverIdentity: 'sonuvi-lab-01' };
   const paths = { layoutRoot: path.join(root, 'opt', 'sonuvi'), stateRoot: path.join(root, 'var', 'lib', 'sonuvi'), unitRoot: path.join(root, 'etc', 'systemd', 'system'), bootstrapReleaseRoot: path.join(root, 'bootstrap', 'releases') };
   const serviceAccount = { ensure: async () => 'fixture' };
-  const result = await runFixedTargetInstallation({ request, paths, platform: 'linux', architecture: 'arm64', uid: 0, systemd, serviceAccount, health: async () => true, verifyArtifact: async ({ artifactRoot }) => ({ releaseId, artifactRoot }) });
+  const ownershipCalls = []; const ownership = async ({ stateRoot }) => { ownershipCalls.push(stateRoot); };
+  const result = await runFixedTargetInstallation({ request, paths, platform: 'linux', architecture: 'arm64', uid: 0, systemd, serviceAccount, ownership, health: async () => true, verifyArtifact: async ({ artifactRoot }) => ({ releaseId, artifactRoot }) });
   assert.equal(result.state, 'awaiting-administrator-enrollment');
   assert.equal((await fs.readlink(path.join(paths.layoutRoot, 'current'))).includes(releaseId), true);
   assert.deepEqual(calls.slice(0, 3), [['daemon-reload'], ['enable', '--now', 'sonuvi-api.service'], ['enable', '--now', 'sonuvi-web.service']]);
+  assert.deepEqual(ownershipCalls, [paths.stateRoot]);
   await assert.rejects(runFixedTargetInstallation({ request: { ...request, command: 'id' }, paths, platform: 'linux', architecture: 'arm64', uid: 0, systemd, verifyArtifact: async () => ({ releaseId }) }), /unsupported fields/);
 });
 test('B2 package manifest hashes fixed package inputs without executing them', async (t) => {

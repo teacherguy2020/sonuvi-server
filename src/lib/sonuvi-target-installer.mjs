@@ -13,6 +13,7 @@ export const TARGET_INSTALLER_VERSION = '1.0.0';
 export const TARGET_PATHS = Object.freeze({ layoutRoot: '/opt/sonuvi', stateRoot: '/var/lib/sonuvi', unitRoot: '/etc/systemd/system', bootstrapReleaseRoot: '/var/lib/sonuvi-bootstrap/releases' });
 export const TARGET_UNITS = Object.freeze(['sonuvi-api.service', 'sonuvi-web.service']);
 export const TARGET_SERVICE_ACCOUNT = 'sonuvi';
+export const TARGET_WRITABLE_STATE_DIRECTORIES = Object.freeze(['data', 'cache', 'logs', 'empty-library']);
 
 function text(value) { return String(value ?? '').trim(); }
 function releaseId(value) { const id = text(value); if (!/^sonuvi-[a-f0-9]{64}$/.test(id)) throw new Error('release ID is invalid'); return id; }
@@ -46,15 +47,33 @@ export function createFixedSystemd({
   });
 }
 
-export function createFixedServiceAccount({ run = (file, args) => execFile(file, args, { timeout: 30_000, env: { PATH: '/usr/sbin:/usr/bin:/sbin:/bin' } }), lookup = async () => null } = {}) {
+export function createFixedServiceAccount({ run = (file, args) => execFile(file, args, { timeout: 30_000, env: { PATH: '/usr/sbin:/usr/bin:/sbin:/bin' } }), lookup = async () => {
+  const query = async (database) => { try { return (await run('/usr/bin/getent', [database, TARGET_SERVICE_ACCOUNT])).stdout.trim(); } catch (error) { if (error?.code === 2) return ''; throw new Error('service_account_lookup_failed'); } };
+  const [passwd, group] = await Promise.all([query('passwd'), query('group')]);
+  if (!passwd && !group) return null;
+  if (!group) throw new Error('service_account_group_missing');
+  if (!passwd) return { groupOnly: true, group: TARGET_SERVICE_ACCOUNT };
+  const fields = passwd.split(':'); if (fields.length < 7) throw new Error('service_account_invalid');
+  return { group: fields[3] && group.split(':')[2] === fields[3] ? TARGET_SERVICE_ACCOUNT : '', shell: fields[6] };
+} } = {}) {
   return Object.freeze({ async ensure() {
     const existing = await lookup(TARGET_SERVICE_ACCOUNT);
+    if (existing?.groupOnly) { await run('/usr/sbin/useradd', ['--system', '--gid', TARGET_SERVICE_ACCOUNT, '--home-dir', '/var/lib/sonuvi', '--shell', '/usr/sbin/nologin', '--no-create-home', TARGET_SERVICE_ACCOUNT]); return 'user_created'; }
     if (existing && (existing.group !== TARGET_SERVICE_ACCOUNT || existing.shell !== '/usr/sbin/nologin')) throw new Error('service_account_conflict');
     if (existing) return 'existing';
     await run('/usr/sbin/groupadd', ['--system', TARGET_SERVICE_ACCOUNT]);
     await run('/usr/sbin/useradd', ['--system', '--gid', TARGET_SERVICE_ACCOUNT, '--home-dir', '/var/lib/sonuvi', '--shell', '/usr/sbin/nologin', '--no-create-home', TARGET_SERVICE_ACCOUNT]);
     return 'created';
   }});
+}
+
+export async function provisionWritableStateOwnership({ stateRoot, run = (file, args) => execFile(file, args, { timeout: 30_000, env: { PATH: '/usr/sbin:/usr/bin:/sbin:/bin' } }) } = {}) {
+  const root = absolute(stateRoot, 'state root');
+  for (const name of TARGET_WRITABLE_STATE_DIRECTORIES) {
+    const target = path.join(root, name); const stat = await fs.lstat(target);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('writable_state_path_invalid');
+    await run('/usr/bin/chown', ['sonuvi:sonuvi', target]); await fs.chmod(target, 0o700);
+  }
 }
 
 function validateRequest(request) {
@@ -69,7 +88,7 @@ function validateRequest(request) {
  * only: release source, service names, paths, commands, and environment are
  * fixed by this module. It is deliberately not a network service.
  */
-export async function runFixedTargetInstallation({ request, paths = TARGET_PATHS, platform = process.platform, architecture = process.arch, uid = typeof process.getuid === 'function' ? process.getuid() : null, systemd = createFixedSystemd(), serviceAccount = createFixedServiceAccount(), verifyArtifact = verifyReleaseArtifact, health = null } = {}) {
+export async function runFixedTargetInstallation({ request, paths = TARGET_PATHS, platform = process.platform, architecture = process.arch, uid = typeof process.getuid === 'function' ? process.getuid() : null, systemd = createFixedSystemd(), serviceAccount = createFixedServiceAccount(), ownership = provisionWritableStateOwnership, verifyArtifact = verifyReleaseArtifact, health = null } = {}) {
   const input = validateRequest(request);
   if (!nodeCompatible()) throw new Error('node_runtime_unsupported');
   const roots = Object.fromEntries(Object.entries(paths).map(([key, value]) => [key, absolute(value, key)]));
@@ -81,6 +100,7 @@ export async function runFixedTargetInstallation({ request, paths = TARGET_PATHS
   if (sourceManifest.releaseId !== input.releaseId) throw new Error('staged_release_identity_mismatch');
   await serviceAccount.ensure();
   const initialized = await initializeFreshHostLayout({ layoutRoot: roots.layoutRoot, stateRoot: roots.stateRoot, serverIdentity: input.serverIdentity });
+  await ownership({ stateRoot: roots.stateRoot });
   const destination = path.join(roots.layoutRoot, 'releases', input.releaseId);
   try {
     await fs.cp(source, destination, { recursive: true, errorOnExist: true, force: false, mode: fsConstants.COPYFILE_FICLONE });
