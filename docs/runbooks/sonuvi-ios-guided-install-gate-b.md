@@ -304,3 +304,50 @@ moderate. Direct runtime dependencies implicated include `fast-xml-parser`
 be addressed by a separately authorized dependency-maintenance release before
 production promotion or public bootstrap exposure. No dependency versions were
 changed in this work.
+
+## Gate B2 readiness package
+
+Status: **PARTIAL; package-level readiness improved, but no target-side
+least-privilege installer or VM acceptance exists.**
+
+### Dependency remediation
+
+The locked production dependency set is updated to `express` 5.3.0,
+`fast-xml-parser` 5.12.0, `sharp` 0.35.5, and `undici` 6.29.1. A post-update
+`npm audit --json` reports zero vulnerabilities. XML/DIDL/SOAP, mobile HTTP,
+bootstrap, and full-suite compatibility tests are required evidence for this
+major Express / Sharp update. The supported Node floor is now **20.9.0**,
+because patched Sharp requires it; fresh-host preflight must reject older Node
+runtimes. No production host was changed.
+
+### First-controller handoff
+
+`authorizeFirstController` requires a valid administrator-only token before
+issuing the existing `mobile-api` / mobile-refresh bearer format for the
+controller device. It records only a hash of its access token with the
+administrator identity in protected state. The administrator token is never
+embedded in the controller token, and a controller token cannot satisfy the
+administrator guard. This is an internal integration primitive, not a newly
+registered HTTP endpoint; existing pairing routes and production behavior stay
+unchanged pending a dedicated route/API review.
+
+### Candidate manifest
+
+`buildGateB2ReadinessPackage` produces a non-executing, protected manifest of
+the fixed helper, lockfile, and canonical service templates. It records each
+SHA-256 and does not start a service, access a VM, or invoke host privilege.
+The immutable release artifact itself must still be built and verified using
+the ARM64 dependency pipeline during the separately authorized VM acceptance
+preflight.
+
+### Remaining Gate B2 blockers
+
+1. A reviewed target-side package for the fixed helper plus a one-time,
+   least-privilege elevation mechanism. No generic sudo rule, setuid helper,
+   or network service is authorized or implemented.
+2. A reviewed native-admin route/API layer and integration of first-controller
+   handoff with existing pairing endpoints.
+3. An ARM64 candidate artifact/release manifest built with Node 20.9+ and the
+   updated dependencies.
+4. Separate approval to boot the disposable VM and execute the controlled
+   acceptance procedure.
