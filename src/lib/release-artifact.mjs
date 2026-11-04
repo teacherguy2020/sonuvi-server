@@ -635,7 +635,7 @@ function defaultManifestRequirements() {
 function externalRuntimeDependencies() {
   return {
     executables: [
-      'node', 'npm', 'python3', 'mpc', 'ffmpeg', 'ffprobe', 'metaflac', 'curl', 'ssh', 'scp',
+      'node', 'python3', 'mpc', 'ffmpeg', 'ffprobe', 'metaflac', 'curl', 'ssh', 'scp',
     ],
     pythonPackages: ['python-mpd2', 'requests', 'mutagen'],
     hostServicesAndAccess: [
