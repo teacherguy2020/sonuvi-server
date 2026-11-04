@@ -49,6 +49,7 @@ async function sourceFixture(t) {
   await write(root, 'scripts/promote-staged-release.mjs', 'console.log("fixture promoter");\n');
   await write(root, 'scripts/lastfm-authorize.mjs', 'console.log("fixture lastfm");\n');
   await write(root, 'scripts/export-peppymeter-skins.mjs', 'console.log("fixture skins");\n');
+  await write(root, 'scripts/sonuvi-bootstrap-helper.mjs', 'console.log("fixture bootstrap helper");\n');
   await write(root, 'config/now-playing.config.example.json', '{"ports":{"api":3101,"ui":8101}}\n');
   await write(root, 'config/radio-logo-aliases.json', '{"fixture.example":"Fixture Radio"}\n');
   await write(root, 'index.html', '<!doctype html><title>Sonuvi fixture</title>');

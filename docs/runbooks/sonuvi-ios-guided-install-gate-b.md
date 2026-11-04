@@ -232,3 +232,75 @@ least-privilege host packaging, administrator credential/API design, pairing
 handoff, and a disposable-VM acceptance run remain. The VM must stay off until
 separately authorized for Gate B2. The production Pi5, moOde, and the baseline
 remain out of scope.
+
+## Gate B1.6 fresh-install integration and VM readiness
+
+Status: **PARTIAL; integrated fixtures pass, but no target-side privilege
+package, public admin API, pairing handoff, or VM validation exists.**
+
+### Packaged helper and integrity model
+
+The fixed JSON-lines entry point is `scripts/sonuvi-bootstrap-helper.mjs`; it
+is now included in immutable release artifacts and its static import closure is
+verified with the release. `src/lib/sonuvi-bootstrap-helper.mjs` supplies a
+versioned helper descriptor and SHA-256 verification. The future iOS client
+must receive the expected digest from a trusted signed Sonuvi release manifest
+or separately pinned distribution metadata—not from the same download channel
+as an untrusted helper. It stages the helper in a fixed target-owned location,
+verifies before invocation, and removes only its own verified staging file.
+
+The helper consumes at most one bounded JSON request per line and returns one
+structured response. It supports only the B1.5 fixed operations, binds each
+request to attempt and target identity, has a bounded timeout, and emits no
+credential material. Its source entry point intentionally has no installed
+privileged dispatcher yet; invoking that unconfigured entry point fails closed.
+
+### Integrated installation state machine
+
+`FreshInstallOrchestrator` coordinates real injected operations in this order:
+
+`preflight → release_verification → checkpoint → configuration → activation →
+health_verification → administrator_enrollment → awaiting administrator claim
+→ pairing_ready → complete`.
+
+Every start/pass/fail record is appended to the existing fsync-backed JSONL
+journal and an atomic installation state is written after each durable phase.
+An interrupted observer can read the journal and state, but the implementation
+does **not** claim an in-flight host operation survives process termination.
+Failure records `recoverable-incomplete`; first-release cleanup never claims a
+previous release exists.
+
+### Administrator authority
+
+`AdministratorAuthority` completes a successful enrollment claim into a
+separate protected administrator identity and random signing key. It issues
+short-lived administrator-only tokens and `requireAdministratorAuthorization`
+validates them independently of mobile bearer sessions and the Track Key. No
+HTTP route is registered yet: a future native-admin route layer must be
+reviewed separately rather than widening existing configuration authentication.
+Revocation removes this authority's protected identity/key material. Existing
+mobile pairing behavior is unchanged; the first-controller pairing handoff is
+therefore still **blocked**, not replaced.
+
+### Privilege boundary and target readiness
+
+The constrained adapter remains an injected fixture seam with only the fixed
+unit/systemd/health/attempt-cleanup operations. It is not a sudo policy,
+setuid executable, polkit action, root daemon, or generic remote command API.
+The exact target packaging and lifecycle (including how temporary elevation is
+approved and removed) need a dedicated Linux security review before Gate B2.
+
+### B1.6 validation and npm advisories
+
+Focused helper/authority/orchestration/fresh-install/release tests pass
+**28/28**. The full suite passes **566/566** on repeat. One initial concurrent
+run observed an existing listening-history shadow-mode assertion before its
+asynchronous qualification completed; that test passed in isolation and on the
+full repeat, with no bootstrap code on its path. `npm audit` reports nine
+upstream advisories: 2 critical, 5 high, and 2
+moderate. Direct runtime dependencies implicated include `fast-xml-parser`
+(critical), `sharp` (high), `undici` (high), and `express` through `qs`.
+`fast-xml-parser` is reachable through UPnP/XML parsing and these issues must
+be addressed by a separately authorized dependency-maintenance release before
+production promotion or public bootstrap exposure. No dependency versions were
+changed in this work.

@@ -57,6 +57,7 @@ async function createFixture(t) {
   await write(source, 'scripts/promote-staged-release.mjs', 'console.log("promote");\n');
   await write(source, 'scripts/lastfm-authorize.mjs', 'console.log("lastfm");\n');
   await write(source, 'scripts/export-peppymeter-skins.mjs', 'console.log("skins");\n');
+  await write(source, 'scripts/sonuvi-bootstrap-helper.mjs', 'console.log("bootstrap helper");\n');
   await write(source, 'config/now-playing.config.example.json', '{}\n');
   await write(source, 'index.html', '<!doctype html>one');
   await write(source, 'controller.html', '<!doctype html>controller');
