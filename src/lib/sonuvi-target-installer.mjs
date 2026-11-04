@@ -12,6 +12,7 @@ const execFile = promisify(execFileCallback);
 export const TARGET_INSTALLER_VERSION = '1.0.0';
 export const TARGET_PATHS = Object.freeze({ layoutRoot: '/opt/sonuvi', stateRoot: '/var/lib/sonuvi', unitRoot: '/etc/systemd/system', bootstrapReleaseRoot: '/var/lib/sonuvi-bootstrap/releases' });
 export const TARGET_UNITS = Object.freeze(['sonuvi-api.service', 'sonuvi-web.service']);
+export const TARGET_SERVICE_ACCOUNT = 'sonuvi';
 
 function text(value) { return String(value ?? '').trim(); }
 function releaseId(value) { const id = text(value); if (!/^sonuvi-[a-f0-9]{64}$/.test(id)) throw new Error('release ID is invalid'); return id; }
@@ -45,6 +46,17 @@ export function createFixedSystemd({
   });
 }
 
+export function createFixedServiceAccount({ run = (file, args) => execFile(file, args, { timeout: 30_000, env: { PATH: '/usr/sbin:/usr/bin:/sbin:/bin' } }), lookup = async () => null } = {}) {
+  return Object.freeze({ async ensure() {
+    const existing = await lookup(TARGET_SERVICE_ACCOUNT);
+    if (existing && (existing.group !== TARGET_SERVICE_ACCOUNT || existing.shell !== '/usr/sbin/nologin')) throw new Error('service_account_conflict');
+    if (existing) return 'existing';
+    await run('/usr/sbin/groupadd', ['--system', TARGET_SERVICE_ACCOUNT]);
+    await run('/usr/sbin/useradd', ['--system', '--gid', TARGET_SERVICE_ACCOUNT, '--home-dir', '/var/lib/sonuvi', '--shell', '/usr/sbin/nologin', '--no-create-home', TARGET_SERVICE_ACCOUNT]);
+    return 'created';
+  }});
+}
+
 function validateRequest(request) {
   if (!request || typeof request !== 'object' || Array.isArray(request)) throw new Error('installer request is invalid');
   const keys = Object.keys(request).sort(); const allowed = ['attemptId', 'releaseId', 'serverIdentity', 'targetIdentity'];
@@ -57,7 +69,7 @@ function validateRequest(request) {
  * only: release source, service names, paths, commands, and environment are
  * fixed by this module. It is deliberately not a network service.
  */
-export async function runFixedTargetInstallation({ request, paths = TARGET_PATHS, platform = process.platform, architecture = process.arch, uid = typeof process.getuid === 'function' ? process.getuid() : null, systemd = createFixedSystemd(), verifyArtifact = verifyReleaseArtifact, health = null } = {}) {
+export async function runFixedTargetInstallation({ request, paths = TARGET_PATHS, platform = process.platform, architecture = process.arch, uid = typeof process.getuid === 'function' ? process.getuid() : null, systemd = createFixedSystemd(), serviceAccount = createFixedServiceAccount(), verifyArtifact = verifyReleaseArtifact, health = null } = {}) {
   const input = validateRequest(request);
   if (!nodeCompatible()) throw new Error('node_runtime_unsupported');
   const roots = Object.fromEntries(Object.entries(paths).map(([key, value]) => [key, absolute(value, key)]));
@@ -67,6 +79,7 @@ export async function runFixedTargetInstallation({ request, paths = TARGET_PATHS
   if (preflight.classification !== FreshInstallClassification.FRESH_ELIGIBLE) throw new Error(`fresh_host_refused:${preflight.classification}`);
   const sourceManifest = await verifyArtifact({ artifactRoot: source });
   if (sourceManifest.releaseId !== input.releaseId) throw new Error('staged_release_identity_mismatch');
+  await serviceAccount.ensure();
   const initialized = await initializeFreshHostLayout({ layoutRoot: roots.layoutRoot, stateRoot: roots.stateRoot, serverIdentity: input.serverIdentity });
   const destination = path.join(roots.layoutRoot, 'releases', input.releaseId);
   try {
