@@ -523,7 +523,10 @@ export async function createTargetDependencyMetadata({
   const files = await collectFileInventory(nodeModules);
   const native = await nativeArtifacts(nodeModules);
   assertNoMacNativeArtifacts(native);
-  if (packages.some((entry) => entry.name === 'sharp') && !native.some((entry) => /sharp-linux-arm64\.node$/.test(entry))) {
+  // Sharp 0.35+ version-suffixes its platform binary (for example
+  // sharp-linux-arm64-0.35.5.node); older supported bundles used the
+  // unsuffixed name. Accept both while retaining the ARM64-only constraint.
+  if (packages.some((entry) => entry.name === 'sharp') && !native.some((entry) => /sharp-linux-arm64(?:-[0-9.]+)?\.node$/.test(entry))) {
     throw new Error('linux/arm64 Sharp native artifact is missing from target dependencies');
   }
   return Object.freeze({
