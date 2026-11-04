@@ -61,6 +61,7 @@ const RELEASE_CONFIG_FILES = new Set([
 const RELEASE_RUNTIME_SCRIPTS = new Set([
   'scripts/export-peppymeter-skins.mjs',
   'scripts/sonuvi-bootstrap-helper.mjs',
+  'scripts/sonuvi-debian-node-bootstrap.sh',
   'scripts/sonuvi-target-installer.mjs',
   'scripts/lastfm-authorize.mjs',
   'scripts/promote-staged-release.mjs',
@@ -77,6 +78,7 @@ const RELEASE_STATIC_ENTRYPOINTS = [
   'scripts/verify-current-release.mjs',
   'scripts/verify-release-runtime.mjs',
   'scripts/sonuvi-bootstrap-helper.mjs',
+  'scripts/sonuvi-debian-node-bootstrap.sh',
   'scripts/sonuvi-target-installer.mjs',
 ];
 
