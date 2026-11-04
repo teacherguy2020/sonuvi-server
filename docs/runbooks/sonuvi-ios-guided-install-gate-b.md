@@ -94,6 +94,77 @@ separate short-lived, single-use, server-and-attempt-bound enrollment proof
 with expiry/replay protection and redacted diagnostics. This is a security
 blocker for Gate B1 PASS and all live installation work.
 
+## Gate B1.5 secure bootstrap foundation
+
+Status: **PARTIAL; isolated and tested, not a live transport or VM result.**
+
+### Bootstrap transport contract
+
+`src/lib/sonuvi-bootstrap-security.mjs` defines version 1 JSON-lines protocol
+validation for only these operations: `preflight`, `install`, `status`,
+`enrollment_create`, and `enrollment_claim`. It rejects command-, path-, and
+credential-shaped payload fields. SSH remains a transport only: a future Swift
+client must use strict host-key pinning, explicitly ask before first trust, and
+reject a changed key. The implementation includes the matching host-key policy
+and structured response envelope, but deliberately does not embed an SSH
+client or expose a Server network endpoint yet.
+
+Initial authentication is therefore **proposed**: a prepared target must be
+reached through a user-selected SSH account/key or an explicit one-time
+bootstrap credential outside command arguments and logs. A future fixed remote
+bootstrap executable may accept only the protocol records above, bind every
+request to its pinned machine identity and installation attempt, and resume by
+reading that attempt's durable journal.
+
+### Privileged-operation boundary
+
+`src/lib/sonuvi-privileged-provisioning.mjs` provides an injected, constrained
+host adapter for fixture and future root-owned-helper use. Its exact allowlist
+is: `write_units`, `daemon_reload`, `enable_start`, `verify_health`, and
+`cleanup_attempt`. It accepts no executable, arbitrary service, arbitrary path,
+or shell fragment. Only `sonuvi-api.service` and `sonuvi-web.service` can be
+enabled/started; cleanup requires an attempt-specific ownership marker. The
+caller must supply the same target identity and attempt ID for every operation.
+
+This is not yet installed as sudo, polkit, setuid, daemon, or remotely exposed
+host service. That integration requires a separate least-privilege packaging
+review and is still a Gate B2 prerequisite.
+
+### First-administrator enrollment lifecycle
+
+`FirstAdministratorEnrollment` creates a random short-lived enrollment token,
+persists only its SHA-256 hash, and binds the pending claim to the target
+identity and installation attempt. An exclusive state lock serializes competing
+claims. A successful claim stores the administrator device ID and public-key
+hash, permanently consumes the enrollment state, and causes all later/replayed
+claims to fail. Expired or revoked pending claims cannot be used. The raw token
+is never written into journal/state records.
+
+This is a local enrollment primitive, not a public route. It remains separate
+from controller/mobile bearer sessions and the historical Track Key. Pairing
+handoff and a durable administrative credential format are intentionally not
+yet implemented.
+
+### Security review
+
+| Threat | Current B1.5 behavior | Remaining work |
+| --- | --- | --- |
+| Unknown/changed SSH host key | Explicit first trust only; changed key fails | Native SSH/keychain implementation |
+| Arbitrary remote command | Protocol and privileged adapter reject it | Fixed remote helper packaging |
+| Competing claims/replay | Exclusive lock, hash comparison, claimed terminal state | Crash-safe claim transaction review on target filesystem |
+| Expired enrollment | Explicit expiry and no claim | UI recovery flow |
+| Controller-to-admin escalation | No bearer/Track Key accepted by enrollment | Admin credential/API design |
+| Secret/log leakage | Token is hash-only at rest; protocol rejects sensitive named fields | End-to-end process/SSH audit |
+
+### B1.5 tests and dependency result
+
+`test/sonuvi-bootstrap-security.test.mjs` exercises host-key pinning, explicit
+first trust, changed-key refusal, fixed-operation validation, enrollment
+expiry/replay/target binding, and constrained privileged cleanup. After the
+authorized `npm ci --ignore-scripts` from the existing lockfile, the complete
+suite passed: **562/562**. It did not alter dependency definitions. The local
+audit reported nine upstream advisories; no dependency upgrade was performed.
+
 ### Native iOS handoff status
 
 | Operation | Status |
@@ -155,8 +226,9 @@ for those proposed endpoints until Server implementation and acceptance exist.
 
 ## Gate B next controlled action
 
-Gate B1 is **PARTIAL**, not PASS: the isolated core and regressions are in
-place, but the SSH/bootstrap transport, service-manager adapter, administrator
-enrollment, and a disposable-VM acceptance run remain. The VM must stay off
-until separately authorized for Gate B2. The production Pi5, moOde, and the
-baseline remain out of scope.
+Gate B1.5 is **PARTIAL**, not PASS: isolated policy/provisioning/enrollment
+primitives and regressions are in place, but a real fixed SSH bootstrap helper,
+least-privilege host packaging, administrator credential/API design, pairing
+handoff, and a disposable-VM acceptance run remain. The VM must stay off until
+separately authorized for Gate B2. The production Pi5, moOde, and the baseline
+remain out of scope.
