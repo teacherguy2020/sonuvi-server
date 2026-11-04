@@ -572,7 +572,7 @@ export async function readTargetDependencyMetadata({ dependencyRoot, packageLock
   }
   const native = await nativeArtifacts(nodeModules);
   assertNoMacNativeArtifacts(native);
-  if (packages.some((entry) => entry.name === 'sharp') && !native.some((entry) => /sharp-linux-arm64\.node$/.test(entry))) {
+  if (packages.some((entry) => entry.name === 'sharp') && !native.some((entry) => /sharp-linux-arm64(?:-[0-9.]+)?\.node$/.test(entry))) {
     throw new Error('target dependency tree lacks the required linux/arm64 Sharp binary');
   }
   return Object.freeze({ root, nodeModules, metadata, packages, files, native });
@@ -868,7 +868,7 @@ export async function verifyReleaseArtifact({ artifactRoot, expectedTarget = TAR
   if (inventoryHash(packages) !== manifest.dependencies.packageInventoryHash || inventoryHash(dependencyFiles) !== manifest.dependencies.dependencyFilesHash) {
     throw new Error('release dependency inventory does not match its manifest');
   }
-  if (packages.some((entry) => entry.name === 'sharp') && !native.some((entry) => /sharp-linux-arm64\.node$/.test(entry))) {
+  if (packages.some((entry) => entry.name === 'sharp') && !native.some((entry) => /sharp-linux-arm64(?:-[0-9.]+)?\.node$/.test(entry))) {
     throw new Error('release dependency tree lacks the required linux/arm64 Sharp binary');
   }
   void dependencyRoot;
