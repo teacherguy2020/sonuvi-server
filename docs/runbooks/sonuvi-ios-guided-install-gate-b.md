@@ -351,3 +351,41 @@ preflight.
    updated dependencies.
 4. Separate approval to boot the disposable VM and execute the controlled
    acceptance procedure.
+
+## Executable fresh-install path (2026-11-04)
+
+Status: **implemented and fixture-tested; pending ARM64 VM acceptance.**
+
+`scripts/sonuvi-target-installer.mjs` is the fixed target-side entry point.
+It is a local, root-only executable intended for an explicitly authorized
+`sudo` invocation over the pinned SSH bootstrap transport. It reads one JSON
+request from standard input and has no listener, shell parser, arbitrary
+command field, configurable service field, or caller-controlled filesystem
+path. Its only accepted fields are the installation attempt ID, target
+identity, immutable release ID, and new Server identity.
+
+`src/lib/sonuvi-target-installer.mjs` fixes the host locations to
+`/opt/sonuvi`, `/var/lib/sonuvi`, `/etc/systemd/system`, and the verified
+bootstrap staging location. It rejects an existing or incomplete Sonuvi
+layout, requires Linux/ARM64, systemd, root authorization, at least Node
+20.9, sufficient space, and a verified staged immutable artifact. It then
+creates fresh state, copies and re-verifies the immutable release, writes only
+the canonical API/web unit files, invokes only fixed `systemctl` verbs for
+those two units, performs first-release activation, and stops at
+`awaiting-administrator-enrollment`. It never invents a prior rollback
+release. Failure removes only the candidate copied by this attempt; it does
+not remove unrelated host state.
+
+The installed Server registers `GET /v1/admin/bootstrap/status` and
+`POST /v1/admin/bootstrap/first-controller` only when fresh-install
+administrator authority exists. Both require the separate administrator
+bearer token. The controller endpoint issues the existing mobile bearer/refresh
+format and records only a token hash, so controller scope remains distinct
+from administrator scope. Established installations with no administrator
+authority retain a 404 at these routes.
+
+This is not yet evidence of a physical ARM64 install: the target executable,
+systemd behavior, artifact runtime closure, and APIs have passed isolated
+fixtures only. Build the immutable ARM64 artifact from this committed source,
+verify it with the normal release verifier, then use the preserved disposable
+VM for the first controlled acceptance attempt after its separate authorization.

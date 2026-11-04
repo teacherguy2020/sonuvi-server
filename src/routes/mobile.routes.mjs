@@ -69,6 +69,8 @@ import {
   waitForQobuzRelease,
 } from '../lib/qobuz-connect-release.mjs';
 import { registerMobileUpnpRoutes } from './mobile-upnp.routes.mjs';
+import { authorizeFirstController } from '../lib/sonuvi-first-controller-handoff.mjs';
+import { requireAdministratorAuthorization } from '../lib/sonuvi-admin-authority.mjs';
 
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const REFRESH_TTL_MS = 365 * 24 * 60 * 60 * 1000;
@@ -642,6 +644,11 @@ export function registerMobileRoutes(app, deps = {}) {
   // requiring the user to copy the Track Key into that device first.
   const pairingAuthConfigured = Boolean(apiSecret && trackIdSecret && apiSecret !== trackIdSecret);
   const pairingStore = new MobilePairingStore();
+  const administratorAuthority = deps.administratorAuthority
+    && typeof deps.administratorAuthority.verifyAccessToken === 'function'
+    ? deps.administratorAuthority
+    : null;
+  const administratorStateRoot = text(deps.administratorStateRoot);
   const getIndex = typeof deps.getBrowseIndex === 'function'
     ? deps.getBrowseIndex
     : (host) => getBrowseIndex(host);
@@ -2380,6 +2387,28 @@ export function registerMobileRoutes(app, deps = {}) {
       mediaUrl,
     });
   }));
+
+  // Fresh-install-only administrative bridge. It is inert for established
+  // deployments without a protected administrator authority record.
+  app.get('/v1/admin/bootstrap/status', async (req, res) => {
+    if (!administratorAuthority || !administratorStateRoot) return errorResponse(res, 404, 'administrator bootstrap is unavailable');
+    try {
+      const claims = await requireAdministratorAuthorization({ authority: administratorAuthority, bearerToken: readBearerToken(req) });
+      return res.json({ ok: true, role: claims.role, administratorId: claims.administratorId });
+    } catch {
+      return errorResponse(res, 401, 'administrator authorization is required');
+    }
+  });
+  app.post('/v1/admin/bootstrap/first-controller', async (req, res) => {
+    if (!administratorAuthority || !administratorStateRoot || !apiSecret) return errorResponse(res, 404, 'administrator bootstrap is unavailable');
+    try {
+      const handoff = await authorizeFirstController({ authority: administratorAuthority, administratorToken: readBearerToken(req), mobileApiSecret: apiSecret, controllerDeviceId: req.body?.deviceId, stateRoot: administratorStateRoot });
+      return res.status(201).json({ ok: true, ...handoff });
+    } catch (error) {
+      if (error?.message === 'administrator_authorization_required') return errorResponse(res, 401, 'administrator authorization is required');
+      return errorResponse(res, 400, 'first-controller authorization failed');
+    }
+  });
 
   const pairingRoute = (handler) => async (req, res) => {
     if (!requireEnabled(res)) return;

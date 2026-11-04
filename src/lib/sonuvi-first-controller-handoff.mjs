@@ -15,7 +15,9 @@ function safeDevice(value) { const result = text(value); if (!/^[A-Za-z0-9._-]{8
 export async function authorizeFirstController({ authority, administratorToken, mobileApiSecret, controllerDeviceId, stateRoot, now = Date.now() } = {}) {
   const administrator = await requireAdministratorAuthorization({ authority, bearerToken: administratorToken }); const deviceId = safeDevice(controllerDeviceId); const secret = text(mobileApiSecret); if (!secret) throw new Error('mobile API secret is required');
   const root = path.resolve(text(stateRoot)); if (!path.isAbsolute(root)) throw new Error('state root must be absolute');
-  const pairingRecord = { schema: 'sonuvi.first-controller-pairing.v1', deviceId, authorizedBy: administrator.administratorId, authorizedAt: new Date(now).toISOString(), accessTokenHash: crypto.createHash('sha256').update(createMobileSessionToken({ secret, deviceId, now })).digest('base64url') };
+  const accessToken = createMobileSessionToken({ secret, deviceId, now });
+  const refreshToken = createMobileRefreshToken({ secret, deviceId, now });
+  const pairingRecord = { schema: 'sonuvi.first-controller-pairing.v1', deviceId, authorizedBy: administrator.administratorId, authorizedAt: new Date(now).toISOString(), accessTokenHash: crypto.createHash('sha256').update(accessToken).digest('base64url') };
   const file = path.join(root, 'protected', 'first-controller-pairing.json'); await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 }); const temp = `${file}.${crypto.randomUUID()}.tmp`; await fs.writeFile(temp, `${JSON.stringify(pairingRecord)}\n`, { mode: 0o600 }); await fs.rename(temp, file);
-  return Object.freeze({ deviceId, accessToken: createMobileSessionToken({ secret, deviceId, now }), refreshToken: createMobileRefreshToken({ secret, deviceId, now }), scope: 'mobile-api' });
+  return Object.freeze({ deviceId, accessToken, refreshToken, scope: 'mobile-api' });
 }

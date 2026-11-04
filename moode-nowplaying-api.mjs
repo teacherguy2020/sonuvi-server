@@ -299,6 +299,7 @@ import { createApnsProvider } from './src/lib/apns.mjs';
 import { resolveApnsMediaUrl } from './src/lib/apns-artwork.mjs';
 import { createMobilePushTokenStore } from './src/lib/mobile-push-store.mjs';
 import { createMobileVideoCatalog } from './src/lib/mobile-video-catalog.mjs';
+import { AdministratorAuthority } from './src/lib/sonuvi-admin-authority.mjs';
 import { buildAnimatedArtContext } from './src/lib/animated-art-context.mjs';
 import { UpnpControlPoint } from './src/lib/upnp-control-point.mjs';
 import { createUpnpPlaybackSessionManager } from './src/lib/upnp-playback-session.mjs';
@@ -9181,6 +9182,7 @@ registerArtRoutes(app, {
 });
 
 let mobileVibeStarter = null;
+const firstAdministratorAuthority = new AdministratorAuthority({ stateRoot: RUNTIME_STATE_PATHS.stateRoot });
 
 registerMobileRoutes(app, {
   enabled: MOBILE_API_ENABLED,
@@ -9190,6 +9192,8 @@ registerMobileRoutes(app, {
   mobileBaseUrl: MOBILE_PUBLIC_BASE_URL,
   mobileTrackCacheDir: MOBILE_TRACK_CACHE_DIR,
   transcodeTracks: MOBILE_TRANSCODE_TRACKS,
+  administratorAuthority: firstAdministratorAuthority,
+  administratorStateRoot: RUNTIME_STATE_PATHS.stateRoot,
   musicLibraryRoot: PI4_MOUNT_BASE,
   videoCatalog: mobileVideoCatalog,
   listeningHistory,
