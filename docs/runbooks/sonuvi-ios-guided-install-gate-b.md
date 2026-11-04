@@ -37,7 +37,80 @@ Events contain a stage, state, timestamp, optional measured progress, and a
 stable error code. Progress is optional and is not synthesized where no
 measurable unit exists.
 
-## Required fresh-host adapter (proposed; not implemented)
+## Gate B1 isolated implementation (not VM-accepted)
+
+`src/lib/sonuvi-fresh-install.mjs` now implements and tests a deliberately
+narrow fresh-host adapter core. It is not a network listener and has no shell,
+SSH, or arbitrary-command capability.
+
+- `classifyFreshInstallHost` returns one of `fresh_eligible`,
+  `already_installed`, `incomplete_installation`, `unsupported_host`,
+  `conflicting_installation`, or `requires_recovery`. Inaccessible or partial
+  state is never treated as empty.
+- `initializeFreshHostLayout` creates Sonuvi-owned state only after a fresh
+  classification. Its initial configuration is non-secret, localhost-only,
+  uses an empty local library, and has no moOde, production host, or copied
+  credential dependency.
+- `renderFreshSystemdUnits` and `provisionFreshSystemdUnits` materialize only
+  the reviewed API/web unit files and refuse to overwrite a different unit.
+  The future privileged transport still owns `daemon-reload`, enable, and
+  start; no general privileged execution interface was introduced.
+- `appendFreshInstallJournal` writes fsync-backed JSONL stage events and
+  `writeFreshInstallState` records an atomically replaced durable state file.
+  Both redact sensitive named fields.
+- `src/lib/sonuvi-first-release.mjs` adds an initial activation seam. It
+  verifies the staged artifact, never invents a previous release, and removes
+  only the pointer it created if API/web verification or health fails. The
+  verified candidate remains for diagnosis or explicit recovery.
+
+The existing upgrade transaction in `src/lib/release-activation.mjs` is
+unchanged and remains the only path for upgrades with a retained release.
+
+### Gate B1 state model
+
+`preflight -> release_acquisition -> release_verification -> checkpoint ->
+dependency_setup -> configuration -> activation -> health_verification ->
+administrator_enrollment -> pairing_ready -> complete`.
+
+Only `preflight`, configuration persistence, unit-file provisioning, durable
+journal/state persistence, and first-release activation are implemented in
+the isolated adapter. A failure before a first current-pointer is created
+leaves no release selected. A failure after selection removes that pointer,
+records `recoverable-incomplete`, and invokes the narrowly supplied rollback
+adapter; it cannot "roll back" to a nonexistent release.
+
+Example sanitized journal record:
+
+```json
+{"contract":"sonuvi.fresh-install-journal.v1","attemptId":"boot_example","targetIdentity":"machine-id","stage":"activation","state":"started"}
+```
+
+### Administrator enrollment remains a blocker
+
+No first-administrator enrollment endpoint or credential has been added.
+Existing mobile pairing sessions and the historical Track Key are not safe
+substitutes for administrator authority. A future implementation must use a
+separate short-lived, single-use, server-and-attempt-bound enrollment proof
+with expiry/replay protection and redacted diagnostics. This is a security
+blocker for Gate B1 PASS and all live installation work.
+
+### Native iOS handoff status
+
+| Operation | Status |
+| --- | --- |
+| Preflight classifications and stable stage vocabulary | Implemented and tested locally |
+| JSONL observation/resume of durable stage records | Implemented and tested locally |
+| Initial layout/configuration and first-release pointer semantics | Implemented and tested locally |
+| Privileged SSH/bootstrap command, artifact transport, service manager execution | Designed, not implemented |
+| Administrator enrollment and post-enrollment pairing handoff | Blocked pending security design/review |
+| Live VM acceptance | Not attempted; requires Gate B2 authorization |
+
+The iOS client must treat this as a mockable local contract, not as an exposed
+Server API. It must pin the SSH host key before invoking a future fixed,
+structured bootstrap command and may resume observation of a known attempt
+only after target identity matches.
+
+## Required fresh-host adapter (remaining work)
 
 The future privileged bootstrap command must:
 
@@ -82,7 +155,8 @@ for those proposed endpoints until Server implementation and acceptance exist.
 
 ## Gate B next controlled action
 
-Implement and test the fresh-host adapter locally first. Only then manually
-start `SONUVI-IOS-GUIDED-SETUP-01` through UTM, reconfirm its pinned identity
-and clean-baseline provenance, and run the adapter against the disposable VM.
-The production Pi5, moOde, and the baseline are out of scope.
+Gate B1 is **PARTIAL**, not PASS: the isolated core and regressions are in
+place, but the SSH/bootstrap transport, service-manager adapter, administrator
+enrollment, and a disposable-VM acceptance run remain. The VM must stay off
+until separately authorized for Gate B2. The production Pi5, moOde, and the
+baseline remain out of scope.
