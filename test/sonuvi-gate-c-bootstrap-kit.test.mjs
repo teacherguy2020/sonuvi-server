@@ -105,7 +105,13 @@ test('bootstrap kit verifier rejects unexpected files, symlinks, malformed manif
 
 test('real capsule promotes the actual packaged kit and rejects an unexpected archive entry', { skip: process.env.SONUVI_GATE_C_RUN_DOCKER_FIXTURE === '1' ? false : 'set SONUVI_GATE_C_RUN_DOCKER_FIXTURE=1 for isolated Debian ARM64 capsule acceptance' }, async (t) => {
   const { root, kitRoot } = await buildKit(t, 'capsule');
-  const archive = await archiveGateCBootstrapKit({ kitRoot, archivePath: path.join(root, 'sonuvi-bootstrap-kit-v1.tar') });
+  const builtArchive = await archiveGateCBootstrapKit({ kitRoot, archivePath: path.join(root, 'sonuvi-bootstrap-kit-v1.tar') });
+  const packagedArchive = String(process.env.SONUVI_GATE_C_PACKAGED_BOOTSTRAP_KIT || '').trim();
+  const archive = packagedArchive
+    ? Object.freeze({ archivePath: path.resolve(packagedArchive) })
+    : builtArchive;
+  const packagedStat = await fs.lstat(archive.archivePath);
+  assert.equal(packagedStat.isFile() && !packagedStat.isSymbolicLink(), true, 'capsule input must be a regular archive');
   const capsule = path.resolve('scripts/sonuvi-sftp-bootstrap-activate-v1.sh');
 
   async function runCapsule({ archivePath, expectedExit, requiredOutput = '' }) {

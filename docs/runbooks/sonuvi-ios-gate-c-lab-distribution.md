@@ -20,20 +20,41 @@ service.
 iOS uses the exact host identity and prefix:
 
 ```text
-https://M4-Mac-mini.local:9443/v1/gate-c/releases/sonuvi-ae4e6d010a9d76698d182e65700b802389a20a419420f68e83e76cded6f6b653/
+https://M4-Mac-mini.local:9443/v1/gate-c/releases/sonuvi-152057e2d169e6d586a36cea1d3f6c1c1316781b14a72035eec625eb3c45b421/
 ```
 
 No redirects, query strings, alternate hosts, release IDs, or endpoint paths
 are accepted. The only `GET`/`HEAD` artifacts are:
 
 - `release-envelope.json` — `application/json; charset=utf-8`
-- `sonuvi-ae4e6d010a9d76698d182e65700b802389a20a419420f68e83e76cded6f6b653-linux-arm64.tar` — `application/x-tar`, 55,586,816 bytes
-- `sonuvi-bootstrap-kit-v1.tar` — `application/x-tar`, 98,304 bytes
+- `sonuvi-152057e2d169e6d586a36cea1d3f6c1c1316781b14a72035eec625eb3c45b421-linux-arm64.tar` — `application/x-tar`, 53,431,808 bytes
+- `sonuvi-bootstrap-kit-v1.tar` — `application/x-tar`, 129,536 bytes
 - `release-trust-anchors.json` — `application/json; charset=utf-8`
 - `sonuvi-lab-gate-c-20261105-public.pem` — `application/x-pem-file`
 - `CHECKSUMS.sha256` — `text/plain; charset=utf-8`
 - `ios-integration-handoff.json` — `application/json; charset=utf-8`
 - `LAB-README.md` — `text/markdown; charset=utf-8`
+
+### Current signed kit identity
+
+The currently served immutable lab kit is separate from the superseded B2-era
+lab release and was built from Server commit
+`5a143afc74dc927d60afc1a0b200ea5875798bb4`:
+
+```text
+release ID: sonuvi-152057e2d169e6d586a36cea1d3f6c1c1316781b14a72035eec625eb3c45b421
+release manifest SHA-256: b02e280b17a6e88ea335064daf6c89f49bb88b57f2f7a5139532a4db545e9449
+release archive SHA-256: 171943aed7dc84deaa50861a340f151c7e67e5a43c113cabcf81779a73147574
+bootstrap kit SHA-256: a26e00d76d4f10599f170a71a4fa632b1fb85ccb89871c26864bcfe6e001a28d
+release envelope SHA-256: 269dcf1c96011d5e9eead7985f4424c8fd64f6daa91fdfdae8b665ceeb357b1a
+activation capsule SHA-256: 56ccc9df3888b4360da44939bf26a26384cf5219bd076130437b5741713a8bfd
+signed metadata validity: 2026-11-05T20:52:07.118Z through 2026-12-05T20:52:07.118Z
+```
+
+The capsule accepts the exact `sonuvi.gate-c-bootstrap-kit.v1` inventory
+documented in the SFTP contract, including the durable status helper and its
+closure. The iOS client still verifies the signed envelope and both payload
+digests before any SSH staging or fixed activation.
 
 All other paths return `404`; methods other than `GET`/`HEAD` return `405`.
 Range is deliberately unsupported (`416`, `Accept-Ranges: none`), so an

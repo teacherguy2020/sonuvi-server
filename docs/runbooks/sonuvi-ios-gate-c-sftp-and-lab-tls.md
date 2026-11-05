@@ -25,7 +25,7 @@ Before opening SFTP, iOS must have completed all of the following locally:
 3. Verify the signed Ed25519 release envelope, signer key ID, expiry,
    Linux/ARM64 target, and `payload.bootstrap.sha256`.
 4. Verify the downloaded `sonuvi-bootstrap-kit-v1.tar` SHA-256 against that
-   signed digest. The current lab artifact is 98,304 bytes. Its size is also
+   signed digest. The current lab artifact is 129,536 bytes. Its size is also
    capped at 16 MiB by this contract.
 
 The SFTP upload never grants execution authority. It is merely a transfer of
@@ -125,18 +125,24 @@ before copying/extracting. It requires ordinary Debian base utilities
 not Node.js or npm.
 
 The fixed extracted bootstrap-kit inventory is versioned as
-`sonuvi.gate-c-bootstrap-kit.v1`. It includes the release-stage closure and
-the complete reconnect-safe status closure:
+`sonuvi.gate-c-bootstrap-kit.v1`. The complete regular-file allowlist is:
 
 ```text
+etc/sonuvi/release-trust-anchors.json
 scripts/sonuvi-bootstrap-status.mjs
-src/lib/sonuvi-bootstrap-status.mjs
-src/lib/sonuvi-bootstrap-progress.mjs
-src/lib/sonuvi-fresh-install.mjs
+scripts/sonuvi-debian-node-bootstrap.sh
+scripts/sonuvi-release-stage.mjs
 src/lib/atomic-file.mjs
+src/lib/public-web-root.mjs
+src/lib/release-artifact.mjs
 src/lib/runtime-capabilities.mjs
 src/lib/runtime-config-security.mjs
 src/lib/sonuvi-bootstrap-contract.mjs
+src/lib/sonuvi-bootstrap-progress.mjs
+src/lib/sonuvi-bootstrap-status.mjs
+src/lib/sonuvi-fresh-install.mjs
+src/lib/sonuvi-gate-c-release.mjs
+src/lib/sonuvi-gate-c-staging.mjs
 ```
 
 `scripts/sonuvi-bootstrap-status.mjs` is deliberately also present in the
