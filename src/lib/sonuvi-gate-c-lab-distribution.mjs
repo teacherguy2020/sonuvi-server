@@ -10,6 +10,7 @@ export const GATE_C_LAB_DISTRIBUTION_CONTRACT = 'sonuvi.gate-c-lab-distribution.
 export const GATE_C_LAB_DISTRIBUTION_PREFIX = '/v1/gate-c/releases';
 export const GATE_C_LAB_MAX_RELEASE_BYTES = 8 * 1024 * 1024 * 1024;
 export const GATE_C_LAB_MAX_BOOTSTRAP_BYTES = 16 * 1024 * 1024;
+export const GATE_C_LAB_TRUSTED_LAN_CIDR = '10.0.0.0/16';
 
 const STATIC_HEADERS = Object.freeze({
   'accept-ranges': 'none',
@@ -21,6 +22,21 @@ const STATIC_HEADERS = Object.freeze({
 
 function text(value) {
   return String(value ?? '').trim();
+}
+
+/**
+ * The lab listener is bound to an IPv4 address on the trusted 10.0.0.0/16
+ * network. Keep the source check separate from TLS: it narrows who can reach
+ * the fixed read-only endpoint but is not an authentication substitute.
+ */
+export function isGateCLabTrustedLanAddress(value) {
+  let address = text(value).toLowerCase();
+  if (address.startsWith('::ffff:')) address = address.slice('::ffff:'.length);
+  const octets = address.split('.');
+  if (octets.length !== 4 || octets.some((part) => !/^(0|[1-9][0-9]{0,2})$/.test(part))) return false;
+  const numbers = octets.map(Number);
+  if (numbers.some((part) => part > 255)) return false;
+  return numbers[0] === 10 && numbers[1] === 0;
 }
 
 function sameKeys(value, expected, label) {
@@ -181,9 +197,20 @@ export function resolveGateCLabDistributionRequest({ method, url, headers = {} }
   return Object.freeze({ status: 200, asset, headers: { ...STATIC_HEADERS, 'content-length': String(asset.bytes), 'content-type': asset.contentType, etag: `"sha256-${asset.sha256}"` } });
 }
 
-export function createGateCLabDistributionHandler(distribution) {
+export function createGateCLabDistributionHandler(distribution, { isTrustedRemoteAddress = () => true } = {}) {
+  if (typeof isTrustedRemoteAddress !== 'function') throw new Error('lab distribution remote-address policy is invalid');
   return (request, response) => {
     request.resume();
+    if (!isTrustedRemoteAddress(request.socket?.remoteAddress)) {
+      response.writeHead(403, {
+        'cache-control': 'no-store',
+        'content-length': '0',
+        'content-security-policy': "default-src 'none'",
+        'x-content-type-options': 'nosniff',
+      });
+      response.end();
+      return;
+    }
     const result = resolveGateCLabDistributionRequest(request, distribution);
     if (result.status !== 200) {
       response.writeHead(result.status, result.headers);
@@ -201,9 +228,12 @@ export function createGateCLabDistributionHandler(distribution) {
   };
 }
 
-export async function createGateCLabDistributionServer({ releaseRoot, tls } = {}) {
+export async function createGateCLabDistributionServer({ releaseRoot, tls, isTrustedRemoteAddress } = {}) {
   if (!tls?.key || !tls?.cert) throw new Error('lab distribution TLS key and certificate are required');
   const distribution = await loadGateCLabDistribution({ releaseRoot });
-  const server = https.createServer({ key: tls.key, cert: tls.cert, minVersion: 'TLSv1.3' }, createGateCLabDistributionHandler(distribution));
+  const server = https.createServer(
+    { key: tls.key, cert: tls.cert, minVersion: 'TLSv1.3' },
+    createGateCLabDistributionHandler(distribution, { isTrustedRemoteAddress }),
+  );
   return Object.freeze({ distribution, server });
 }

@@ -6,7 +6,12 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { canonicalJson } from '../src/lib/release-artifact.mjs';
-import { loadGateCLabDistribution, resolveGateCLabDistributionRequest } from '../src/lib/sonuvi-gate-c-lab-distribution.mjs';
+import {
+  createGateCLabDistributionHandler,
+  isGateCLabTrustedLanAddress,
+  loadGateCLabDistribution,
+  resolveGateCLabDistributionRequest,
+} from '../src/lib/sonuvi-gate-c-lab-distribution.mjs';
 
 const releaseId = `sonuvi-${'a'.repeat(64)}`;
 const keyId = 'sonuvi-lab-test';
@@ -63,6 +68,42 @@ test('lab distribution exposes only fixed immutable release artifacts and refuse
   assert.equal(resolveGateCLabDistributionRequest({ method: 'GET', url: `${prefix}../../etc/passwd` }, distribution).status, 404);
   assert.equal(resolveGateCLabDistributionRequest({ method: 'GET', url: `${prefix}release-envelope.json?redirect=https://elsewhere` }, distribution).status, 404);
   await assert.rejects(loadGateCLabDistribution({ releaseRoot: '' }), /release root must be absolute/);
+});
+
+test('lab distribution trusted-LAN guard accepts only 10.0.0.0/16 IPv4 peers', () => {
+  assert.equal(isGateCLabTrustedLanAddress('10.0.0.1'), true);
+  assert.equal(isGateCLabTrustedLanAddress('10.0.255.254'), true);
+  assert.equal(isGateCLabTrustedLanAddress('::ffff:10.0.0.210'), true);
+  assert.equal(isGateCLabTrustedLanAddress('10.1.0.1'), false);
+  assert.equal(isGateCLabTrustedLanAddress('192.168.1.1'), false);
+  assert.equal(isGateCLabTrustedLanAddress('::1'), false);
+  assert.equal(isGateCLabTrustedLanAddress('10.0.0.999'), false);
+  assert.equal(isGateCLabTrustedLanAddress('010.0.0.1'), false);
+});
+
+test('lab distribution rejects an untrusted peer before resolving an artifact', async (t) => {
+  const root = await fixture(t);
+  const distribution = await loadGateCLabDistribution({ releaseRoot: root });
+  const handler = createGateCLabDistributionHandler(distribution, {
+    isTrustedRemoteAddress: isGateCLabTrustedLanAddress,
+  });
+  const observed = { resumed: false, status: null, headers: null, ended: false };
+  handler(
+    {
+      method: 'GET',
+      url: `/v1/gate-c/releases/${releaseId}/release-envelope.json`,
+      socket: { remoteAddress: '192.168.1.5' },
+      resume() { observed.resumed = true; },
+    },
+    {
+      writeHead(status, headers) { observed.status = status; observed.headers = headers; },
+      end() { observed.ended = true; },
+    },
+  );
+  assert.equal(observed.resumed, true);
+  assert.equal(observed.status, 403);
+  assert.equal(observed.headers['cache-control'], 'no-store');
+  assert.equal(observed.ended, true);
 });
 
 test('lab distribution rejects checksum tampering and expired signed metadata before listening', async (t) => {

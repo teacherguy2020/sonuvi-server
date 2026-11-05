@@ -6,13 +6,18 @@
 already-signed lab kit. It is not a Sonuvi production service and has no
 release publishing, upload, shell, directory-listing, or arbitrary-file API.
 
-The server binds **only** to `127.0.0.1:9443` until Brian explicitly approves
-a separately verified LAN bind. Do not use a production Sonuvi listener or
-make a router/firewall change for this lab service.
+Brian approved the temporary lab bind after verifying the intended Mac mini
+owns `10.0.0.210` on `en0`. The service binds **only** to
+`10.0.0.210:9443` (IPv4): no wildcard, loopback companion, or IPv6 listener.
+It rejects every peer outside the trusted `10.0.0.0/16` LAN before resolving
+an artifact path. This source restriction complements—rather than replaces—
+TLS authentication and the signed-release verification. Do not use a
+production Sonuvi listener or make a router/firewall change for this lab
+service.
 
 ## Fixed endpoint shape
 
-When LAN binding is approved, iOS uses the exact host identity and prefix:
+iOS uses the exact host identity and prefix:
 
 ```text
 https://M4-Mac-mini.local:9443/v1/gate-c/releases/sonuvi-ae4e6d010a9d76698d182e65700b802389a20a419420f68e83e76cded6f6b653/
