@@ -1,7 +1,42 @@
 # Gate B: fresh-install and iOS bootstrap audit
 
-Status: **BLOCKED for controlled installation**. This document distinguishes
-implemented contracts from proposed work. It does not authorize deployment.
+Status: **Gate B2 disposable-VM acceptance PASS (2026-11-05); not production
+or physical-iOS acceptance.** This document preserves the implementation
+history below; the current VM acceptance result takes precedence where an
+older gate description says that live installation is blocked. It does not
+authorize production deployment.
+
+## Gate B2 disposable-VM acceptance result
+
+The dedicated Debian ARM64 UTM guest `SONUVI-IOS-GUIDED-SETUP-01` completed a
+clean fresh installation from immutable release
+`sonuvi-707d9c95a4f2460e658ca7f65d65056e2c7dce40549c76f07dd09ff34c3cf640`
+(source commit `b81a47b98392e15426a35ef440e5a22e4d1057da`). The pre-install
+baseline remains immutable, while the prior installed/enrolled attempt is
+preserved separately as lab evidence.
+
+Acceptance evidence:
+
+- Pinned hostname, machine ID, and ED25519 host key passed before staging; the
+  target was clean and distinct from the preserved baseline.
+- The target-side verifier accepted the staged immutable artifact. Debian
+  Trixie supplied Node 20.19.2 and all approved runtime executables; npm was
+  not required.
+- `sonuvi-api.service` and `sonuvi-web.service` are enabled and active after a
+  normal restart. API health and web HTTP checks report the exact release ID.
+- The `sonuvi` account can write only data, cache, logs, empty-library, and
+  podcast runtime directories. Configuration, protected material,
+  checkpoints, and installer state remain non-writable to that account.
+- Fresh-install catalog access returns a valid empty catalog without contacting
+  `moode.local`. A first controller received a normal controller credential,
+  received catalog `200` with zero artists/albums/tracks, and received `401`
+  from the administrator route.
+- First-administrator authority survived the normal restart. Enrollment-claim
+  replay and new enrollment creation were both rejected after the claim.
+
+Remaining work is Gate C/D: native SwiftUI orchestration and physical iOS/iPad
+acceptance. This result neither configures moOde nor validates production or
+real-device pairing UX.
 
 ## Verified reusable release components
 
