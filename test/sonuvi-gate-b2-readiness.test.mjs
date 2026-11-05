@@ -8,7 +8,7 @@ import { firstAdministratorClaimMessage, FirstAdministratorEnrollment } from '..
 import { authorizeFirstController } from '../src/lib/sonuvi-first-controller-handoff.mjs';
 import { buildGateB2ReadinessPackage } from '../src/lib/sonuvi-gate-b2-package.mjs';
 import { makeTreeWritableForCleanup } from '../src/lib/release-artifact.mjs';
-import { createFixedServiceAccount, createFixedSystemd, provisionServiceReadableActivationState, provisionServiceReadableConfiguration, provisionWritableStateOwnership, runFixedTargetInstallation, TARGET_WRITABLE_STATE_DIRECTORIES } from '../src/lib/sonuvi-target-installer.mjs';
+import { createFixedServiceAccount, createFixedSystemd, provisionServiceReadableActivationState, provisionServiceReadableConfiguration, provisionWritableStateOwnership, runFixedTargetInstallation, TARGET_WRITABLE_STATE_DIRECTORIES, verifyFixedTargetPrerequisites } from '../src/lib/sonuvi-target-installer.mjs';
 import crypto from 'node:crypto';
 
 const attemptId = 'boot_0123456789abcdef'; const targetIdentity = 'machine_0123456789abcdef';
@@ -64,13 +64,17 @@ test('fixed target installer has no caller-controlled paths or commands', async 
   const ownershipCalls = []; const ownership = async ({ stateRoot }) => { ownershipCalls.push(stateRoot); };
   const configurationAccess = async ({ stateRoot }) => { assert.equal(stateRoot, paths.stateRoot); configurationAccessCalled = true; };
   const activationStateAccess = async ({ stateRoot }) => { assert.equal(stateRoot, paths.stateRoot); activationStateAccessCalled = true; };
-  const result = await runFixedTargetInstallation({ request, paths, platform: 'linux', architecture: 'arm64', uid: 0, systemd, serviceAccount, ownership, configurationAccess, activationStateAccess, health: async () => true, verifyArtifact: async ({ artifactRoot }) => ({ releaseId, artifactRoot }) });
+  const result = await runFixedTargetInstallation({ request, paths, platform: 'linux', architecture: 'arm64', uid: 0, systemd, serviceAccount, ownership, configurationAccess, activationStateAccess, health: async () => true, verifyArtifact: async ({ artifactRoot }) => ({ releaseId, artifactRoot }), verifyPrerequisites: async () => {} });
   assert.equal(result.state, 'awaiting-administrator-enrollment');
   assert.equal((await fs.readlink(path.join(paths.layoutRoot, 'current'))).includes(releaseId), true);
   const installState = JSON.parse(await fs.readFile(path.join(paths.stateRoot, 'install', 'state.json'), 'utf8'));
   const journal = await fs.readFile(path.join(paths.stateRoot, 'install', 'journal.jsonl'), 'utf8');
+  const bootstrapJournal = await fs.readFile(path.join(root, 'bootstrap', 'attempts', attemptId, 'journal.jsonl'), 'utf8');
   assert.equal(installState.phase, 'awaiting-administrator-enrollment');
   assert.match(journal, /"stage":"administrator_enrollment","state":"waiting"/);
+  assert.match(bootstrapJournal, /"stage":"preflight","state":"passed"/);
+  assert.match(bootstrapJournal, /"stage":"dependency_setup","state":"passed"/);
+  assert.match(bootstrapJournal, /"stage":"administrator_enrollment","state":"waiting"/);
   assert.deepEqual(calls.slice(0, 3), [['daemon-reload'], ['enable', '--now', 'sonuvi-api.service'], ['enable', '--now', 'sonuvi-web.service']]);
   assert.deepEqual(ownershipCalls, [paths.stateRoot]);
   await assert.rejects(runFixedTargetInstallation({ request: { ...request, command: 'id' }, paths, platform: 'linux', architecture: 'arm64', uid: 0, systemd, verifyArtifact: async () => ({ releaseId }) }), /unsupported fields/);
@@ -102,10 +106,18 @@ test('failed first start disables only the approved candidate units before clean
   const calls = [];
   const systemd = createFixedSystemd({ run: async (args) => { calls.push(args); if (args[0] === 'enable') throw new Error('api start failed'); } });
   const request = { attemptId, targetIdentity, releaseId, serverIdentity: 'sonuvi-lab-01' };
-  await assert.rejects(runFixedTargetInstallation({ request, paths, platform: 'linux', architecture: 'arm64', uid: 0, systemd, serviceAccount: { ensure: async () => 'fixture' }, ownership: async () => {}, configurationAccess: async () => {}, activationStateAccess: async () => {}, verifyArtifact: async ({ artifactRoot }) => ({ releaseId, artifactRoot }) }), /api start failed/);
+  await assert.rejects(runFixedTargetInstallation({ request, paths, platform: 'linux', architecture: 'arm64', uid: 0, systemd, serviceAccount: { ensure: async () => 'fixture' }, ownership: async () => {}, configurationAccess: async () => {}, activationStateAccess: async () => {}, verifyArtifact: async ({ artifactRoot }) => ({ releaseId, artifactRoot }), verifyPrerequisites: async () => {} }), /api start failed/);
   assert.deepEqual(calls, [['daemon-reload'], ['enable', '--now', 'sonuvi-api.service'], ['disable', '--now', 'sonuvi-web.service'], ['disable', '--now', 'sonuvi-api.service']]);
   await assert.rejects(fs.lstat(path.join(paths.layoutRoot, 'current')), { code: 'ENOENT' });
 });
+test('target installer rechecks the packaged Node ABI and fixed executable set before activation', async () => {
+  const runtime = { version: 'v20.19.2', platform: 'linux', arch: 'arm64', versions: { modules: '115', napi: '9' } };
+  const manifest = { target: { os: 'linux', architecture: 'arm64', nodeVersion: 'v20.19.5', nodeModuleAbi: '115', napiVersion: '9' }, externalRuntimeDependencies: { executables: ['node', 'ffmpeg'] } };
+  const checked = await verifyFixedTargetPrerequisites({ manifest, runtime, find: async (name) => `/usr/bin/${name}` });
+  assert.deepEqual(checked.missing, []);
+  await assert.rejects(verifyFixedTargetPrerequisites({ manifest, runtime, find: async (name) => name === 'node' ? '/usr/bin/node' : '' }), /runtime_prerequisites_missing:ffmpeg/);
+});
+
 test('B2 package manifest hashes fixed package inputs without executing them', async (t) => {
   const root = await fixture(t); const helper = path.join(root, 'helper.mjs'); const lock = path.join(root, 'package-lock.json'); const unit = path.join(root, 'unit.service.in'); await Promise.all([fs.writeFile(helper, 'helper'), fs.writeFile(lock, 'lock'), fs.writeFile(unit, 'unit')]); const built = await buildGateB2ReadinessPackage({ outputPath: path.join(root, 'candidate', 'manifest.json'), helperPath: helper, lockfilePath: lock, serviceTemplatePaths: [unit] }); assert.equal(built.manifest.contract, 'sonuvi.gate-b2-package.v1'); assert.equal(built.manifest.files.length, 3);
 });

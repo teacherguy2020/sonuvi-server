@@ -6,12 +6,14 @@ import path from 'node:path';
 
 import { activateFirstRelease } from './sonuvi-first-release.mjs';
 import { AdministratorAuthority } from './sonuvi-admin-authority.mjs';
+import { appendBootstrapAttemptEvent, writeBootstrapAttemptProgress } from './sonuvi-bootstrap-progress.mjs';
 import { FreshInstallClassification, appendFreshInstallJournal, classifyFreshInstallHost, initializeFreshHostLayout, initializeFreshMobileEnvironment, provisionFreshSystemdUnits, renderFreshSystemdUnits, writeFreshInstallState } from './sonuvi-fresh-install.mjs';
 import { makeTreeReadOnly, verifyReleaseArtifact } from './release-artifact.mjs';
+import { assertReleaseTargetRuntime, inspectExternalExecutables } from './release-runtime-preflight.mjs';
 
 const execFile = promisify(execFileCallback);
 export const TARGET_INSTALLER_VERSION = '1.0.0';
-export const TARGET_PATHS = Object.freeze({ layoutRoot: '/opt/sonuvi', stateRoot: '/var/lib/sonuvi', unitRoot: '/etc/systemd/system', bootstrapReleaseRoot: '/var/lib/sonuvi-bootstrap/releases' });
+export const TARGET_PATHS = Object.freeze({ layoutRoot: '/opt/sonuvi', stateRoot: '/var/lib/sonuvi', unitRoot: '/etc/systemd/system', bootstrapReleaseRoot: '/var/lib/sonuvi-bootstrap/releases', bootstrapAttemptRoot: '/var/lib/sonuvi-bootstrap/attempts' });
 export const TARGET_UNITS = Object.freeze(['sonuvi-api.service', 'sonuvi-web.service']);
 export const TARGET_SERVICE_ACCOUNT = 'sonuvi';
 // These are the only application-writable state locations. Nested podcast
@@ -124,31 +126,73 @@ function validateRequest(request) {
   return Object.freeze({ attemptId: bootstrapAttemptId(request.attemptId), targetIdentity: identity(request.targetIdentity), releaseId: releaseId(request.releaseId), serverIdentity: serverIdentity(request.serverIdentity) });
 }
 
+/** Recheck the exact packaged runtime and fixed Debian executable set before activation. */
+export async function verifyFixedTargetPrerequisites({ manifest, runtime = process, find } = {}) {
+  assertReleaseTargetRuntime({ manifest, runtime });
+  const external = await inspectExternalExecutables({ manifest, ...(find ? { find } : {}) });
+  if (!external.ok) throw new Error(`runtime_prerequisites_missing:${external.missing.join(',')}`);
+  return external;
+}
+
 /**
  * Root-only, local first-install transaction. Its request contains identities
  * only: release source, service names, paths, commands, and environment are
  * fixed by this module. It is deliberately not a network service.
  */
-export async function runFixedTargetInstallation({ request, paths = TARGET_PATHS, platform = process.platform, architecture = process.arch, uid = typeof process.getuid === 'function' ? process.getuid() : null, systemd = createFixedSystemd(), serviceAccount = createFixedServiceAccount(), ownership = provisionWritableStateOwnership, configurationAccess = provisionServiceReadableConfiguration, activationStateAccess = provisionServiceReadableActivationState, verifyArtifact = verifyReleaseArtifact, health = null, administratorAuthorityFactory = (stateRoot) => new AdministratorAuthority({ stateRoot }) } = {}) {
+export async function runFixedTargetInstallation({ request, paths = TARGET_PATHS, platform = process.platform, architecture = process.arch, uid = typeof process.getuid === 'function' ? process.getuid() : null, systemd = createFixedSystemd(), serviceAccount = createFixedServiceAccount(), ownership = provisionWritableStateOwnership, configurationAccess = provisionServiceReadableConfiguration, activationStateAccess = provisionServiceReadableActivationState, verifyArtifact = verifyReleaseArtifact, verifyPrerequisites = verifyFixedTargetPrerequisites, health = null, administratorAuthorityFactory = (stateRoot) => new AdministratorAuthority({ stateRoot }) } = {}) {
   const input = validateRequest(request);
   if (!nodeCompatible()) throw new Error('node_runtime_unsupported');
-  const roots = Object.fromEntries(Object.entries(paths).map(([key, value]) => [key, absolute(value, key)]));
+  const configuredPaths = {
+    ...TARGET_PATHS,
+    ...paths,
+    bootstrapAttemptRoot: paths?.bootstrapAttemptRoot || path.join(path.dirname(paths?.bootstrapReleaseRoot || TARGET_PATHS.bootstrapReleaseRoot), 'attempts'),
+  };
+  const roots = Object.fromEntries(Object.entries(configuredPaths).map(([key, value]) => [key, absolute(value, key)]));
   const source = path.join(roots.bootstrapReleaseRoot, input.releaseId);
   if (!await exists(source)) throw new Error('verified_release_not_staged');
   const preflight = await classifyFreshInstallHost({ layoutRoot: roots.layoutRoot, stateRoot: roots.stateRoot, platform, architecture, hasSystemd: true, uid, availableBytes: await availableBytes(path.dirname(roots.stateRoot)) });
   if (preflight.classification !== FreshInstallClassification.FRESH_ELIGIBLE) throw new Error(`fresh_host_refused:${preflight.classification}`);
-  const sourceManifest = await verifyArtifact({ artifactRoot: source });
-  if (sourceManifest.releaseId !== input.releaseId) throw new Error('staged_release_identity_mismatch');
-  await serviceAccount.ensure();
-  const initialized = await initializeFreshHostLayout({ layoutRoot: roots.layoutRoot, stateRoot: roots.stateRoot, serverIdentity: input.serverIdentity });
-  await initializeFreshMobileEnvironment({ stateRoot: roots.stateRoot });
-  const administratorAuthority = administratorAuthorityFactory(roots.stateRoot);
-  if (!administratorAuthority || typeof administratorAuthority.provisionSigningMaterial !== 'function') throw new Error('administrator authority provisioning is unavailable');
-  await administratorAuthority.provisionSigningMaterial();
-  await ownership({ stateRoot: roots.stateRoot });
-  await configurationAccess({ stateRoot: roots.stateRoot });
   const destination = path.join(roots.layoutRoot, 'releases', input.releaseId);
+  let stage = 'release_verification';
+  const progress = async (nextStage, state, error = null) => appendBootstrapAttemptEvent({
+    attemptId: input.attemptId,
+    targetIdentity: input.targetIdentity,
+    root: roots.bootstrapAttemptRoot,
+    event: { requestId: input.attemptId, stage: nextStage, state, at: new Date().toISOString(), ...(error ? { error } : {}) },
+  });
+  const persistProgress = async (phase, errorCode = null) => writeBootstrapAttemptProgress({
+    attemptId: input.attemptId,
+    targetIdentity: input.targetIdentity,
+    releaseId: input.releaseId,
+    phase,
+    errorCode,
+    root: roots.bootstrapAttemptRoot,
+  });
   try {
+    await persistProgress('release_acquisition');
+    await progress('preflight', 'passed');
+    await progress('release_acquisition', 'passed');
+    await progress(stage, 'started');
+    const sourceManifest = await verifyArtifact({ artifactRoot: source });
+    if (sourceManifest.releaseId !== input.releaseId) throw new Error('staged_release_identity_mismatch');
+    await progress(stage, 'passed');
+    stage = 'dependency_setup';
+    await persistProgress(stage);
+    await progress(stage, 'started');
+    await verifyPrerequisites({ manifest: sourceManifest.manifest });
+    await progress(stage, 'passed');
+    stage = 'configuration';
+    await persistProgress(stage);
+    await progress(stage, 'started');
+    await serviceAccount.ensure();
+    const initialized = await initializeFreshHostLayout({ layoutRoot: roots.layoutRoot, stateRoot: roots.stateRoot, serverIdentity: input.serverIdentity });
+    await initializeFreshMobileEnvironment({ stateRoot: roots.stateRoot });
+    const administratorAuthority = administratorAuthorityFactory(roots.stateRoot);
+    if (!administratorAuthority || typeof administratorAuthority.provisionSigningMaterial !== 'function') throw new Error('administrator authority provisioning is unavailable');
+    await administratorAuthority.provisionSigningMaterial();
+    await ownership({ stateRoot: roots.stateRoot });
+    await configurationAccess({ stateRoot: roots.stateRoot });
+    await progress(stage, 'passed');
     await fs.cp(source, destination, { recursive: true, errorOnExist: true, force: false, mode: fsConstants.COPYFILE_FICLONE });
     // Candidate staging is intentionally private to the bootstrap user. The
     // installed immutable release must instead be readable and traversable by
@@ -165,13 +209,24 @@ export async function runFixedTargetInstallation({ request, paths = TARGET_PATHS
       rollback: async () => { for (const unit of [...TARGET_UNITS].reverse()) await systemd.disableAndStop(unit); },
       makeActivationStateReadable: async () => activationStateAccess({ stateRoot: roots.stateRoot }),
     };
+    stage = 'checkpoint';
+    await persistProgress(stage);
+    await progress(stage, 'started');
     const activation = await activateFirstRelease({ layoutRoot: roots.layoutRoot, stateRoot: roots.stateRoot, releaseId: input.releaseId, attemptId: input.attemptId, targetIdentity: input.targetIdentity, adapter, verifyArtifact });
+    await progress(stage, 'passed');
+    await progress('activation', 'passed');
+    await progress('health_verification', 'passed');
     const waiting = { ...activation.state, phase: 'awaiting-administrator-enrollment', completedAt: new Date().toISOString() };
     await writeFreshInstallState({ statePath: initialized.statePath, state: waiting });
     await appendFreshInstallJournal({ journalPath: initialized.journalPath, attemptId: input.attemptId, targetIdentity: input.targetIdentity, event: { requestId: input.attemptId, stage: 'administrator_enrollment', state: 'waiting', at: waiting.completedAt } });
+    await persistProgress('awaiting-administrator-enrollment');
+    await progress('administrator_enrollment', 'waiting');
     return Object.freeze({ state: 'awaiting-administrator-enrollment', releaseId: activation.releaseId, layoutRoot: initialized.layoutRoot, stateRoot: initialized.stateRoot });
   } catch (error) {
     await fs.rm(destination, { recursive: true, force: true }).catch(() => {});
+    const errorCode = stage === 'dependency_setup' ? 'runtime_prerequisites_failed' : 'target_installation_failed';
+    await persistProgress('recoverable-incomplete', errorCode).catch(() => {});
+    await progress(stage, 'failed', { code: errorCode, recoverable: true }).catch(() => {});
     throw error;
   }
 }

@@ -45,6 +45,23 @@ export const MOODE_SSH_USER = process.env.MOODE_SSH_USER || moodeCfg?.sshUser ||
 export const MOODE_SSH_HOST = process.env.MOODE_SSH_HOST || moodeCfg?.sshHost || mpdCfg?.host || 'moode.local';
 export const PORT = Number(process.env.PORT || MASTER_CONFIG?.ports?.api || '3000');
 
+/**
+ * A fresh Server has no approved TLS listener yet. Bind its authenticated API
+ * to loopback so administrator/controller material can only traverse the
+ * pinned SSH direct-tcpip path. Established deployments retain their existing
+ * listener unless an operator explicitly configures a reviewed host value.
+ */
+export function resolveApiListenHost({ freshInstall = FRESH_INSTALL_MODE, override = process.env.SONUVI_API_LISTEN_HOST } = {}) {
+  const requested = String(override || '').trim();
+  if (freshInstall && requested && requested !== '127.0.0.1') {
+    throw new Error('fresh Sonuvi installation API must bind to 127.0.0.1');
+  }
+  const selected = freshInstall ? '127.0.0.1' : (requested || '0.0.0.0');
+  if (!['127.0.0.1', '0.0.0.0'].includes(selected)) throw new Error('SONUVI_API_LISTEN_HOST must be 127.0.0.1 or 0.0.0.0');
+  return selected;
+}
+export const API_LISTEN_HOST = resolveApiListenHost();
+
 export const MOODE_BASE_URL = normalizeMoodeBaseUrl(
   process.env.MOODE_BASE_URL || moodeCfg?.baseUrl,
   MOODE_SSH_HOST,

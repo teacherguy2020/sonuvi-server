@@ -58,6 +58,8 @@ async function createFixture(t) {
   await write(source, 'scripts/lastfm-authorize.mjs', 'console.log("lastfm");\n');
   await write(source, 'scripts/export-peppymeter-skins.mjs', 'console.log("skins");\n');
   await write(source, 'scripts/sonuvi-bootstrap-helper.mjs', 'console.log("bootstrap helper");\n');
+  await write(source, 'scripts/sonuvi-bootstrap-status.mjs', 'console.log("bootstrap status");\n');
+  await write(source, 'scripts/sonuvi-release-stage.mjs', 'console.log("release stage");\n');
   await write(source, 'scripts/sonuvi-admin-bootstrap.mjs', 'console.log("administrator bootstrap");\n');
   await write(source, 'scripts/sonuvi-debian-node-bootstrap.sh', '#!/bin/sh\nexit 0\n');
   await write(source, 'scripts/sonuvi-target-installer.mjs', 'console.log("target installer");\n');

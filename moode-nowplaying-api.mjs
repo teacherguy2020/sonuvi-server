@@ -231,7 +231,7 @@ if (!globalThis.File && NodeFile) globalThis.File = NodeFile;
 import { ProxyAgent, setGlobalDispatcher, Agent } from 'undici';
 import {
   FFMPEG, CURL, MPD_PLAYLIST_DIR, FAVORITES_PATH, MOODE_SSH_USER, MOODE_SSH_HOST, PORT,
-  MOODE_BASE_URL, PUBLIC_BASE_URL, LOCAL_ADDRESS, MPD_HOST, MPD_PORT, MOODE_USB_PREFIX, FRESH_INSTALL_MODE,
+  MOODE_BASE_URL, PUBLIC_BASE_URL, LOCAL_ADDRESS, MPD_HOST, MPD_PORT, MOODE_USB_PREFIX, FRESH_INSTALL_MODE, API_LISTEN_HOST,
   PI4_MOUNT_BASE, METAFLAC, TRACK_KEY, LASTFM_API_KEY, LASTFM_API_SECRET, LASTFM_SESSION_KEY, LASTFM_MPD_MODE,
   ENABLE_ALEXA, TRANSCODE_TRACKS, TRACK_CACHE_DIR,
   FAVORITES_PLAYLIST_NAME, FAVORITES_REFRESH_MS, ITUNES_SEARCH_URL, ITUNES_COUNTRY,
@@ -9965,7 +9965,7 @@ app.post('/youtube/queue', async (req, res) => {
   }
 });
 
-app.listen(PORT, '0.0.0.0', () => {
+app.listen(PORT, API_LISTEN_HOST, () => {
   log.debug(`moOde now-playing server running on port ${PORT}`);
   log.debug(`Endpoint: http://${LOCAL_ADDRESS}:${PORT}/now-playing`);
   log.debug(`Endpoint: http://${LOCAL_ADDRESS}:${PORT}/next-up`);
