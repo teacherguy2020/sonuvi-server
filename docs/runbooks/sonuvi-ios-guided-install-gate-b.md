@@ -49,8 +49,11 @@ SSH, or arbitrary-command capability.
   state is never treated as empty.
 - `initializeFreshHostLayout` creates Sonuvi-owned state only after a fresh
   classification. Its initial configuration is non-secret, localhost-only,
-  uses an empty local library, and has no moOde, production host, or copied
-  credential dependency.
+  uses an empty local library, pins its inert MPD target to loopback, and has
+  no moOde, production host, or copied credential dependency. At runtime,
+  `environment: "fresh-install"` selects a stable empty Browse Index v2 rather
+  than attempting an MPD/moOde catalog refresh; normal established installs
+  retain the MPD-backed provider.
 - `renderFreshSystemdUnits` and `provisionFreshSystemdUnits` materialize only
   the reviewed API/web unit files and refuse to overwrite a different unit.
   The future privileged transport still owns `daemon-reload`, enable, and

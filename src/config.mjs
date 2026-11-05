@@ -6,6 +6,10 @@ import { loadProtectedLastfmEnvironment } from './lib/protected-runtime-secrets.
 
 export const RUNTIME_STATE_PATHS = runtimeStatePaths();
 export const MASTER_CONFIG = loadConfigOrNull();
+// A fresh Server deliberately starts without a playback destination. This is
+// configuration state, not an operator-controlled environment override: the
+// root-managed fresh configuration is the only way to enable this mode.
+export const FRESH_INSTALL_MODE = String(MASTER_CONFIG?.environment || '').trim() === 'fresh-install';
 const PROTECTED_LASTFM = loadProtectedLastfmEnvironment({ statePaths: RUNTIME_STATE_PATHS });
 
 const apiNode = (MASTER_CONFIG?.nodes || []).find(n => n?.role === 'api' || n?.role === 'both') || null;

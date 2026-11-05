@@ -9,6 +9,7 @@ import { AdministratorAuthority } from '../src/lib/sonuvi-admin-authority.mjs';
 import { runAdministratorBootstrap } from '../src/lib/sonuvi-admin-bootstrap.mjs';
 import { FirstAdministratorEnrollment, firstAdministratorClaimMessage } from '../src/lib/sonuvi-bootstrap-security.mjs';
 import { FRESH_INSTALL_STATE_CONTRACT } from '../src/lib/sonuvi-fresh-install.mjs';
+import { createRuntimeBrowseIndexProvider } from '../src/lib/fresh-install-browse-index.mjs';
 import { verifyMobileToken } from '../src/lib/mobile-auth.mjs';
 import { registerMobileRoutes } from '../src/routes/mobile.routes.mjs';
 
@@ -78,13 +79,21 @@ test('administrator authorizes exactly one controller through the existing API a
   const claimed = await runAdministratorBootstrap({ stateRoot: root, request: administratorClaim(created.enrollmentToken) });
   const authority = new AdministratorAuthority({ stateRoot: root });
   const app = appFixture();
+  let mpdCalls = 0;
+  const freshCatalog = createRuntimeBrowseIndexProvider({
+    freshInstall: true,
+    getMpdBrowseIndex: async () => {
+      mpdCalls += 1;
+      throw new Error('fresh controller catalog must not reach MPD');
+    },
+  });
   registerMobileRoutes(app, {
     enabled: true,
     apiSecret: 'lab-mobile-api-secret',
     trackIdSecret: 'lab-mobile-track-secret',
     administratorAuthority: authority,
     administratorStateRoot: root,
-    getBrowseIndex: async () => ({ builtAt: '2026-11-04T00:00:00.000Z', tracks: [] }),
+    getBrowseIndex: freshCatalog.getBrowseIndex,
   });
   const unauthorized = response();
   await app.routes.get('POST /v1/admin/bootstrap/first-controller')(request({ body: { deviceId: 'controller-0123456789' } }), unauthorized);
@@ -99,6 +108,8 @@ test('administrator authorizes exactly one controller through the existing API a
   const controllerRoute = response();
   await app.routes.get('GET /v1/mobile/catalog/stats')(request({ headers: { authorization: `Bearer ${paired.body.accessToken}` } }), controllerRoute);
   assert.equal(controllerRoute.statusCode, 200);
+  assert.deepEqual(controllerRoute.body.counts, { tracks: 0, albums: 0, artists: 0 });
+  assert.equal(mpdCalls, 0);
   const controllerAdmin = response();
   await app.routes.get('GET /v1/admin/bootstrap/status')(request({ headers: { authorization: `Bearer ${paired.body.accessToken}` } }), controllerAdmin);
   assert.equal(controllerAdmin.statusCode, 401);

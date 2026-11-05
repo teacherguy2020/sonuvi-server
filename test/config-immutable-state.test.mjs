@@ -21,6 +21,9 @@ async function loadConfigInChild(env, { cwd = repositoryRoot } = {}) {
     '  mobileVideoCatalog: config.MOBILE_VIDEO_CATALOG_PATH,',
     '  podcastLog: config.PODCAST_DL_LOG,',
     '  mobilePushTokens: config.MOBILE_PUSH_TOKENS_PATH,',
+    '  freshInstall: config.FRESH_INSTALL_MODE,',
+    '  mpdHost: config.MPD_HOST,',
+    '  moodeHost: config.MOODE_SSH_HOST,',
     '}));',
   ].join('\n');
   return execFile(process.execPath, ['--input-type=module', '-e', program, configModuleUrl], {
@@ -63,9 +66,31 @@ test('immutable config redirects legacy-relative writable overrides into shared 
   assert.equal(paths.mobileVideoCatalog, path.join(sharedRoot, 'data', 'catalog', 'mobile.json'));
   assert.equal(paths.podcastLog, path.join(sharedRoot, 'cache', 'podcasts', 'download-log.ndjson'));
   assert.equal(paths.mobilePushTokens, path.join(sharedRoot, 'protected', 'tokens', 'mobile.json'));
-  for (const value of Object.values(paths)) {
+  for (const value of Object.values(paths).filter((value) => typeof value === 'string')) {
     assert.equal(value === releaseRoot || value.startsWith(`${releaseRoot}${path.sep}`), false);
   }
+});
+
+test('fresh immutable configuration selects the local empty-library runtime mode', async (t) => {
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'sonuvi-fresh-config-'));
+  t.after(() => fs.rm(temporary, { recursive: true, force: true }));
+  const releaseRoot = path.join(temporary, 'release');
+  const configPath = path.join(temporary, 'config.json');
+  await fs.mkdir(releaseRoot);
+  await fs.writeFile(configPath, JSON.stringify(configFixture({
+    environment: 'fresh-install',
+    mpd: { host: '127.0.0.1', port: 6600 },
+  })), 'utf8');
+
+  const { stdout } = await loadConfigInChild({
+    NOW_PLAYING_CONFIG_PATH: configPath,
+    SONUVI_STATE_ROOT: path.join(temporary, 'state'),
+    SONUVI_FRESH_INSTALL: '0',
+  }, { cwd: releaseRoot });
+  const runtime = JSON.parse(stdout);
+  assert.equal(runtime.freshInstall, true);
+  assert.equal(runtime.mpdHost, '127.0.0.1');
+  assert.equal(runtime.moodeHost, '127.0.0.1');
 });
 
 test('immutable config rejects relative writable overrides that escape shared state', async (t) => {

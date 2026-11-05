@@ -5,13 +5,23 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { CapabilityDeniedError } from '../src/lib/runtime-capabilities.mjs';
-import { createBrowseIndexAdapter, parseMpdDuration } from '../src/lib/browse-index.mjs';
+import { createBrowseIndexAdapter, createEmptyBrowseIndex, parseMpdDuration } from '../src/lib/browse-index.mjs';
 
 test('browse index parses MPD colon-formatted durations', () => {
   assert.equal(parseMpdDuration('7:21'), 441);
   assert.equal(parseMpdDuration('1:02:03'), 3723);
   assert.equal(parseMpdDuration('180'), 180);
   assert.equal(parseMpdDuration(''), 0);
+});
+
+test('empty browse index is a complete v2 catalog with no MPD dependency', () => {
+  const index = createEmptyBrowseIndex({ builtAt: '2026-11-05T00:00:00.000Z' });
+  assert.equal(index.schema, 'now-playing.browse-index.v2');
+  assert.equal(index.builtAt, '2026-11-05T00:00:00.000Z');
+  assert.deepEqual(index.counts, { artists: 0, albums: 0, tracks: 0 });
+  assert.deepEqual(index.artists, []);
+  assert.deepEqual(index.albums, []);
+  assert.deepEqual(index.tracks, []);
 });
 
 async function temporaryFixtureRoot(t) {

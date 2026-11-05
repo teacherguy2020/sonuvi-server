@@ -42,6 +42,8 @@ test('initial layout has a non-production, secret-free configuration and safe mo
   const initialized = await initializeFreshHostLayout({ ...f, serverIdentity: 'sonuvi-ios-setup-01' });
   const config = JSON.parse(await fs.readFile(initialized.configPath, 'utf8'));
   assert.equal(config.nodes[0].ip, '127.0.0.1');
+  assert.equal(config.mpd.host, '127.0.0.1');
+  assert.equal(config.mpd.port, 6600);
   assert.equal(config.paths.musicLibraryRoot, '/var/lib/sonuvi/empty-library');
   assert.equal(config.alexa.enabled, false);
   assert.equal((await fs.stat(initialized.configPath)).mode & 0o777, 0o600);

@@ -231,7 +231,7 @@ if (!globalThis.File && NodeFile) globalThis.File = NodeFile;
 import { ProxyAgent, setGlobalDispatcher, Agent } from 'undici';
 import {
   FFMPEG, CURL, MPD_PLAYLIST_DIR, FAVORITES_PATH, MOODE_SSH_USER, MOODE_SSH_HOST, PORT,
-  MOODE_BASE_URL, PUBLIC_BASE_URL, LOCAL_ADDRESS, MPD_HOST, MPD_PORT, MOODE_USB_PREFIX,
+  MOODE_BASE_URL, PUBLIC_BASE_URL, LOCAL_ADDRESS, MPD_HOST, MPD_PORT, MOODE_USB_PREFIX, FRESH_INSTALL_MODE,
   PI4_MOUNT_BASE, METAFLAC, TRACK_KEY, LASTFM_API_KEY, LASTFM_API_SECRET, LASTFM_SESSION_KEY, LASTFM_MPD_MODE,
   ENABLE_ALEXA, TRANSCODE_TRACKS, TRACK_CACHE_DIR,
   FAVORITES_PLAYLIST_NAME, FAVORITES_REFRESH_MS, ITUNES_SEARCH_URL, ITUNES_COUNTRY,
@@ -273,7 +273,8 @@ import { registerQueueRoutes } from './src/routes/queue.routes.mjs';
 import { registerTrackRoutes } from './src/routes/track.routes.mjs';
 import { registerArtRoutes, serveTrackArtwork } from './src/routes/art.routes.mjs';
 import { registerMobileRoutes } from './src/routes/mobile.routes.mjs';
-import { getBrowseIndex } from './src/lib/browse-index.mjs';
+import { getBrowseIndex as getMpdBrowseIndex } from './src/lib/browse-index.mjs';
+import { createRuntimeBrowseIndexProvider } from './src/lib/fresh-install-browse-index.mjs';
 import { buildMobileCatalog } from './src/lib/mobile-track-identity.mjs';
 import { createSourceAudioProbe } from './src/lib/source-audio.mjs';
 import { createLiveRadioAudioProbe } from './src/lib/live-radio-audio.mjs';
@@ -9183,6 +9184,11 @@ registerArtRoutes(app, {
 
 let mobileVibeStarter = null;
 const firstAdministratorAuthority = new AdministratorAuthority({ stateRoot: RUNTIME_STATE_PATHS.stateRoot });
+const runtimeBrowseIndex = createRuntimeBrowseIndexProvider({
+  freshInstall: FRESH_INSTALL_MODE,
+  getMpdBrowseIndex,
+});
+const getBrowseIndex = runtimeBrowseIndex.getBrowseIndex;
 
 registerMobileRoutes(app, {
   enabled: MOBILE_API_ENABLED,

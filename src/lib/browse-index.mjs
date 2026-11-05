@@ -18,6 +18,24 @@ export function parseMpdDuration(value) {
   return 0;
 }
 
+/**
+ * A fresh Server has no configured MPD destination or library yet. Keep that
+ * state explicit and structurally identical to a normal v2 index so callers
+ * can render an empty catalog without attempting an MPD connection.
+ */
+export function createEmptyBrowseIndex({ mpdHost = '', builtAt = new Date().toISOString() } = {}) {
+  return Object.freeze({
+    schema: 'now-playing.browse-index.v2',
+    builtAt: String(builtAt),
+    dbUpdateAt: '',
+    mpdHost: String(mpdHost || ''),
+    counts: Object.freeze({ artists: 0, albums: 0, tracks: 0 }),
+    artists: Object.freeze([]),
+    albums: Object.freeze([]),
+    tracks: Object.freeze([]),
+  });
+}
+
 function norm(s = '') {
   return String(s || '').trim().toLowerCase();
 }
