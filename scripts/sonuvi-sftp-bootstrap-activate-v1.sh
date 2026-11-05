@@ -101,12 +101,20 @@ expected_tree='.
 ./etc/sonuvi
 ./etc/sonuvi/release-trust-anchors.json
 ./scripts
+./scripts/sonuvi-bootstrap-status.mjs
 ./scripts/sonuvi-debian-node-bootstrap.sh
 ./scripts/sonuvi-release-stage.mjs
 ./src
 ./src/lib
+./src/lib/atomic-file.mjs
 ./src/lib/public-web-root.mjs
 ./src/lib/release-artifact.mjs
+./src/lib/runtime-capabilities.mjs
+./src/lib/runtime-config-security.mjs
+./src/lib/sonuvi-bootstrap-contract.mjs
+./src/lib/sonuvi-bootstrap-progress.mjs
+./src/lib/sonuvi-bootstrap-status.mjs
+./src/lib/sonuvi-fresh-install.mjs
 ./src/lib/sonuvi-gate-c-release.mjs
 ./src/lib/sonuvi-gate-c-staging.mjs'
 observed_tree="$(cd "$temporary_root" && find . -print | LC_ALL=C sort)"

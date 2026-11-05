@@ -134,6 +134,17 @@ The new fixed root status helper consumes only:
 { "operation": "status", "attemptId": "boot_<opaque-id>" }
 ```
 
+Before a release has been activated, iOS invokes that operation at the fixed
+root-owned bootstrap-kit path:
+
+```text
+/var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-bootstrap-status.mjs
+```
+
+After activation, the same status helper is also part of the immutable Server
+release. Both copies are fixed members of `sonuvi.gate-c-bootstrap-kit.v1` and
+the signed release inventory; no status command or path is supplied by iOS.
+
 It returns `sonuvi.bootstrap-status.v1` with immutable attempt/target/release
 identity, phase, `next`, terminal flag, and the combined redacted event
 snapshot. It creates no state, starts no service, and cannot duplicate an

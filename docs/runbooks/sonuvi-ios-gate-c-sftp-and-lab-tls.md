@@ -90,7 +90,7 @@ It is delivered as exact application-owned stdin, never selected by the user
 or fetched from the target. Its shell command is one of these fixed forms:
 
 ```text
-capsule SHA-256: 25f39ab0b1aaeb6a697a3e90572f438dbd2514de22c5098a01603b9c98fe199b
+capsule SHA-256: 56ccc9df3888b4360da44939bf26a26384cf5219bd076130437b5741713a8bfd
 ```
 
 ```text
@@ -123,6 +123,27 @@ copy into root ownership first. The capsule also verifies root-side free space
 before copying/extracting. It requires ordinary Debian base utilities
 (`sh`, `sudo`, `getent`, `dd`, `sha256sum`, `tar`, `find`, `stat`, and `df`),
 not Node.js or npm.
+
+The fixed extracted bootstrap-kit inventory is versioned as
+`sonuvi.gate-c-bootstrap-kit.v1`. It includes the release-stage closure and
+the complete reconnect-safe status closure:
+
+```text
+scripts/sonuvi-bootstrap-status.mjs
+src/lib/sonuvi-bootstrap-status.mjs
+src/lib/sonuvi-bootstrap-progress.mjs
+src/lib/sonuvi-fresh-install.mjs
+src/lib/atomic-file.mjs
+src/lib/runtime-capabilities.mjs
+src/lib/runtime-config-security.mjs
+src/lib/sonuvi-bootstrap-contract.mjs
+```
+
+`scripts/sonuvi-bootstrap-status.mjs` is deliberately also present in the
+immutable Server release. Before activation, iOS invokes the fixed bootstrap
+copy; after activation, the release preserves the same durable-status behavior.
+The actual packaged kit is verified against this exact inventory before it is
+archived, and the capsule independently rejects any different extracted tree.
 
 After successful prerequisite activation, the only release staging entrypoint
 is the fixed root-owned path:
