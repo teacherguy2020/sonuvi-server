@@ -192,18 +192,19 @@ root-helper container, and the current signed immutable archive. Its exact
 credentials path, operation strings, release identity, helper hashes, reset
 procedure, and validated failure semantics are in
 [the archive/status fixture handoff](sonuvi-ios-gate-c-archive-status-fixture.md).
-The existing published kit/archive predate the status-entrypoint syntax fix;
-they must be rebuilt and signed as a new immutable bundle before iOS uses their
-status helper in a fresh-install or physical-iPad acceptance.
+The current signed lab bundle includes the corrected status helper in both the
+bootstrap kit and immutable release. Its fixed HTTPS identity, complete hashes,
+and independent trust requirements are in the
+[lab-distribution handoff](sonuvi-ios-gate-c-lab-distribution.md). Older
+immutable artifacts remain preserved but are not the current iOS input.
 
 ## Remaining acceptance requirements
 
-1. Release engineering must publish the real pinned Ed25519 public key, signed
-   metadata, immutable tar, and signed bootstrap kit as one reviewed release
-   bundle. No public key or production distribution URL has been invented.
-2. iOS must add typed SFTP bootstrap-kit transfer, the reviewed fixed
+1. iOS must retrieve and independently verify the current lab-only signed
+   bundle through the pinned distribution endpoint, then add typed SFTP
+   bootstrap-kit transfer, the reviewed fixed
    activation capsule, framed archive streaming, and fixed status commands to
    its existing SwiftNIO adapter; no UI redesign is necessary.
-3. A fresh minimal Debian ARM64 clone—separate from the preserved B2 VM and
+2. A fresh minimal Debian ARM64 clone—separate from the preserved B2 VM and
    baseline—must prove the full native iPad flow. The preserved B2 VM is only
    suitable for read-only tunnel verification.

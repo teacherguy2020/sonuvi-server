@@ -61,20 +61,15 @@ protected temporary location, validates all requirements, extracts with
 path-containment/no-follow checks, then makes the final tree read-only.
 
 ```text
-releaseId: sonuvi-152057e2d169e6d586a36cea1d3f6c1c1316781b14a72035eec625eb3c45b421
+releaseId: sonuvi-7bfc8c4eb23ef0e00c7718bb4ae5089c42eb6c65fa29c2eb1ea097a080d5c5e7
 archive:   53,431,808 bytes
-sha256:    171943aed7dc84deaa50861a340f151c7e67e5a43c113cabcf81779a73147574
+sha256:    f5375a722c4e82666577899231215f387c2e96751461d1383d3ac3d29ff06f97
 ```
 
-> **Published-artifact refresh required:** this fixture corrected a syntax
-> defect in the status entrypoint after the above immutable archive and
-> bootstrap kit were published. The fixture stages the archive to exercise the
-> transfer contract, but it packages the corrected workspace helper for status
-> acceptance. The published kit and archive both contain the pre-fix status
-> script and fail `node --check`. Do not use them for iOS status acceptance;
-> rebuild, independently verify, sign, and publish a new immutable bundle with
-> new identities before fresh-install or physical-iPad acceptance. The old
-> signed artifacts remain preserved and unmodified.
+> **Published artifact:** the above immutable bundle was rebuilt after the
+> status-entrypoint syntax correction. The actual extracted release and
+> bootstrap-kit copies both pass `node --check`; the older signed artifacts
+> remain preserved and unmodified.
 
 Success returns `ok: true` and `state: "staged"`; a complete retry returns
 `state: "already_staged"` without a second extraction. Malformed JSON,
