@@ -721,6 +721,9 @@ export async function buildReleaseArtifact({
     }
     await verifyReleaseRuntimeImportClosure({ artifactRoot: stage });
     await copyTree(dependencies.nodeModules, path.join(stage, 'node_modules'));
+    // npm command shims are build-time conveniences. Runtime loads package
+    // imports directly; omitting .bin avoids shipping mutable CLI symlinks.
+    await fs.rm(path.join(stage, 'node_modules', '.bin'), { recursive: true, force: true });
     const publicRoot = path.join(stage, 'public');
     await buildPublicWebRoot({ sourceRoot: snapshot.root, outputRoot: publicRoot });
     const initialPublicInventory = await assertPublicRootIntegrity(publicRoot);
