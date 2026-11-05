@@ -10,7 +10,7 @@ if (process.getuid?.() !== 0) {
   process.exitCode = 77;
 } else {
   try {
-    const request = JSON.parse(await fs.readFile(0, 'utf8'));
+    const request = JSON.parse(await fs.readFile('/dev/stdin', 'utf8'));
     const result = await runFixedTargetInstallation({ request });
     process.stdout.write(`${JSON.stringify({ ok: true, ...result })}\n`);
   } catch (error) {
