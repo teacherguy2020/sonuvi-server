@@ -7,11 +7,20 @@ import { AdministratorAuthority } from '../src/lib/sonuvi-admin-authority.mjs';
 import { FirstAdministratorEnrollment } from '../src/lib/sonuvi-bootstrap-security.mjs';
 import { authorizeFirstController } from '../src/lib/sonuvi-first-controller-handoff.mjs';
 import { buildGateB2ReadinessPackage } from '../src/lib/sonuvi-gate-b2-package.mjs';
+import { makeTreeWritableForCleanup } from '../src/lib/release-artifact.mjs';
 import { createFixedServiceAccount, createFixedSystemd, provisionWritableStateOwnership, runFixedTargetInstallation, TARGET_WRITABLE_STATE_DIRECTORIES } from '../src/lib/sonuvi-target-installer.mjs';
 import crypto from 'node:crypto';
 
 const attemptId = 'boot_0123456789abcdef'; const targetIdentity = 'machine_0123456789abcdef';
-async function fixture(t) { const root = await fs.mkdtemp(path.join(os.tmpdir(), 'sonuvi-b2-')); t.after(() => fs.rm(root, { recursive: true, force: true })); return root; }
+async function fixture(t) {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'sonuvi-b2-'));
+  t.after(async () => {
+    const releases = path.join(root, 'opt', 'sonuvi', 'releases');
+    for (const entry of await fs.readdir(releases).catch(() => [])) await makeTreeWritableForCleanup(path.join(releases, entry)).catch(() => {});
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  return root;
+}
 test('first-controller handoff requires an administrator and reuses mobile-only bearer scope', async (t) => {
   const root = await fixture(t); const enrollment = new FirstAdministratorEnrollment({ stateRoot: root }); const issued = await enrollment.create({ attemptId, targetIdentity }); const authority = new AdministratorAuthority({ stateRoot: root }); const admin = await authority.initializeFromClaim({ enrollment, attemptId, targetIdentity, enrollmentToken: issued.enrollmentToken, administratorDeviceId: 'device_admin_0123456789', administratorPublicKey: 'admin-key' }); const adminToken = await authority.issueAccessToken({ administratorId: admin.administratorId });
   const handoff = await authorizeFirstController({ authority, administratorToken: adminToken, mobileApiSecret: 'fixture-mobile-secret', controllerDeviceId: 'controller_0123456789', stateRoot: root }); assert.equal(handoff.scope, 'mobile-api'); assert.equal(handoff.accessToken.includes(adminToken), false);
@@ -34,9 +43,16 @@ test('fixed target installer has no caller-controlled paths or commands', async 
   await fs.mkdir(path.join(staging, 'ops', 'systemd'), { recursive: true });
   await fs.writeFile(path.join(staging, 'ops', 'systemd', 'sonuvi-api.service.in'), 'api=@RELEASE_ID@');
   await fs.writeFile(path.join(staging, 'ops', 'systemd', 'sonuvi-web.service.in'), 'web=@RELEASE_ID@');
-  const calls = []; const systemd = createFixedSystemd({ run: async (args) => { calls.push(args); } });
   const request = { attemptId, targetIdentity, releaseId, serverIdentity: 'sonuvi-lab-01' };
   const paths = { layoutRoot: path.join(root, 'opt', 'sonuvi'), stateRoot: path.join(root, 'var', 'lib', 'sonuvi'), unitRoot: path.join(root, 'etc', 'systemd', 'system'), bootstrapReleaseRoot: path.join(root, 'bootstrap', 'releases') };
+  const calls = []; const systemd = createFixedSystemd({ run: async (args) => {
+    if (args[0] === 'enable') {
+      const installed = path.join(paths.layoutRoot, 'releases', releaseId);
+      assert.equal((await fs.stat(installed)).mode & 0o777, 0o555);
+      assert.equal((await fs.stat(path.join(installed, 'ops', 'systemd', 'sonuvi-api.service.in'))).mode & 0o777, 0o444);
+    }
+    calls.push(args);
+  } });
   const serviceAccount = { ensure: async () => 'fixture' };
   const ownershipCalls = []; const ownership = async ({ stateRoot }) => { ownershipCalls.push(stateRoot); };
   const result = await runFixedTargetInstallation({ request, paths, platform: 'linux', architecture: 'arm64', uid: 0, systemd, serviceAccount, ownership, health: async () => true, verifyArtifact: async ({ artifactRoot }) => ({ releaseId, artifactRoot }) });

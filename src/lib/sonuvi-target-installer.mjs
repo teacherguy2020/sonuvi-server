@@ -6,7 +6,7 @@ import path from 'node:path';
 
 import { activateFirstRelease } from './sonuvi-first-release.mjs';
 import { FreshInstallClassification, classifyFreshInstallHost, initializeFreshHostLayout, provisionFreshSystemdUnits, renderFreshSystemdUnits } from './sonuvi-fresh-install.mjs';
-import { verifyReleaseArtifact } from './release-artifact.mjs';
+import { makeTreeReadOnly, verifyReleaseArtifact } from './release-artifact.mjs';
 
 const execFile = promisify(execFileCallback);
 export const TARGET_INSTALLER_VERSION = '1.0.0';
@@ -111,6 +111,10 @@ export async function runFixedTargetInstallation({ request, paths = TARGET_PATHS
   const destination = path.join(roots.layoutRoot, 'releases', input.releaseId);
   try {
     await fs.cp(source, destination, { recursive: true, errorOnExist: true, force: false, mode: fsConstants.COPYFILE_FICLONE });
+    // Candidate staging is intentionally private to the bootstrap user. The
+    // installed immutable release must instead be readable and traversable by
+    // the unprivileged service account before its systemd units can start.
+    await makeTreeReadOnly(destination);
     await verifyArtifact({ artifactRoot: destination });
     const [apiTemplate, webTemplate] = await Promise.all([fs.readFile(path.join(destination, 'ops/systemd/sonuvi-api.service.in'), 'utf8'), fs.readFile(path.join(destination, 'ops/systemd/sonuvi-web.service.in'), 'utf8')]);
     const units = renderFreshSystemdUnits({ apiTemplate, webTemplate, releaseId: input.releaseId });
