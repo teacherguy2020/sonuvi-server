@@ -46,6 +46,22 @@ test('fixed target installer has no caller-controlled paths or commands', async 
   assert.deepEqual(ownershipCalls, [paths.stateRoot]);
   await assert.rejects(runFixedTargetInstallation({ request: { ...request, command: 'id' }, paths, platform: 'linux', architecture: 'arm64', uid: 0, systemd, verifyArtifact: async () => ({ releaseId }) }), /unsupported fields/);
 });
+
+test('fixed target installer rejects a non-bootstrap attempt ID before host mutation', async () => {
+  const releaseId = `sonuvi-${'b'.repeat(64)}`;
+  let serviceAccountCalled = false;
+  let artifactVerifierCalled = false;
+  await assert.rejects(
+    runFixedTargetInstallation({
+      request: { attemptId: 'gateb2_20261104_04', targetIdentity, releaseId, serverIdentity: 'sonuvi-lab-01' },
+      serviceAccount: { ensure: async () => { serviceAccountCalled = true; } },
+      verifyArtifact: async () => { artifactVerifierCalled = true; return { releaseId }; },
+    }),
+    /bootstrap request ID is invalid/,
+  );
+  assert.equal(serviceAccountCalled, false);
+  assert.equal(artifactVerifierCalled, false);
+});
 test('B2 package manifest hashes fixed package inputs without executing them', async (t) => {
   const root = await fixture(t); const helper = path.join(root, 'helper.mjs'); const lock = path.join(root, 'package-lock.json'); const unit = path.join(root, 'unit.service.in'); await Promise.all([fs.writeFile(helper, 'helper'), fs.writeFile(lock, 'lock'), fs.writeFile(unit, 'unit')]); const built = await buildGateB2ReadinessPackage({ outputPath: path.join(root, 'candidate', 'manifest.json'), helperPath: helper, lockfilePath: lock, serviceTemplatePaths: [unit] }); assert.equal(built.manifest.contract, 'sonuvi.gate-b2-package.v1'); assert.equal(built.manifest.files.length, 3);
 });

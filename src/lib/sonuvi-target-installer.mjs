@@ -21,6 +21,10 @@ export const TARGET_WRITABLE_STATE_DIRECTORIES = Object.freeze(['data', 'cache',
 function text(value) { return String(value ?? '').trim(); }
 function releaseId(value) { const id = text(value); if (!/^sonuvi-[a-f0-9]{64}$/.test(id)) throw new Error('release ID is invalid'); return id; }
 function identity(value) { const id = text(value); if (!/^[A-Za-z0-9_-]{16,160}$/.test(id)) throw new Error('target identity is invalid'); return id; }
+// The durable installation journal accepts only the versioned bootstrap request
+// identifier. Validate it before any host preflight or mutation so an invalid
+// caller request cannot leave a fresh host partially provisioned.
+function bootstrapAttemptId(value) { const id = text(value); if (!/^boot_[A-Za-z0-9_-]{16,128}$/.test(id)) throw new Error('bootstrap request ID is invalid'); return id; }
 function serverIdentity(value) { const id = text(value); if (!/^[a-z0-9][a-z0-9-]{0,62}$/i.test(id)) throw new Error('server identity is invalid'); return id; }
 function nodeCompatible(version = process.versions.node) { const [major, minor] = text(version).replace(/^v/, '').split('.').map(Number); return major > 20 || (major === 20 && minor >= 9); }
 function absolute(value, label) { const result = path.resolve(text(value)); if (!path.isAbsolute(result)) throw new Error(`${label} must be absolute`); return result; }
@@ -83,7 +87,7 @@ function validateRequest(request) {
   if (!request || typeof request !== 'object' || Array.isArray(request)) throw new Error('installer request is invalid');
   const keys = Object.keys(request).sort(); const allowed = ['attemptId', 'releaseId', 'serverIdentity', 'targetIdentity'];
   if (keys.join(',') !== allowed.join(',')) throw new Error('installer request has unsupported fields');
-  return Object.freeze({ attemptId: identity(request.attemptId), targetIdentity: identity(request.targetIdentity), releaseId: releaseId(request.releaseId), serverIdentity: serverIdentity(request.serverIdentity) });
+  return Object.freeze({ attemptId: bootstrapAttemptId(request.attemptId), targetIdentity: identity(request.targetIdentity), releaseId: releaseId(request.releaseId), serverIdentity: serverIdentity(request.serverIdentity) });
 }
 
 /**
