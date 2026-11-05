@@ -60,6 +60,8 @@ async function createFixture(t) {
   await write(source, 'scripts/sonuvi-bootstrap-helper.mjs', 'console.log("bootstrap helper");\n');
   await write(source, 'scripts/sonuvi-debian-node-bootstrap.sh', '#!/bin/sh\nexit 0\n');
   await write(source, 'scripts/sonuvi-target-installer.mjs', 'console.log("target installer");\n');
+  await write(source, 'ops/systemd/sonuvi-api.service.in', '[Service]\nExecStart=/usr/bin/node api.mjs\n');
+  await write(source, 'ops/systemd/sonuvi-web.service.in', '[Service]\nExecStart=/usr/bin/node web.mjs\n');
   await write(source, 'config/now-playing.config.example.json', '{}\n');
   await write(source, 'index.html', '<!doctype html>one');
   await write(source, 'controller.html', '<!doctype html>controller');

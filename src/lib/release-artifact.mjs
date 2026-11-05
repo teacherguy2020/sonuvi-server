@@ -58,6 +58,11 @@ const RELEASE_CONFIG_FILES = new Set([
   'now-playing.config.example.json',
 ]);
 
+const RELEASE_SYSTEMD_TEMPLATES = new Set([
+  'ops/systemd/sonuvi-api.service.in',
+  'ops/systemd/sonuvi-web.service.in',
+]);
+
 const RELEASE_RUNTIME_SCRIPTS = new Set([
   'scripts/export-peppymeter-skins.mjs',
   'scripts/sonuvi-bootstrap-helper.mjs',
@@ -169,7 +174,7 @@ function snapshotExcluded(relativePath) {
 
 function releaseSourcePath(relativePath) {
   const relative = normalizeRelativePath(relativePath, 'release source path');
-  if (RELEASE_ROOT_FILES.has(relative) || RELEASE_CONFIG_FILES.has(relative) || RELEASE_RUNTIME_SCRIPTS.has(relative)) return true;
+  if (RELEASE_ROOT_FILES.has(relative) || RELEASE_CONFIG_FILES.has(relative) || RELEASE_SYSTEMD_TEMPLATES.has(relative) || RELEASE_RUNTIME_SCRIPTS.has(relative)) return true;
   if (relative.startsWith('src/')) return !relative.startsWith('src/private/');
   if (relative.startsWith('skins/')) return true;
   return false;
@@ -713,6 +718,11 @@ export async function buildReleaseArtifact({
     }
     if (!await lstatOrNull(path.join(stage, 'scripts', 'verify-current-release.mjs'))) {
       throw new Error('release source snapshot did not contain the release verification startup script');
+    }
+    for (const template of RELEASE_SYSTEMD_TEMPLATES) {
+      if (!await lstatOrNull(path.join(stage, template))) {
+        throw new Error(`release source snapshot did not contain required systemd template: ${template}`);
+      }
     }
     for (const helper of ['build_moode_index.py', 'lastfm_vibe_radio.py', 'vibe_planner.py']) {
       if (!await lstatOrNull(path.join(stage, helper))) {

@@ -53,6 +53,8 @@ async function sourceFixture(t) {
   await write(root, 'scripts/sonuvi-bootstrap-helper.mjs', 'console.log("fixture bootstrap helper");\n');
   await write(root, 'scripts/sonuvi-debian-node-bootstrap.sh', '#!/bin/sh\nexit 0\n');
   await write(root, 'scripts/sonuvi-target-installer.mjs', 'console.log("fixture target installer");\n');
+  await write(root, 'ops/systemd/sonuvi-api.service.in', '[Service]\nUser=@SERVICE_ACCOUNT@\nExecStart=node @RELEASE_ID@\n');
+  await write(root, 'ops/systemd/sonuvi-web.service.in', '[Service]\nUser=@SERVICE_ACCOUNT@\nExecStart=node @RELEASE_ID@\n');
   await write(root, 'config/now-playing.config.example.json', '{"ports":{"api":3101,"ui":8101}}\n');
   await write(root, 'config/radio-logo-aliases.json', '{"fixture.example":"Fixture Radio"}\n');
   await write(root, 'index.html', '<!doctype html><title>Sonuvi fixture</title>');
@@ -100,6 +102,8 @@ async function releaseFixture(t, { label = 'one' } = {}) {
   assert.deepEqual(built.manifest.requiredServices, ['sonuvi-api.service', 'sonuvi-web.service']);
   assert.match(built.manifest.requirements.configurationFiles.join(' '), /SONUVI_CONFIG_ROOT/);
   assert.equal(await fs.readFile(path.join(output, 'vibe_planner.py'), 'utf8'), 'print("fixture planner")\n');
+  assert.match(await fs.readFile(path.join(output, 'ops', 'systemd', 'sonuvi-api.service.in'), 'utf8'), /@SERVICE_ACCOUNT@/);
+  assert.match(await fs.readFile(path.join(output, 'ops', 'systemd', 'sonuvi-web.service.in'), 'utf8'), /@RELEASE_ID@/);
   return { source, dependencies, parent, output, built };
 }
 
