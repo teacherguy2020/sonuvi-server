@@ -14,7 +14,7 @@ if [ "$(id -u)" -ne 0 ]; then
   echo 'explicit root authorization is required' >&2
   exit 77
 fi
-if [ ! -r /etc/debian_version ] || ! -x /usr/bin/apt-get ]; then
+if [ ! -r /etc/debian_version ] || [ ! -x /usr/bin/apt-get ]; then
   echo 'supported Debian APT environment is required' >&2
   exit 78
 fi
