@@ -8,7 +8,7 @@ import { FirstAdministratorEnrollment } from '../src/lib/sonuvi-bootstrap-securi
 import { authorizeFirstController } from '../src/lib/sonuvi-first-controller-handoff.mjs';
 import { buildGateB2ReadinessPackage } from '../src/lib/sonuvi-gate-b2-package.mjs';
 import { makeTreeWritableForCleanup } from '../src/lib/release-artifact.mjs';
-import { createFixedServiceAccount, createFixedSystemd, provisionServiceReadableConfiguration, provisionWritableStateOwnership, runFixedTargetInstallation, TARGET_WRITABLE_STATE_DIRECTORIES } from '../src/lib/sonuvi-target-installer.mjs';
+import { createFixedServiceAccount, createFixedSystemd, provisionServiceReadableActivationState, provisionServiceReadableConfiguration, provisionWritableStateOwnership, runFixedTargetInstallation, TARGET_WRITABLE_STATE_DIRECTORIES } from '../src/lib/sonuvi-target-installer.mjs';
 import crypto from 'node:crypto';
 
 const attemptId = 'boot_0123456789abcdef'; const targetIdentity = 'machine_0123456789abcdef';
@@ -32,8 +32,9 @@ test('first-controller handoff requires an administrator and reuses mobile-only 
 test('fixed systemd adapter permits only reviewed units and verbs', async () => {
   const calls = []; const systemd = createFixedSystemd({ run: async (args) => { calls.push(args); } });
   await systemd.daemonReload(); await systemd.enableAndStart('sonuvi-api.service');
+  await systemd.disableAndStop('sonuvi-api.service');
   assert.equal(await systemd.isHealthy('sonuvi-web.service'), true);
-  assert.deepEqual(calls, [['daemon-reload'], ['enable', '--now', 'sonuvi-api.service'], ['is-active', '--quiet', 'sonuvi-web.service']]);
+  assert.deepEqual(calls, [['daemon-reload'], ['enable', '--now', 'sonuvi-api.service'], ['disable', '--now', 'sonuvi-api.service'], ['is-active', '--quiet', 'sonuvi-web.service']]);
   await assert.rejects(systemd.enableAndStart('ssh.service'), /unapproved/);
 });
 
@@ -45,20 +46,22 @@ test('fixed target installer has no caller-controlled paths or commands', async 
   await fs.writeFile(path.join(staging, 'ops', 'systemd', 'sonuvi-web.service.in'), 'web=@RELEASE_ID@');
   const request = { attemptId, targetIdentity, releaseId, serverIdentity: 'sonuvi-lab-01' };
   const paths = { layoutRoot: path.join(root, 'opt', 'sonuvi'), stateRoot: path.join(root, 'var', 'lib', 'sonuvi'), unitRoot: path.join(root, 'etc', 'systemd', 'system'), bootstrapReleaseRoot: path.join(root, 'bootstrap', 'releases') };
-  let configurationAccessCalled = false;
+  let configurationAccessCalled = false; let activationStateAccessCalled = false;
   const calls = []; const systemd = createFixedSystemd({ run: async (args) => {
     if (args[0] === 'enable') {
       const installed = path.join(paths.layoutRoot, 'releases', releaseId);
       assert.equal((await fs.stat(installed)).mode & 0o777, 0o555);
       assert.equal((await fs.stat(path.join(installed, 'ops', 'systemd', 'sonuvi-api.service.in'))).mode & 0o777, 0o444);
       assert.equal(configurationAccessCalled, true);
+      assert.equal(activationStateAccessCalled, true);
     }
     calls.push(args);
   } });
   const serviceAccount = { ensure: async () => 'fixture' };
   const ownershipCalls = []; const ownership = async ({ stateRoot }) => { ownershipCalls.push(stateRoot); };
   const configurationAccess = async ({ stateRoot }) => { assert.equal(stateRoot, paths.stateRoot); configurationAccessCalled = true; };
-  const result = await runFixedTargetInstallation({ request, paths, platform: 'linux', architecture: 'arm64', uid: 0, systemd, serviceAccount, ownership, configurationAccess, health: async () => true, verifyArtifact: async ({ artifactRoot }) => ({ releaseId, artifactRoot }) });
+  const activationStateAccess = async ({ stateRoot }) => { assert.equal(stateRoot, paths.stateRoot); activationStateAccessCalled = true; };
+  const result = await runFixedTargetInstallation({ request, paths, platform: 'linux', architecture: 'arm64', uid: 0, systemd, serviceAccount, ownership, configurationAccess, activationStateAccess, health: async () => true, verifyArtifact: async ({ artifactRoot }) => ({ releaseId, artifactRoot }) });
   assert.equal(result.state, 'awaiting-administrator-enrollment');
   assert.equal((await fs.readlink(path.join(paths.layoutRoot, 'current'))).includes(releaseId), true);
   assert.deepEqual(calls.slice(0, 3), [['daemon-reload'], ['enable', '--now', 'sonuvi-api.service'], ['enable', '--now', 'sonuvi-web.service']]);
@@ -80,6 +83,21 @@ test('fixed target installer rejects a non-bootstrap attempt ID before host muta
   );
   assert.equal(serviceAccountCalled, false);
   assert.equal(artifactVerifierCalled, false);
+});
+
+test('failed first start disables only the approved candidate units before cleanup', async (t) => {
+  const root = await fixture(t); const releaseId = `sonuvi-${'c'.repeat(64)}`;
+  const staging = path.join(root, 'bootstrap', 'releases', releaseId);
+  await fs.mkdir(path.join(staging, 'ops', 'systemd'), { recursive: true });
+  await fs.writeFile(path.join(staging, 'ops', 'systemd', 'sonuvi-api.service.in'), 'api=@RELEASE_ID@');
+  await fs.writeFile(path.join(staging, 'ops', 'systemd', 'sonuvi-web.service.in'), 'web=@RELEASE_ID@');
+  const paths = { layoutRoot: path.join(root, 'opt', 'sonuvi'), stateRoot: path.join(root, 'var', 'lib', 'sonuvi'), unitRoot: path.join(root, 'etc', 'systemd', 'system'), bootstrapReleaseRoot: path.join(root, 'bootstrap', 'releases') };
+  const calls = [];
+  const systemd = createFixedSystemd({ run: async (args) => { calls.push(args); if (args[0] === 'enable') throw new Error('api start failed'); } });
+  const request = { attemptId, targetIdentity, releaseId, serverIdentity: 'sonuvi-lab-01' };
+  await assert.rejects(runFixedTargetInstallation({ request, paths, platform: 'linux', architecture: 'arm64', uid: 0, systemd, serviceAccount: { ensure: async () => 'fixture' }, ownership: async () => {}, configurationAccess: async () => {}, activationStateAccess: async () => {}, verifyArtifact: async ({ artifactRoot }) => ({ releaseId, artifactRoot }) }), /api start failed/);
+  assert.deepEqual(calls, [['daemon-reload'], ['enable', '--now', 'sonuvi-api.service'], ['disable', '--now', 'sonuvi-web.service'], ['disable', '--now', 'sonuvi-api.service']]);
+  await assert.rejects(fs.lstat(path.join(paths.layoutRoot, 'current')), { code: 'ENOENT' });
 });
 test('B2 package manifest hashes fixed package inputs without executing them', async (t) => {
   const root = await fixture(t); const helper = path.join(root, 'helper.mjs'); const lock = path.join(root, 'package-lock.json'); const unit = path.join(root, 'unit.service.in'); await Promise.all([fs.writeFile(helper, 'helper'), fs.writeFile(lock, 'lock'), fs.writeFile(unit, 'unit')]); const built = await buildGateB2ReadinessPackage({ outputPath: path.join(root, 'candidate', 'manifest.json'), helperPath: helper, lockfilePath: lock, serviceTemplatePaths: [unit] }); assert.equal(built.manifest.contract, 'sonuvi.gate-b2-package.v1'); assert.equal(built.manifest.files.length, 3);
@@ -117,12 +135,17 @@ test('bounded state ownership includes the configured podcast root without touch
 test('initial configuration is root-owned but readable by the service group', async (t) => {
   const root = await fixture(t); const stateRoot = path.join(root, 'var', 'lib', 'sonuvi');
   const configRoot = path.join(stateRoot, 'config'); const configFile = path.join(configRoot, 'now-playing.config.json');
-  await fs.mkdir(configRoot, { recursive: true, mode: 0o700 }); await fs.writeFile(configFile, '{}\n', { mode: 0o600 });
+  const checkpointsRoot = path.join(stateRoot, 'checkpoints'); const activationState = path.join(checkpointsRoot, 'release-activation-state.json');
+  await fs.mkdir(configRoot, { recursive: true, mode: 0o700 }); await fs.mkdir(checkpointsRoot, { recursive: true, mode: 0o700 }); await fs.writeFile(configFile, '{}\n', { mode: 0o600 }); await fs.writeFile(activationState, '{}\n', { mode: 0o600 });
   const calls = [];
   await provisionServiceReadableConfiguration({ stateRoot, run: async (file, args) => { calls.push([file, args]); } });
-  assert.deepEqual(calls, [['/usr/bin/chown', ['root:sonuvi', configRoot]], ['/usr/bin/chown', ['root:sonuvi', configFile]]]);
+  await provisionServiceReadableActivationState({ stateRoot, run: async (file, args) => { calls.push([file, args]); } });
+  assert.deepEqual(calls, [['/usr/bin/chown', ['root:sonuvi', stateRoot]], ['/usr/bin/chown', ['root:sonuvi', configRoot]], ['/usr/bin/chown', ['root:sonuvi', configFile]], ['/usr/bin/chown', ['root:sonuvi', checkpointsRoot]], ['/usr/bin/chown', ['root:sonuvi', activationState]]]);
+  assert.equal((await fs.stat(stateRoot)).mode & 0o777, 0o710);
   assert.equal((await fs.stat(configRoot)).mode & 0o777, 0o750);
   assert.equal((await fs.stat(configFile)).mode & 0o777, 0o640);
+  assert.equal((await fs.stat(checkpointsRoot)).mode & 0o777, 0o750);
+  assert.equal((await fs.stat(activationState)).mode & 0o777, 0o640);
   await fs.rm(configFile); await fs.symlink('/tmp', configFile);
   await assert.rejects(provisionServiceReadableConfiguration({ stateRoot, run: async () => {} }), /configuration_path_invalid/);
 });

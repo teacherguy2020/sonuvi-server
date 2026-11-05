@@ -75,9 +75,9 @@ test('only approved, identical systemd units are provisioned idempotently', asyn
   await assert.rejects(provisionFreshSystemdUnits({ unitRoot: path.join(f.root, 'units'), units: { ...units, 'other.service': 'no' } }), /only approved/);
 });
 
-function adapter({ fail = false } = {}) {
+function adapter({ fail = false, onRestart = null } = {}) {
   return {
-    async prepare() {}, async restart() {},
+    async prepare() {}, async restart(context) { if (onRestart) await onRestart(context); },
     async verify({ expectedReleaseId }) { return { releaseId: expectedReleaseId }; },
     async health() { return fail ? { ok: false } : { ok: true }; },
     async rollback() {},
@@ -90,9 +90,15 @@ test('first release activates without inventing a rollback release and failure l
   const candidate = path.join(f.layoutRoot, 'releases', releaseId);
   await fs.mkdir(candidate, { recursive: true });
   const verifyArtifact = async ({ artifactRoot }) => ({ releaseId, root: artifactRoot });
-  const success = await activateFirstRelease({ ...f, releaseId, attemptId, targetIdentity: 'machine-1', adapter: adapter(), verifyArtifact });
+  let checkpointAtRestart;
+  const success = await activateFirstRelease({ ...f, releaseId, attemptId, targetIdentity: 'machine-1', adapter: adapter({ onRestart: async () => { checkpointAtRestart = JSON.parse(await fs.readFile(path.join(f.stateRoot, 'checkpoints', 'release-activation-state.json'), 'utf8')); } }), verifyArtifact });
   assert.equal(success.state.previousReleaseId, null);
   assert.equal(path.basename(await fs.realpath(path.join(f.layoutRoot, 'current'))), releaseId);
+  assert.equal(checkpointAtRestart.phase, 'pointer-switched');
+  assert.equal(checkpointAtRestart.candidateReleaseId, releaseId);
+  const committedCheckpoint = JSON.parse(await fs.readFile(path.join(f.stateRoot, 'checkpoints', 'release-activation-state.json'), 'utf8'));
+  assert.equal(committedCheckpoint.phase, 'committed');
+  assert.equal(committedCheckpoint.previousReleaseId, null);
   await fs.unlink(path.join(f.layoutRoot, 'current'));
   await assert.rejects(activateFirstRelease({ ...f, releaseId, attemptId, targetIdentity: 'machine-1', adapter: adapter({ fail: true }), verifyArtifact }), /health check failed/);
   await assert.rejects(fs.lstat(path.join(f.layoutRoot, 'current')), { code: 'ENOENT' });

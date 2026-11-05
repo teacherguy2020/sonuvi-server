@@ -50,6 +50,7 @@ export function createFixedSystemd({
   return Object.freeze({
     async daemonReload() { await invoke(['daemon-reload']); },
     async enableAndStart(unit) { if (!TARGET_UNITS.includes(unit)) throw new Error('unapproved_service'); await invoke(['enable', '--now', unit]); },
+    async disableAndStop(unit) { if (!TARGET_UNITS.includes(unit)) throw new Error('unapproved_service'); await invoke(['disable', '--now', unit]); },
     async isHealthy(unit) { if (!TARGET_UNITS.includes(unit)) throw new Error('unapproved_service'); try { await invoke(['is-active', '--quiet', unit]); return true; } catch { return false; } },
   });
 }
@@ -90,12 +91,26 @@ export async function provisionServiceReadableConfiguration({ stateRoot, run = (
   const root = absolute(stateRoot, 'state root');
   const configRoot = path.join(root, 'config');
   const configFile = path.join(configRoot, 'now-playing.config.json');
-  const [directory, file] = await Promise.all([fs.lstat(configRoot), fs.lstat(configFile)]);
-  if (!directory.isDirectory() || directory.isSymbolicLink() || !file.isFile() || file.isSymbolicLink()) throw new Error('configuration_path_invalid');
+  const checkpointsRoot = path.join(root, 'checkpoints');
+  const [state, directory, file, checkpoints] = await Promise.all([fs.lstat(root), fs.lstat(configRoot), fs.lstat(configFile), fs.lstat(checkpointsRoot)]);
+  if (!state.isDirectory() || state.isSymbolicLink() || !directory.isDirectory() || directory.isSymbolicLink() || !file.isFile() || file.isSymbolicLink() || !checkpoints.isDirectory() || checkpoints.isSymbolicLink()) throw new Error('configuration_path_invalid');
+  await run('/usr/bin/chown', ['root:sonuvi', root]);
   await run('/usr/bin/chown', ['root:sonuvi', configRoot]);
   await run('/usr/bin/chown', ['root:sonuvi', configFile]);
+  await run('/usr/bin/chown', ['root:sonuvi', checkpointsRoot]);
+  await fs.chmod(root, 0o710);
   await fs.chmod(configRoot, 0o750);
   await fs.chmod(configFile, 0o640);
+  await fs.chmod(checkpointsRoot, 0o750);
+}
+
+export async function provisionServiceReadableActivationState({ stateRoot, run = (file, args) => execFile(file, args, { timeout: 30_000, env: { PATH: '/usr/sbin:/usr/bin:/sbin:/bin' } }) } = {}) {
+  const root = absolute(stateRoot, 'state root');
+  const activationState = path.join(root, 'checkpoints', 'release-activation-state.json');
+  const stat = await fs.lstat(activationState);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('activation_state_path_invalid');
+  await run('/usr/bin/chown', ['root:sonuvi', activationState]);
+  await fs.chmod(activationState, 0o640);
 }
 
 function validateRequest(request) {
@@ -110,7 +125,7 @@ function validateRequest(request) {
  * only: release source, service names, paths, commands, and environment are
  * fixed by this module. It is deliberately not a network service.
  */
-export async function runFixedTargetInstallation({ request, paths = TARGET_PATHS, platform = process.platform, architecture = process.arch, uid = typeof process.getuid === 'function' ? process.getuid() : null, systemd = createFixedSystemd(), serviceAccount = createFixedServiceAccount(), ownership = provisionWritableStateOwnership, configurationAccess = provisionServiceReadableConfiguration, verifyArtifact = verifyReleaseArtifact, health = null } = {}) {
+export async function runFixedTargetInstallation({ request, paths = TARGET_PATHS, platform = process.platform, architecture = process.arch, uid = typeof process.getuid === 'function' ? process.getuid() : null, systemd = createFixedSystemd(), serviceAccount = createFixedServiceAccount(), ownership = provisionWritableStateOwnership, configurationAccess = provisionServiceReadableConfiguration, activationStateAccess = provisionServiceReadableActivationState, verifyArtifact = verifyReleaseArtifact, health = null } = {}) {
   const input = validateRequest(request);
   if (!nodeCompatible()) throw new Error('node_runtime_unsupported');
   const roots = Object.fromEntries(Object.entries(paths).map(([key, value]) => [key, absolute(value, key)]));
@@ -136,10 +151,11 @@ export async function runFixedTargetInstallation({ request, paths = TARGET_PATHS
     const units = renderFreshSystemdUnits({ apiTemplate, webTemplate, releaseId: input.releaseId });
     const adapter = {
       prepare: async () => { await provisionFreshSystemdUnits({ unitRoot: roots.unitRoot, units }); await systemd.daemonReload(); },
-      restart: async () => { for (const unit of TARGET_UNITS) await systemd.enableAndStart(unit); },
+      restart: async () => { await activationStateAccess({ stateRoot: roots.stateRoot }); for (const unit of TARGET_UNITS) await systemd.enableAndStart(unit); },
       verify: async ({ service, expectedReleaseId }) => ({ releaseId: (await systemd.isHealthy(`sonuvi-${service}.service`)) ? expectedReleaseId : null }),
       health: async ({ service }) => health ? health({ service }) : systemd.isHealthy(`sonuvi-${service}.service`),
-      rollback: async () => {},
+      rollback: async () => { for (const unit of [...TARGET_UNITS].reverse()) await systemd.disableAndStop(unit); },
+      makeActivationStateReadable: async () => activationStateAccess({ stateRoot: roots.stateRoot }),
     };
     const activation = await activateFirstRelease({ layoutRoot: roots.layoutRoot, stateRoot: roots.stateRoot, releaseId: input.releaseId, attemptId: input.attemptId, targetIdentity: input.targetIdentity, adapter, verifyArtifact });
     return Object.freeze({ state: 'awaiting-administrator-enrollment', releaseId: activation.releaseId, layoutRoot: initialized.layoutRoot, stateRoot: initialized.stateRoot });
