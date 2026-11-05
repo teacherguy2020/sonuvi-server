@@ -58,6 +58,12 @@ Current lab TLS identity:
 The TLS private key is stored only in local lab credential storage. It is not
 part of the release kit, source repository, or iOS application.
 
+The endpoint is self-signed by design. The reviewed, application-scoped
+Security.framework anchor/hostname/validity/leaf/SPKI policy is
+[`sonuvi-ios-gate-c-sftp-and-lab-tls.md`](sonuvi-ios-gate-c-sftp-and-lab-tls.md).
+It applies only to this literal lab endpoint and never disables normal system
+certificate validation for other app traffic.
+
 1. Require TLS 1.3, hostname `M4-Mac-mini.local`, and the configured TLS SPKI pin.
 2. Fetch the fixed envelope and public anchor only from the fixed prefix.
 3. Verify envelope signature, signer key ID, expiry, ARM64/Linux target,

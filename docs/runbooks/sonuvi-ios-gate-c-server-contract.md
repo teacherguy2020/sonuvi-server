@@ -71,11 +71,14 @@ It never requires or installs npm for the packaged runtime. It validates Node
 An unavailable repository or a Debian release that cannot provide Node 20.9+
 returns an explicit failure.
 
-On a truly blank target the signed bootstrap kit must be transferred by the
-iOS SSH transport and its `bootstrap.sha256` verified before the iPad invokes
-the fixed root preflight/install operation. The current iOS adapter needs a
-new typed bootstrap-kit operation for this; it must not substitute generic
-remote execution.
+On a truly blank target the signed bootstrap kit must be transferred through
+the fixed `sonuvi.gate-c-sftp-bootstrap.v1` contract and its
+`bootstrap.sha256` verified before the iPad invokes the fixed root
+preflight/install operation. The authoritative transfer, no-follow copy,
+root-side rehash, and SFTP recovery details are in
+[`sonuvi-ios-gate-c-sftp-and-lab-tls.md`](sonuvi-ios-gate-c-sftp-and-lab-tls.md).
+The iOS adapter needs a new typed bootstrap-kit operation for this; it must
+not substitute generic remote execution.
 
 ## 3. Staging and activation
 
@@ -174,9 +177,9 @@ plain HTTP LAN API is safe:
 1. Release engineering must publish the real pinned Ed25519 public key, signed
    metadata, immutable tar, and signed bootstrap kit as one reviewed release
    bundle. No public key or production distribution URL has been invented.
-2. iOS must add typed bootstrap-kit transfer, framed archive streaming, and
-   fixed status commands to its existing SwiftNIO adapter; no UI redesign is
-   necessary.
+2. iOS must add typed SFTP bootstrap-kit transfer, the reviewed fixed
+   activation capsule, framed archive streaming, and fixed status commands to
+   its existing SwiftNIO adapter; no UI redesign is necessary.
 3. A fresh minimal Debian ARM64 clone—separate from the preserved B2 VM and
    baseline—must prove the full native iPad flow. The preserved B2 VM is only
    suitable for read-only tunnel verification.
