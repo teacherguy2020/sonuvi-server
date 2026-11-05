@@ -13,7 +13,10 @@ export const TARGET_INSTALLER_VERSION = '1.0.0';
 export const TARGET_PATHS = Object.freeze({ layoutRoot: '/opt/sonuvi', stateRoot: '/var/lib/sonuvi', unitRoot: '/etc/systemd/system', bootstrapReleaseRoot: '/var/lib/sonuvi-bootstrap/releases' });
 export const TARGET_UNITS = Object.freeze(['sonuvi-api.service', 'sonuvi-web.service']);
 export const TARGET_SERVICE_ACCOUNT = 'sonuvi';
-export const TARGET_WRITABLE_STATE_DIRECTORIES = Object.freeze(['data', 'cache', 'logs', 'empty-library']);
+// These are the only application-writable state locations. Nested podcast
+// storage is listed explicitly rather than relying on a recursive ownership
+// change, so protected siblings under the shared state root remain root-only.
+export const TARGET_WRITABLE_STATE_DIRECTORIES = Object.freeze(['data', 'cache', 'logs', 'empty-library', 'empty-library/podcasts']);
 
 function text(value) { return String(value ?? '').trim(); }
 function releaseId(value) { const id = text(value); if (!/^sonuvi-[a-f0-9]{64}$/.test(id)) throw new Error('release ID is invalid'); return id; }

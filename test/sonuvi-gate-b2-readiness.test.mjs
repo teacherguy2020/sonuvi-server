@@ -7,7 +7,7 @@ import { AdministratorAuthority } from '../src/lib/sonuvi-admin-authority.mjs';
 import { FirstAdministratorEnrollment } from '../src/lib/sonuvi-bootstrap-security.mjs';
 import { authorizeFirstController } from '../src/lib/sonuvi-first-controller-handoff.mjs';
 import { buildGateB2ReadinessPackage } from '../src/lib/sonuvi-gate-b2-package.mjs';
-import { createFixedServiceAccount, createFixedSystemd, runFixedTargetInstallation } from '../src/lib/sonuvi-target-installer.mjs';
+import { createFixedServiceAccount, createFixedSystemd, provisionWritableStateOwnership, runFixedTargetInstallation, TARGET_WRITABLE_STATE_DIRECTORIES } from '../src/lib/sonuvi-target-installer.mjs';
 import crypto from 'node:crypto';
 
 const attemptId = 'boot_0123456789abcdef'; const targetIdentity = 'machine_0123456789abcdef';
@@ -57,4 +57,24 @@ test('fixed service account creates only the approved non-login identity and rej
   assert.equal(await createFixedServiceAccount({ lookup: async () => ({ group: 'sonuvi', shell: '/usr/sbin/nologin' }) }).ensure(), 'existing');
   await assert.rejects(createFixedServiceAccount({ lookup: async () => ({ group: 'users', shell: '/usr/sbin/nologin' }) }).ensure(), /service_account_conflict/);
   await assert.rejects(createFixedServiceAccount({ lookup: async () => ({ group: 'sonuvi', shell: '/bin/bash' }) }).ensure(), /service_account_conflict/);
+});
+
+test('bounded state ownership includes the configured podcast root without touching protected siblings', async (t) => {
+  const root = await fixture(t);
+  const stateRoot = path.join(root, 'var', 'lib', 'sonuvi');
+  for (const directory of ['config', 'data', 'cache', 'protected', 'logs', 'checkpoints', 'install', 'empty-library', 'empty-library/podcasts']) {
+    await fs.mkdir(path.join(stateRoot, directory), { recursive: true });
+  }
+  const calls = [];
+  await provisionWritableStateOwnership({
+    stateRoot,
+    run: async (file, args) => { calls.push([file, args]); },
+  });
+  assert.deepEqual(TARGET_WRITABLE_STATE_DIRECTORIES, ['data', 'cache', 'logs', 'empty-library', 'empty-library/podcasts']);
+  assert.deepEqual(calls.map(([, args]) => args[1]), TARGET_WRITABLE_STATE_DIRECTORIES.map((directory) => path.join(stateRoot, directory)));
+  assert.equal(calls.every(([file, args]) => file === '/usr/bin/chown' && args[0] === 'sonuvi:sonuvi'), true);
+  for (const protectedDirectory of ['config', 'protected', 'checkpoints', 'install']) {
+    assert.equal(calls.some(([, args]) => args[1] === path.join(stateRoot, protectedDirectory)), false);
+  }
+  assert.equal((await fs.stat(path.join(stateRoot, 'empty-library', 'podcasts'))).mode & 0o777, 0o700);
 });
