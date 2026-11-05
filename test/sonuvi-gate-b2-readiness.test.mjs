@@ -8,7 +8,7 @@ import { FirstAdministratorEnrollment } from '../src/lib/sonuvi-bootstrap-securi
 import { authorizeFirstController } from '../src/lib/sonuvi-first-controller-handoff.mjs';
 import { buildGateB2ReadinessPackage } from '../src/lib/sonuvi-gate-b2-package.mjs';
 import { makeTreeWritableForCleanup } from '../src/lib/release-artifact.mjs';
-import { createFixedServiceAccount, createFixedSystemd, provisionWritableStateOwnership, runFixedTargetInstallation, TARGET_WRITABLE_STATE_DIRECTORIES } from '../src/lib/sonuvi-target-installer.mjs';
+import { createFixedServiceAccount, createFixedSystemd, provisionServiceReadableConfiguration, provisionWritableStateOwnership, runFixedTargetInstallation, TARGET_WRITABLE_STATE_DIRECTORIES } from '../src/lib/sonuvi-target-installer.mjs';
 import crypto from 'node:crypto';
 
 const attemptId = 'boot_0123456789abcdef'; const targetIdentity = 'machine_0123456789abcdef';
@@ -45,17 +45,20 @@ test('fixed target installer has no caller-controlled paths or commands', async 
   await fs.writeFile(path.join(staging, 'ops', 'systemd', 'sonuvi-web.service.in'), 'web=@RELEASE_ID@');
   const request = { attemptId, targetIdentity, releaseId, serverIdentity: 'sonuvi-lab-01' };
   const paths = { layoutRoot: path.join(root, 'opt', 'sonuvi'), stateRoot: path.join(root, 'var', 'lib', 'sonuvi'), unitRoot: path.join(root, 'etc', 'systemd', 'system'), bootstrapReleaseRoot: path.join(root, 'bootstrap', 'releases') };
+  let configurationAccessCalled = false;
   const calls = []; const systemd = createFixedSystemd({ run: async (args) => {
     if (args[0] === 'enable') {
       const installed = path.join(paths.layoutRoot, 'releases', releaseId);
       assert.equal((await fs.stat(installed)).mode & 0o777, 0o555);
       assert.equal((await fs.stat(path.join(installed, 'ops', 'systemd', 'sonuvi-api.service.in'))).mode & 0o777, 0o444);
+      assert.equal(configurationAccessCalled, true);
     }
     calls.push(args);
   } });
   const serviceAccount = { ensure: async () => 'fixture' };
   const ownershipCalls = []; const ownership = async ({ stateRoot }) => { ownershipCalls.push(stateRoot); };
-  const result = await runFixedTargetInstallation({ request, paths, platform: 'linux', architecture: 'arm64', uid: 0, systemd, serviceAccount, ownership, health: async () => true, verifyArtifact: async ({ artifactRoot }) => ({ releaseId, artifactRoot }) });
+  const configurationAccess = async ({ stateRoot }) => { assert.equal(stateRoot, paths.stateRoot); configurationAccessCalled = true; };
+  const result = await runFixedTargetInstallation({ request, paths, platform: 'linux', architecture: 'arm64', uid: 0, systemd, serviceAccount, ownership, configurationAccess, health: async () => true, verifyArtifact: async ({ artifactRoot }) => ({ releaseId, artifactRoot }) });
   assert.equal(result.state, 'awaiting-administrator-enrollment');
   assert.equal((await fs.readlink(path.join(paths.layoutRoot, 'current'))).includes(releaseId), true);
   assert.deepEqual(calls.slice(0, 3), [['daemon-reload'], ['enable', '--now', 'sonuvi-api.service'], ['enable', '--now', 'sonuvi-web.service']]);
@@ -109,4 +112,17 @@ test('bounded state ownership includes the configured podcast root without touch
     assert.equal(calls.some(([, args]) => args[1] === path.join(stateRoot, protectedDirectory)), false);
   }
   assert.equal((await fs.stat(path.join(stateRoot, 'empty-library', 'podcasts'))).mode & 0o777, 0o700);
+});
+
+test('initial configuration is root-owned but readable by the service group', async (t) => {
+  const root = await fixture(t); const stateRoot = path.join(root, 'var', 'lib', 'sonuvi');
+  const configRoot = path.join(stateRoot, 'config'); const configFile = path.join(configRoot, 'now-playing.config.json');
+  await fs.mkdir(configRoot, { recursive: true, mode: 0o700 }); await fs.writeFile(configFile, '{}\n', { mode: 0o600 });
+  const calls = [];
+  await provisionServiceReadableConfiguration({ stateRoot, run: async (file, args) => { calls.push([file, args]); } });
+  assert.deepEqual(calls, [['/usr/bin/chown', ['root:sonuvi', configRoot]], ['/usr/bin/chown', ['root:sonuvi', configFile]]]);
+  assert.equal((await fs.stat(configRoot)).mode & 0o777, 0o750);
+  assert.equal((await fs.stat(configFile)).mode & 0o777, 0o640);
+  await fs.rm(configFile); await fs.symlink('/tmp', configFile);
+  await assert.rejects(provisionServiceReadableConfiguration({ stateRoot, run: async () => {} }), /configuration_path_invalid/);
 });

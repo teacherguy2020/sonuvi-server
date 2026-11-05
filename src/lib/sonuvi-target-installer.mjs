@@ -83,6 +83,21 @@ export async function provisionWritableStateOwnership({ stateRoot, run = (file, 
   }
 }
 
+// The service must read the initial, root-controlled configuration on first
+// start. Grant group read/traverse access only; configuration remains owned by
+// root and is never part of the application's writable state.
+export async function provisionServiceReadableConfiguration({ stateRoot, run = (file, args) => execFile(file, args, { timeout: 30_000, env: { PATH: '/usr/sbin:/usr/bin:/sbin:/bin' } }) } = {}) {
+  const root = absolute(stateRoot, 'state root');
+  const configRoot = path.join(root, 'config');
+  const configFile = path.join(configRoot, 'now-playing.config.json');
+  const [directory, file] = await Promise.all([fs.lstat(configRoot), fs.lstat(configFile)]);
+  if (!directory.isDirectory() || directory.isSymbolicLink() || !file.isFile() || file.isSymbolicLink()) throw new Error('configuration_path_invalid');
+  await run('/usr/bin/chown', ['root:sonuvi', configRoot]);
+  await run('/usr/bin/chown', ['root:sonuvi', configFile]);
+  await fs.chmod(configRoot, 0o750);
+  await fs.chmod(configFile, 0o640);
+}
+
 function validateRequest(request) {
   if (!request || typeof request !== 'object' || Array.isArray(request)) throw new Error('installer request is invalid');
   const keys = Object.keys(request).sort(); const allowed = ['attemptId', 'releaseId', 'serverIdentity', 'targetIdentity'];
@@ -95,7 +110,7 @@ function validateRequest(request) {
  * only: release source, service names, paths, commands, and environment are
  * fixed by this module. It is deliberately not a network service.
  */
-export async function runFixedTargetInstallation({ request, paths = TARGET_PATHS, platform = process.platform, architecture = process.arch, uid = typeof process.getuid === 'function' ? process.getuid() : null, systemd = createFixedSystemd(), serviceAccount = createFixedServiceAccount(), ownership = provisionWritableStateOwnership, verifyArtifact = verifyReleaseArtifact, health = null } = {}) {
+export async function runFixedTargetInstallation({ request, paths = TARGET_PATHS, platform = process.platform, architecture = process.arch, uid = typeof process.getuid === 'function' ? process.getuid() : null, systemd = createFixedSystemd(), serviceAccount = createFixedServiceAccount(), ownership = provisionWritableStateOwnership, configurationAccess = provisionServiceReadableConfiguration, verifyArtifact = verifyReleaseArtifact, health = null } = {}) {
   const input = validateRequest(request);
   if (!nodeCompatible()) throw new Error('node_runtime_unsupported');
   const roots = Object.fromEntries(Object.entries(paths).map(([key, value]) => [key, absolute(value, key)]));
@@ -108,6 +123,7 @@ export async function runFixedTargetInstallation({ request, paths = TARGET_PATHS
   await serviceAccount.ensure();
   const initialized = await initializeFreshHostLayout({ layoutRoot: roots.layoutRoot, stateRoot: roots.stateRoot, serverIdentity: input.serverIdentity });
   await ownership({ stateRoot: roots.stateRoot });
+  await configurationAccess({ stateRoot: roots.stateRoot });
   const destination = path.join(roots.layoutRoot, 'releases', input.releaseId);
   try {
     await fs.cp(source, destination, { recursive: true, errorOnExist: true, force: false, mode: fsConstants.COPYFILE_FICLONE });
