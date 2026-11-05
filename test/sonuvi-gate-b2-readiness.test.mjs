@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { AdministratorAuthority } from '../src/lib/sonuvi-admin-authority.mjs';
-import { FirstAdministratorEnrollment } from '../src/lib/sonuvi-bootstrap-security.mjs';
+import { firstAdministratorClaimMessage, FirstAdministratorEnrollment } from '../src/lib/sonuvi-bootstrap-security.mjs';
 import { authorizeFirstController } from '../src/lib/sonuvi-first-controller-handoff.mjs';
 import { buildGateB2ReadinessPackage } from '../src/lib/sonuvi-gate-b2-package.mjs';
 import { makeTreeWritableForCleanup } from '../src/lib/release-artifact.mjs';
@@ -21,10 +21,11 @@ async function fixture(t) {
   });
   return root;
 }
+function claimPayload(token) { const pair = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' }); const administratorDeviceId = 'device_admin_0123456789'; const administratorPublicKey = pair.publicKey.export({ format: 'der', type: 'spki' }).toString('base64url'); const administratorProof = crypto.sign('sha256', firstAdministratorClaimMessage({ attemptId, targetIdentity, enrollmentToken: token, administratorDeviceId }), { key: pair.privateKey, dsaEncoding: 'ieee-p1363' }).toString('base64url'); return { administratorDeviceId, administratorPublicKey, administratorProof }; }
 test('first-controller handoff requires an administrator and reuses mobile-only bearer scope', async (t) => {
-  const root = await fixture(t); const enrollment = new FirstAdministratorEnrollment({ stateRoot: root }); const issued = await enrollment.create({ attemptId, targetIdentity }); const authority = new AdministratorAuthority({ stateRoot: root }); const admin = await authority.initializeFromClaim({ enrollment, attemptId, targetIdentity, enrollmentToken: issued.enrollmentToken, administratorDeviceId: 'device_admin_0123456789', administratorPublicKey: 'admin-key' }); const adminToken = await authority.issueAccessToken({ administratorId: admin.administratorId });
+  const root = await fixture(t); await fs.mkdir(path.join(root, 'data'), { recursive: true }); const enrollment = new FirstAdministratorEnrollment({ stateRoot: root }); const issued = await enrollment.create({ attemptId, targetIdentity }); const authority = new AdministratorAuthority({ stateRoot: root }); await authority.provisionSigningMaterial(); const admin = await authority.initializeFromClaim({ enrollment, attemptId, targetIdentity, enrollmentToken: issued.enrollmentToken, ...claimPayload(issued.enrollmentToken) }); const adminToken = await authority.issueAccessToken({ administratorId: admin.administratorId });
   const handoff = await authorizeFirstController({ authority, administratorToken: adminToken, mobileApiSecret: 'fixture-mobile-secret', controllerDeviceId: 'controller_0123456789', stateRoot: root }); assert.equal(handoff.scope, 'mobile-api'); assert.equal(handoff.accessToken.includes(adminToken), false);
-  const record = JSON.parse(await fs.readFile(path.join(root, 'protected', 'first-controller-pairing.json'), 'utf8'));
+  const record = JSON.parse(await fs.readFile(path.join(root, 'data', 'first-controller-pairing.json'), 'utf8'));
   assert.equal(record.accessTokenHash, crypto.createHash('sha256').update(handoff.accessToken).digest('base64url'));
   await assert.rejects(authorizeFirstController({ authority, administratorToken: 'controller-token', mobileApiSecret: 'fixture-mobile-secret', controllerDeviceId: 'controller_0123456789', stateRoot: root }), /required/);
 });
@@ -52,6 +53,8 @@ test('fixed target installer has no caller-controlled paths or commands', async 
       const installed = path.join(paths.layoutRoot, 'releases', releaseId);
       assert.equal((await fs.stat(installed)).mode & 0o777, 0o555);
       assert.equal((await fs.stat(path.join(installed, 'ops', 'systemd', 'sonuvi-api.service.in'))).mode & 0o777, 0o444);
+      assert.match(await fs.readFile(path.join(paths.stateRoot, 'protected', 'now-playing.env'), 'utf8'), /^MOBILE_API_ENABLED=1$/m);
+      assert.equal((await fs.stat(path.join(paths.stateRoot, 'config', 'administrator-verifier.json'))).isFile(), true);
       assert.equal(configurationAccessCalled, true);
       assert.equal(activationStateAccessCalled, true);
     }
@@ -64,6 +67,10 @@ test('fixed target installer has no caller-controlled paths or commands', async 
   const result = await runFixedTargetInstallation({ request, paths, platform: 'linux', architecture: 'arm64', uid: 0, systemd, serviceAccount, ownership, configurationAccess, activationStateAccess, health: async () => true, verifyArtifact: async ({ artifactRoot }) => ({ releaseId, artifactRoot }) });
   assert.equal(result.state, 'awaiting-administrator-enrollment');
   assert.equal((await fs.readlink(path.join(paths.layoutRoot, 'current'))).includes(releaseId), true);
+  const installState = JSON.parse(await fs.readFile(path.join(paths.stateRoot, 'install', 'state.json'), 'utf8'));
+  const journal = await fs.readFile(path.join(paths.stateRoot, 'install', 'journal.jsonl'), 'utf8');
+  assert.equal(installState.phase, 'awaiting-administrator-enrollment');
+  assert.match(journal, /"stage":"administrator_enrollment","state":"waiting"/);
   assert.deepEqual(calls.slice(0, 3), [['daemon-reload'], ['enable', '--now', 'sonuvi-api.service'], ['enable', '--now', 'sonuvi-web.service']]);
   assert.deepEqual(ownershipCalls, [paths.stateRoot]);
   await assert.rejects(runFixedTargetInstallation({ request: { ...request, command: 'id' }, paths, platform: 'linux', architecture: 'arm64', uid: 0, systemd, verifyArtifact: async () => ({ releaseId }) }), /unsupported fields/);
@@ -134,16 +141,17 @@ test('bounded state ownership includes the configured podcast root without touch
 
 test('initial configuration is root-owned but readable by the service group', async (t) => {
   const root = await fixture(t); const stateRoot = path.join(root, 'var', 'lib', 'sonuvi');
-  const configRoot = path.join(stateRoot, 'config'); const configFile = path.join(configRoot, 'now-playing.config.json');
+  const configRoot = path.join(stateRoot, 'config'); const configFile = path.join(configRoot, 'now-playing.config.json'); const verifierFile = path.join(configRoot, 'administrator-verifier.json');
   const checkpointsRoot = path.join(stateRoot, 'checkpoints'); const activationState = path.join(checkpointsRoot, 'release-activation-state.json');
-  await fs.mkdir(configRoot, { recursive: true, mode: 0o700 }); await fs.mkdir(checkpointsRoot, { recursive: true, mode: 0o700 }); await fs.writeFile(configFile, '{}\n', { mode: 0o600 }); await fs.writeFile(activationState, '{}\n', { mode: 0o600 });
+  await fs.mkdir(configRoot, { recursive: true, mode: 0o700 }); await fs.mkdir(checkpointsRoot, { recursive: true, mode: 0o700 }); await fs.writeFile(configFile, '{}\n', { mode: 0o600 }); await fs.writeFile(verifierFile, '{}\n', { mode: 0o600 }); await fs.writeFile(activationState, '{}\n', { mode: 0o600 });
   const calls = [];
   await provisionServiceReadableConfiguration({ stateRoot, run: async (file, args) => { calls.push([file, args]); } });
   await provisionServiceReadableActivationState({ stateRoot, run: async (file, args) => { calls.push([file, args]); } });
-  assert.deepEqual(calls, [['/usr/bin/chown', ['root:sonuvi', stateRoot]], ['/usr/bin/chown', ['root:sonuvi', configRoot]], ['/usr/bin/chown', ['root:sonuvi', configFile]], ['/usr/bin/chown', ['root:sonuvi', checkpointsRoot]], ['/usr/bin/chown', ['root:sonuvi', activationState]]]);
+  assert.deepEqual(calls, [['/usr/bin/chown', ['root:sonuvi', stateRoot]], ['/usr/bin/chown', ['root:sonuvi', configRoot]], ['/usr/bin/chown', ['root:sonuvi', configFile]], ['/usr/bin/chown', ['root:sonuvi', verifierFile]], ['/usr/bin/chown', ['root:sonuvi', checkpointsRoot]], ['/usr/bin/chown', ['root:sonuvi', activationState]]]);
   assert.equal((await fs.stat(stateRoot)).mode & 0o777, 0o710);
   assert.equal((await fs.stat(configRoot)).mode & 0o777, 0o750);
   assert.equal((await fs.stat(configFile)).mode & 0o777, 0o640);
+  assert.equal((await fs.stat(verifierFile)).mode & 0o777, 0o640);
   assert.equal((await fs.stat(checkpointsRoot)).mode & 0o777, 0o750);
   assert.equal((await fs.stat(activationState)).mode & 0o777, 0o640);
   await fs.rm(configFile); await fs.symlink('/tmp', configFile);

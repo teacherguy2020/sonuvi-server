@@ -17,7 +17,15 @@ export async function authorizeFirstController({ authority, administratorToken, 
   const root = path.resolve(text(stateRoot)); if (!path.isAbsolute(root)) throw new Error('state root must be absolute');
   const accessToken = createMobileSessionToken({ secret, deviceId, now });
   const refreshToken = createMobileRefreshToken({ secret, deviceId, now });
-  const pairingRecord = { schema: 'sonuvi.first-controller-pairing.v1', deviceId, authorizedBy: administrator.administratorId, authorizedAt: new Date(now).toISOString(), accessTokenHash: crypto.createHash('sha256').update(accessToken).digest('base64url') };
-  const file = path.join(root, 'protected', 'first-controller-pairing.json'); await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 }); const temp = `${file}.${crypto.randomUUID()}.tmp`; await fs.writeFile(temp, `${JSON.stringify(pairingRecord)}\n`, { mode: 0o600 }); await fs.rename(temp, file);
+  // This is an audit record containing only a token hash. It must be written
+  // by the unprivileged API, so it lives in the narrowly approved data root,
+  // not beside root-only administrator keys or installer state.
+  const file = path.join(root, 'data', 'first-controller-pairing.json');
+  const existing = await fs.readFile(file, 'utf8').then((value) => JSON.parse(value), (error) => error?.code === 'ENOENT' ? null : Promise.reject(error));
+  if (existing && existing.deviceId !== deviceId) throw new Error('first_controller_already_authorized');
+  if (!existing) {
+    const pairingRecord = { schema: 'sonuvi.first-controller-pairing.v1', deviceId, authorizedBy: administrator.administratorId, authorizedAt: new Date(now).toISOString(), accessTokenHash: crypto.createHash('sha256').update(accessToken).digest('base64url') };
+    const temp = `${file}.${crypto.randomUUID()}.tmp`; await fs.writeFile(temp, `${JSON.stringify(pairingRecord)}\n`, { mode: 0o600 }); await fs.rename(temp, file);
+  }
   return Object.freeze({ deviceId, accessToken, refreshToken, scope: 'mobile-api' });
 }

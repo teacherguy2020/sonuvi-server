@@ -31,6 +31,27 @@ export function freshRuntimeConfig({ serverIdentity, timezone = 'UTC', apiPort =
   const identity = safeIdentity(serverIdentity); const config = { projectName: 'sonuvi', environment: 'fresh-install', timezone, apiHost: '127.0.0.1', apiNodeIp: '127.0.0.1', nodes: [{ name: identity, ip: '127.0.0.1', role: 'both', sshUser: 'sonuvi' }], ports: { api: apiPort, ui: webPort }, deployment: { sourceOfTruthNode: identity, syncMethod: 'local' }, alexa: { enabled: false, publicDomain: '', webhookPath: '/alexa' }, paths: { musicLibraryRoot: '/var/lib/sonuvi/empty-library', podcastRoot: '/var/lib/sonuvi/empty-library/podcasts', subscriptionsJson: './subscriptions.json' }, features: { podcasts: false, ratings: false, radio: true }, notifications: { trackNotify: { enabled: false, pollMs: 3000, dedupeMs: 15000, alexaMaxAgeMs: 21600000 }, pushover: {}, apns: { topic: '', environment: 'auto', tokensPath: 'var/mobile-push-tokens.json' } } };
   assertImmutableRuntimeConfig(config, { context: 'fresh installation configuration' }); return Object.freeze(config);
 }
+
+/**
+ * A newly installed Server needs its own mobile-token signing secrets, not a
+ * copied Track Key or production configuration. This file is root-only; the
+ * service receives its values through systemd's existing EnvironmentFile.
+ */
+export async function initializeFreshMobileEnvironment({ stateRoot } = {}) {
+  const root = absolute(stateRoot, 'state root');
+  const protectedRoot = path.join(root, 'protected');
+  const stat = await fs.lstat(protectedRoot);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('protected environment path is invalid');
+  const file = path.join(protectedRoot, 'now-playing.env');
+  try { await fs.lstat(file); throw new Error('fresh mobile environment already exists'); } catch (error) { if (error?.code !== 'ENOENT') throw error; }
+  const lines = [
+    'MOBILE_API_ENABLED=1',
+    `MOBILE_API_SECRET=${crypto.randomBytes(32).toString('base64url')}`,
+    `MOBILE_TRACK_ID_SECRET=${crypto.randomBytes(32).toString('base64url')}`,
+  ];
+  await fs.writeFile(file, `${lines.join('\n')}\n`, { mode: 0o600, flag: 'wx' });
+  return Object.freeze({ environmentPath: file });
+}
 /** Create only Sonuvi-owned directories. Existing partial state is rejected. */
 export async function initializeFreshHostLayout({ layoutRoot, stateRoot, serverIdentity, config = null } = {}) {
   const layout = absolute(layoutRoot, 'release layout root'); const state = absolute(stateRoot, 'state root'); const inspection = await classifyFreshInstallHost({ layoutRoot: layout, stateRoot: state, platform: 'linux', architecture: 'arm64', hasSystemd: true, uid: 0, availableBytes: Number.MAX_SAFE_INTEGER }); if (inspection.classification !== FreshInstallClassification.FRESH_ELIGIBLE) throw new Error(`fresh layout initialization refused: ${inspection.classification}`);

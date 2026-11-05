@@ -7,10 +7,11 @@ import test from 'node:test';
 
 import { AdministratorAuthority, requireAdministratorAuthorization } from '../src/lib/sonuvi-admin-authority.mjs';
 import { bootstrapHelperDescriptor, processBootstrapJsonLine, verifyBootstrapHelperArtifact } from '../src/lib/sonuvi-bootstrap-helper.mjs';
-import { FirstAdministratorEnrollment } from '../src/lib/sonuvi-bootstrap-security.mjs';
+import { firstAdministratorClaimMessage, FirstAdministratorEnrollment } from '../src/lib/sonuvi-bootstrap-security.mjs';
 
 const attemptId = 'boot_0123456789abcdef'; const targetIdentity = 'machine_0123456789abcdef';
 async function fixture(t) { const root = await fs.mkdtemp(path.join(os.tmpdir(), 'sonuvi-helper-')); t.after(() => fs.rm(root, { recursive: true, force: true })); return root; }
+function claimPayload(token) { const pair = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' }); const administratorDeviceId = 'device_0123456789abcdef'; const administratorPublicKey = pair.publicKey.export({ format: 'der', type: 'spki' }).toString('base64url'); const administratorProof = crypto.sign('sha256', firstAdministratorClaimMessage({ attemptId, targetIdentity, enrollmentToken: token, administratorDeviceId }), { key: pair.privateKey, dsaEncoding: 'ieee-p1363' }).toString('base64url'); return { administratorDeviceId, administratorPublicKey, administratorProof }; }
 
 test('bootstrap helper artifact requires an independently supplied trusted digest', async (t) => {
   const root = await fixture(t); const helper = path.join(root, 'helper.mjs'); await fs.writeFile(helper, 'fixed helper\n'); const digest = crypto.createHash('sha256').update(await fs.readFile(helper)).digest('hex');
@@ -26,6 +27,6 @@ test('JSON-lines helper has bounded fixed dispatch and reports timeout/interrupt
 });
 
 test('administrator authority persists separately from controller sessions and rejects invalid access', async (t) => {
-  const root = await fixture(t); const enrollment = new FirstAdministratorEnrollment({ stateRoot: root }); const created = await enrollment.create({ attemptId, targetIdentity }); const authority = new AdministratorAuthority({ stateRoot: root }); const identity = await authority.initializeFromClaim({ enrollment, attemptId, targetIdentity, enrollmentToken: created.enrollmentToken, administratorDeviceId: 'device_0123456789abcdef', administratorPublicKey: 'public-key' });
+  const root = await fixture(t); const enrollment = new FirstAdministratorEnrollment({ stateRoot: root }); const created = await enrollment.create({ attemptId, targetIdentity }); const authority = new AdministratorAuthority({ stateRoot: root }); await authority.provisionSigningMaterial(); const identity = await authority.initializeFromClaim({ enrollment, attemptId, targetIdentity, enrollmentToken: created.enrollmentToken, ...claimPayload(created.enrollmentToken) });
   const token = await authority.issueAccessToken({ administratorId: identity.administratorId }); assert.equal((await requireAdministratorAuthorization({ authority, bearerToken: token })).role, 'administrator'); await assert.rejects(requireAdministratorAuthorization({ authority, bearerToken: 'mobile-token' }), /required/); await authority.revoke(); assert.equal(await authority.verifyAccessToken(token), null);
 });

@@ -51,6 +51,7 @@ async function sourceFixture(t) {
   await write(root, 'scripts/lastfm-authorize.mjs', 'console.log("fixture lastfm");\n');
   await write(root, 'scripts/export-peppymeter-skins.mjs', 'console.log("fixture skins");\n');
   await write(root, 'scripts/sonuvi-bootstrap-helper.mjs', 'console.log("fixture bootstrap helper");\n');
+  await write(root, 'scripts/sonuvi-admin-bootstrap.mjs', 'console.log("fixture administrator bootstrap");\n');
   await write(root, 'scripts/sonuvi-debian-node-bootstrap.sh', '#!/bin/sh\nexit 0\n');
   await write(root, 'scripts/sonuvi-target-installer.mjs', 'console.log("fixture target installer");\n');
   await write(root, 'ops/systemd/sonuvi-api.service.in', '[Service]\nUser=@SERVICE_ACCOUNT@\nExecStart=node @RELEASE_ID@\n');

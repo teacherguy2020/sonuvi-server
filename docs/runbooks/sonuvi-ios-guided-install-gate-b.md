@@ -389,3 +389,72 @@ systemd behavior, artifact runtime closure, and APIs have passed isolated
 fixtures only. Build the immutable ARM64 artifact from this committed source,
 verify it with the normal release verifier, then use the preserved disposable
 VM for the first controlled acceptance attempt after its separate authorization.
+
+## Gate B2 administrator enrollment and first-controller handoff (2026-11-04)
+
+Status: **implemented and fixture-tested; requires a new clean-VM acceptance
+run.** This section supersedes the earlier historical notes that describe the
+administrator route as unimplemented.
+
+### Fixed enrollment transport
+
+`scripts/sonuvi-admin-bootstrap.mjs` is a root-only, local companion to the
+fixed target installer. It accepts exactly one JSON request over stdin for one
+of two operations:
+
+- `enrollment_create` creates a ten-minute, single-use first-administrator
+  proof only when the durable first-install state is
+  `awaiting-administrator-enrollment`.
+- `enrollment_claim` consumes that proof with a P-256 device public key and a
+  P-256 signature over the installation attempt, target identity, device ID,
+  and proof value.
+
+The helper reads the attempt and target identity from protected installation
+state; callers cannot select another path, release, host, service, or command.
+It stores only a SHA-256 enrollment-token verifier, public-key fingerprint,
+and claim state. If the controller disconnects after the claim record is
+durable but before completion is recorded, only the same enrollment token and
+same P-256 device proof can resume that claim. The raw enrollment proof and
+resulting short-lived administrator token exist
+only in the encrypted SSH stdin/stdout exchange and must not be copied into
+logs, journals, reports, process arguments, or persistent state.
+
+Fresh installation creates a unique mobile API signing secret and a separate
+P-256 administrator-signing key. The private administrator key and identity
+remain root-only in `protected`; its non-secret verification key is provisioned
+as `root:sonuvi` configuration so the unprivileged API can verify administrator
+bearers without ever reading a private key.
+
+### Controller handoff
+
+After a successful claim, the existing
+`POST /v1/admin/bootstrap/first-controller` route accepts only the separate
+administrator bearer and issues the existing mobile access/refresh formats.
+The resulting controller bearer cannot call administrator endpoints. The API
+may record only the controller device ID and access-token hash in its approved
+application data directory; it cannot write protected admin credentials,
+configuration, checkpoints, or installation state. A second device is refused;
+the same first device can be retried safely. Controller refresh tokens and
+administrator-token verification survive a normal API/web restart because the
+fresh per-server mobile secret and public verifier are durable.
+
+### iOS/SSH sequence
+
+1. Pin the target SSH host key and invoke the fixed installer with explicit
+   local elevation.
+2. Invoke `sonuvi-admin-bootstrap.mjs` `enrollment_create` through the same
+   authenticated SSH session and retain the returned proof only in the native
+   client's secure memory/keychain flow.
+3. Create a P-256 device key locally, sign the documented claim tuple, and
+   send the `enrollment_claim` JSON over SSH stdin. Never put the proof or
+   administrator token on a command line.
+4. Use the returned short-lived administrator bearer over the pinned local
+   connection to call admin status and authorize the first controller.
+5. Store only the normal mobile refresh credential for controller use; do not
+   treat it as administrator authority.
+
+Fixture coverage proves target/attempt binding, P-256 proof validation,
+pending/expired/replayed-claim refusal, secret redaction, durable public-key
+verification after restart, controller/admin separation, mobile refresh, and
+first-controller uniqueness. Physical VM acceptance remains required before
+marking Gate B2 complete.

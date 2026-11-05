@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { FirstAdministratorEnrollment, normalizeBootstrapOperation, verifyBootstrapHostKey } from '../src/lib/sonuvi-bootstrap-security.mjs';
+import { firstAdministratorClaimMessage, FirstAdministratorEnrollment, normalizeBootstrapOperation, verifyBootstrapHostKey } from '../src/lib/sonuvi-bootstrap-security.mjs';
 import { PrivilegedProvisioningAdapter, markAttemptOwnedRoot } from '../src/lib/sonuvi-privileged-provisioning.mjs';
 import { renderFreshSystemdUnits } from '../src/lib/sonuvi-fresh-install.mjs';
 
@@ -12,6 +13,13 @@ const attemptId = 'boot_0123456789abcdef';
 const targetIdentity = 'machine_0123456789abcdef';
 const releaseId = `sonuvi-${'b'.repeat(64)}`;
 async function fixture(t) { const root = await fs.mkdtemp(path.join(os.tmpdir(), 'sonuvi-bootstrap-security-')); t.after(() => fs.rm(root, { recursive: true, force: true })); return root; }
+function claimPayload(token, target = targetIdentity) {
+  const pair = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const administratorDeviceId = 'device_0123456789abcdef';
+  const administratorPublicKey = pair.publicKey.export({ format: 'der', type: 'spki' }).toString('base64url');
+  const administratorProof = crypto.sign('sha256', firstAdministratorClaimMessage({ attemptId, targetIdentity: target, enrollmentToken: token, administratorDeviceId }), { key: pair.privateKey, dsaEncoding: 'ieee-p1363' }).toString('base64url');
+  return { administratorDeviceId, administratorPublicKey, administratorProof };
+}
 
 test('host-key policy pins known keys and requires an explicit first trust', () => {
   const fingerprint = 'SHA256:AbCdEf1234567890+/=';
@@ -33,12 +41,15 @@ test('first-administrator enrollment is attempt-bound, expiring, single-use, and
   const created = await enrollment.create({ attemptId, targetIdentity });
   const raw = await fs.readFile(path.join(root, 'protected', 'first-administrator-enrollment.json'), 'utf8');
   assert.equal(raw.includes(created.enrollmentToken), false);
-  await assert.rejects(enrollment.claim({ attemptId, targetIdentity: 'machine_wrong_0123456789', enrollmentToken: created.enrollmentToken, administratorDeviceId: 'device_0123456789abcdef', administratorPublicKey: 'public' }), /mismatch/);
-  const claimed = await enrollment.claim({ attemptId, targetIdentity, enrollmentToken: created.enrollmentToken, administratorDeviceId: 'device_0123456789abcdef', administratorPublicKey: 'public' });
+  await assert.rejects(enrollment.create({ attemptId, targetIdentity }), /pending/);
+  await assert.rejects(enrollment.claim({ attemptId, targetIdentity: 'machine_wrong_0123456789', enrollmentToken: created.enrollmentToken, ...claimPayload(created.enrollmentToken, 'machine_wrong_0123456789') }), /mismatch/);
+  const claim = claimPayload(created.enrollmentToken);
+  const claimed = await enrollment.claim({ attemptId, targetIdentity, enrollmentToken: created.enrollmentToken, ...claim });
   assert.equal(claimed.status, 'claimed');
-  await assert.rejects(enrollment.claim({ attemptId, targetIdentity, enrollmentToken: created.enrollmentToken, administratorDeviceId: 'device_0123456789abcdef', administratorPublicKey: 'public' }), /already_claimed/);
+  assert.equal((await enrollment.claim({ attemptId, targetIdentity, enrollmentToken: created.enrollmentToken, ...claim })).administratorPublicKeyHash, claimed.administratorPublicKeyHash);
+  await assert.rejects(enrollment.claim({ attemptId, targetIdentity, enrollmentToken: created.enrollmentToken, ...claimPayload(created.enrollmentToken) }), /already_claimed/);
   const later = new FirstAdministratorEnrollment({ stateRoot: path.join(root, 'later'), now: () => clock, ttlMs: 1 }); const expiring = await later.create({ attemptId, targetIdentity }); clock += 2;
-  await assert.rejects(later.claim({ attemptId, targetIdentity, enrollmentToken: expiring.enrollmentToken, administratorDeviceId: 'device_0123456789abcdef', administratorPublicKey: 'public' }), /expired/);
+  await assert.rejects(later.claim({ attemptId, targetIdentity, enrollmentToken: expiring.enrollmentToken, ...claimPayload(expiring.enrollmentToken) }), /expired/);
 });
 
 test('privileged adapter accepts only fixed units and attempt-owned cleanup', async (t) => {

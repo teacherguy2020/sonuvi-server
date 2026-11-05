@@ -5,7 +5,8 @@ import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 
 import { activateFirstRelease } from './sonuvi-first-release.mjs';
-import { FreshInstallClassification, classifyFreshInstallHost, initializeFreshHostLayout, provisionFreshSystemdUnits, renderFreshSystemdUnits } from './sonuvi-fresh-install.mjs';
+import { AdministratorAuthority } from './sonuvi-admin-authority.mjs';
+import { FreshInstallClassification, appendFreshInstallJournal, classifyFreshInstallHost, initializeFreshHostLayout, initializeFreshMobileEnvironment, provisionFreshSystemdUnits, renderFreshSystemdUnits, writeFreshInstallState } from './sonuvi-fresh-install.mjs';
 import { makeTreeReadOnly, verifyReleaseArtifact } from './release-artifact.mjs';
 
 const execFile = promisify(execFileCallback);
@@ -91,16 +92,19 @@ export async function provisionServiceReadableConfiguration({ stateRoot, run = (
   const root = absolute(stateRoot, 'state root');
   const configRoot = path.join(root, 'config');
   const configFile = path.join(configRoot, 'now-playing.config.json');
+  const verifierFile = path.join(configRoot, 'administrator-verifier.json');
   const checkpointsRoot = path.join(root, 'checkpoints');
-  const [state, directory, file, checkpoints] = await Promise.all([fs.lstat(root), fs.lstat(configRoot), fs.lstat(configFile), fs.lstat(checkpointsRoot)]);
-  if (!state.isDirectory() || state.isSymbolicLink() || !directory.isDirectory() || directory.isSymbolicLink() || !file.isFile() || file.isSymbolicLink() || !checkpoints.isDirectory() || checkpoints.isSymbolicLink()) throw new Error('configuration_path_invalid');
+  const [state, directory, file, verifier, checkpoints] = await Promise.all([fs.lstat(root), fs.lstat(configRoot), fs.lstat(configFile), fs.lstat(verifierFile), fs.lstat(checkpointsRoot)]);
+  if (!state.isDirectory() || state.isSymbolicLink() || !directory.isDirectory() || directory.isSymbolicLink() || !file.isFile() || file.isSymbolicLink() || !verifier.isFile() || verifier.isSymbolicLink() || !checkpoints.isDirectory() || checkpoints.isSymbolicLink()) throw new Error('configuration_path_invalid');
   await run('/usr/bin/chown', ['root:sonuvi', root]);
   await run('/usr/bin/chown', ['root:sonuvi', configRoot]);
   await run('/usr/bin/chown', ['root:sonuvi', configFile]);
+  await run('/usr/bin/chown', ['root:sonuvi', verifierFile]);
   await run('/usr/bin/chown', ['root:sonuvi', checkpointsRoot]);
   await fs.chmod(root, 0o710);
   await fs.chmod(configRoot, 0o750);
   await fs.chmod(configFile, 0o640);
+  await fs.chmod(verifierFile, 0o640);
   await fs.chmod(checkpointsRoot, 0o750);
 }
 
@@ -125,7 +129,7 @@ function validateRequest(request) {
  * only: release source, service names, paths, commands, and environment are
  * fixed by this module. It is deliberately not a network service.
  */
-export async function runFixedTargetInstallation({ request, paths = TARGET_PATHS, platform = process.platform, architecture = process.arch, uid = typeof process.getuid === 'function' ? process.getuid() : null, systemd = createFixedSystemd(), serviceAccount = createFixedServiceAccount(), ownership = provisionWritableStateOwnership, configurationAccess = provisionServiceReadableConfiguration, activationStateAccess = provisionServiceReadableActivationState, verifyArtifact = verifyReleaseArtifact, health = null } = {}) {
+export async function runFixedTargetInstallation({ request, paths = TARGET_PATHS, platform = process.platform, architecture = process.arch, uid = typeof process.getuid === 'function' ? process.getuid() : null, systemd = createFixedSystemd(), serviceAccount = createFixedServiceAccount(), ownership = provisionWritableStateOwnership, configurationAccess = provisionServiceReadableConfiguration, activationStateAccess = provisionServiceReadableActivationState, verifyArtifact = verifyReleaseArtifact, health = null, administratorAuthorityFactory = (stateRoot) => new AdministratorAuthority({ stateRoot }) } = {}) {
   const input = validateRequest(request);
   if (!nodeCompatible()) throw new Error('node_runtime_unsupported');
   const roots = Object.fromEntries(Object.entries(paths).map(([key, value]) => [key, absolute(value, key)]));
@@ -137,6 +141,10 @@ export async function runFixedTargetInstallation({ request, paths = TARGET_PATHS
   if (sourceManifest.releaseId !== input.releaseId) throw new Error('staged_release_identity_mismatch');
   await serviceAccount.ensure();
   const initialized = await initializeFreshHostLayout({ layoutRoot: roots.layoutRoot, stateRoot: roots.stateRoot, serverIdentity: input.serverIdentity });
+  await initializeFreshMobileEnvironment({ stateRoot: roots.stateRoot });
+  const administratorAuthority = administratorAuthorityFactory(roots.stateRoot);
+  if (!administratorAuthority || typeof administratorAuthority.provisionSigningMaterial !== 'function') throw new Error('administrator authority provisioning is unavailable');
+  await administratorAuthority.provisionSigningMaterial();
   await ownership({ stateRoot: roots.stateRoot });
   await configurationAccess({ stateRoot: roots.stateRoot });
   const destination = path.join(roots.layoutRoot, 'releases', input.releaseId);
@@ -158,6 +166,9 @@ export async function runFixedTargetInstallation({ request, paths = TARGET_PATHS
       makeActivationStateReadable: async () => activationStateAccess({ stateRoot: roots.stateRoot }),
     };
     const activation = await activateFirstRelease({ layoutRoot: roots.layoutRoot, stateRoot: roots.stateRoot, releaseId: input.releaseId, attemptId: input.attemptId, targetIdentity: input.targetIdentity, adapter, verifyArtifact });
+    const waiting = { ...activation.state, phase: 'awaiting-administrator-enrollment', completedAt: new Date().toISOString() };
+    await writeFreshInstallState({ statePath: initialized.statePath, state: waiting });
+    await appendFreshInstallJournal({ journalPath: initialized.journalPath, attemptId: input.attemptId, targetIdentity: input.targetIdentity, event: { requestId: input.attemptId, stage: 'administrator_enrollment', state: 'waiting', at: waiting.completedAt } });
     return Object.freeze({ state: 'awaiting-administrator-enrollment', releaseId: activation.releaseId, layoutRoot: initialized.layoutRoot, stateRoot: initialized.stateRoot });
   } catch (error) {
     await fs.rm(destination, { recursive: true, force: true }).catch(() => {});
