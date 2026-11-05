@@ -183,6 +183,19 @@ plain HTTP LAN API is safe:
 | enrollment expiry/replay | existing enrollment error | create a new enrollment, never reuse proof |
 | controller handoff failure | existing first-controller error | retain SSH trust; retry only authorization |
 
+## Native archive/status acceptance fixture
+
+The dedicated disposable Debian ARM64 fixture is ready at `127.0.0.1:2225` for
+the native archive streamer and durable status poller. It uses the real fixed
+helpers, an explicit SSH pin, a localhost-only relay to an egress-isolated
+root-helper container, and the current signed immutable archive. Its exact
+credentials path, operation strings, release identity, helper hashes, reset
+procedure, and validated failure semantics are in
+[the archive/status fixture handoff](sonuvi-ios-gate-c-archive-status-fixture.md).
+The existing published kit/archive predate the status-entrypoint syntax fix;
+they must be rebuilt and signed as a new immutable bundle before iOS uses their
+status helper in a fresh-install or physical-iPad acceptance.
+
 ## Remaining acceptance requirements
 
 1. Release engineering must publish the real pinned Ed25519 public key, signed

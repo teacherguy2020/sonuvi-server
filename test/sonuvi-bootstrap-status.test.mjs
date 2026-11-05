@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,6 +12,10 @@ import { BOOTSTRAP_STATUS_CONTRACT, normalizeBootstrapStatusRequest, readBootstr
 const attemptId = 'boot_0123456789abcdef';
 const targetIdentity = 'machine_0123456789abcdef';
 const releaseId = `sonuvi-${'a'.repeat(64)}`;
+
+test('root-only status entrypoint remains syntactically executable', () => {
+  assert.doesNotThrow(() => execFileSync(process.execPath, ['--check', 'scripts/sonuvi-bootstrap-status.mjs'], { stdio: 'pipe' }));
+});
 
 async function fixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'sonuvi-bootstrap-status-'));

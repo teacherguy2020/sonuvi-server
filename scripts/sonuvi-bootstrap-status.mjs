@@ -11,7 +11,7 @@ if (process.getuid?.() !== 0) {
 } else {
   try {
     const request = JSON.parse(await fs.readFile('/dev/stdin', 'utf8'));
-    process.stdout.write(`${JSON.stringify({ ok: true, ...(await readBootstrapStatus({ request })))}\n`);
+    process.stdout.write(`${JSON.stringify({ ok: true, ...(await readBootstrapStatus({ request })) })}\n`);
   } catch (error) {
     process.stdout.write(`${JSON.stringify({ ok: false, code: error?.message || 'bootstrap_status_failed' })}\n`);
     process.exitCode = 1;

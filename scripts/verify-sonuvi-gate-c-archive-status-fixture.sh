@@ -1,0 +1,196 @@
+#!/usr/bin/env bash
+# Independent OpenSSH acceptance of the disposable Gate C archive/status
+# fixture. It streams the published immutable release through the real fixed
+# helper and never installs or activates Sonuvi.
+set -euo pipefail
+
+readonly repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+readonly fixture_control="$repo_root/scripts/sonuvi-gate-c-archive-status-fixture.sh"
+readonly credential_dir='/Users/brianwis/.openclaw/credentials/sonuvi-gate-c-archive-status-fixture-20261105'
+readonly host='127.0.0.1'
+readonly port='2225'
+readonly account='sonuvi-stage'
+readonly host_key="$credential_dir/ssh_host_ed25519_key"
+readonly host_key_public="$host_key.pub"
+readonly client_key="$credential_dir/client_ed25519"
+readonly release_id='sonuvi-152057e2d169e6d586a36cea1d3f6c1c1316781b14a72035eec625eb3c45b421'
+readonly release_root="/Volumes/SammySSD/Sonuvi-iOS-Guided-Setup-Lab/distribution/gate-c-lab/$release_id"
+readonly release_archive="$release_root/$release_id-linux-arm64.tar"
+readonly envelope="$release_root/release-envelope.json"
+readonly attempt_id='boot_fixture_archive_status_20261105'
+readonly target_identity='fixture_target_20261105'
+readonly container_name='sonuvi-gate-c-archive-status-fixture'
+readonly status_command='/usr/bin/sudo -n /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-bootstrap-status.mjs'
+readonly stage_command='/usr/bin/sudo -n /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-release-stage.mjs'
+
+fail() {
+  echo "verify_sonuvi_gate_c_archive_status_fixture:$1" >&2
+  exit "${2:-1}"
+}
+
+scratch_dir="$(mktemp -d /tmp/sonuvi-gate-c-archive-status-fixture.XXXXXX)"
+cleanup() {
+  "$fixture_control" reset >/dev/null 2>&1 || true
+  trash "$scratch_dir" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT HUP INT TERM
+
+[ -f "$host_key" ] && [ -f "$host_key_public" ] && [ -f "$client_key" ] || fail fixture_credential_missing 64
+[ -f "$release_archive" ] && [ -f "$envelope" ] || fail fixture_release_missing 64
+expected_fingerprint="$(ssh-keygen -lf "$host_key_public" -E sha256 | awk '{print $2}')"
+[ -n "$expected_fingerprint" ] || fail fixture_host_fingerprint_missing 64
+awk -v port="$port" '{print "[127.0.0.1]:" port " " $1 " " $2}' "$host_key_public" > "$scratch_dir/known_hosts"
+
+ssh_run() {
+  ssh -T \
+    -p "$port" \
+    -i "$client_key" \
+    -o "UserKnownHostsFile=$scratch_dir/known_hosts" \
+    -o GlobalKnownHostsFile=/dev/null \
+    -o StrictHostKeyChecking=yes \
+    -o IdentitiesOnly=yes \
+    -o BatchMode=yes \
+    "$account@$host" "$@"
+}
+
+make_header() {
+  SONUVI_FIXTURE_ENVELOPE="$envelope" node --input-type=module --eval "import fs from 'node:fs/promises'; const envelope = JSON.parse(await fs.readFile(process.env.SONUVI_FIXTURE_ENVELOPE, 'utf8')); process.stdout.write(JSON.stringify({ operation: 'stage_release', envelope }) + '\\n');" > "$scratch_dir/header.jsonl"
+  [ "$(wc -c < "$scratch_dir/header.jsonl" | tr -d ' ')" -le 65536 ] || fail fixture_header_limit_invalid 64
+}
+
+assert_status() {
+  local file="$1"
+  SONUVI_FIXTURE_RESULT="$file" node --input-type=module --eval "import fs from 'node:fs/promises'; const value = JSON.parse(await fs.readFile(process.env.SONUVI_FIXTURE_RESULT, 'utf8')); if (!value.ok || value.contract !== 'sonuvi.bootstrap-status.v1' || value.attemptId !== '$attempt_id' || value.targetIdentity !== '$target_identity' || value.phase !== 'release_acquisition' || value.next !== 'observe' || value.terminal !== false || !Array.isArray(value.events) || value.events.length !== 1) throw new Error('unexpected durable status response');"
+}
+
+assert_stage() {
+  local file="$1" expected="$2"
+  SONUVI_FIXTURE_RESULT="$file" SONUVI_FIXTURE_STATE="$expected" node --input-type=module --eval "import fs from 'node:fs/promises'; const value = JSON.parse(await fs.readFile(process.env.SONUVI_FIXTURE_RESULT, 'utf8')); if (!value.ok || value.state !== process.env.SONUVI_FIXTURE_STATE || value.releaseId !== '$release_id') throw new Error('unexpected release stage response');"
+}
+
+assert_failure() {
+  local file="$1" expected="$2"
+  SONUVI_FIXTURE_RESULT="$file" SONUVI_FIXTURE_CODE="$expected" node --input-type=module --eval "import fs from 'node:fs/promises'; const value = JSON.parse(await fs.readFile(process.env.SONUVI_FIXTURE_RESULT, 'utf8')); if (value.ok || !String(value.code || '').includes(process.env.SONUVI_FIXTURE_CODE)) throw new Error('unexpected fixture rejection response');"
+}
+
+run_status() {
+  printf '%s' "{\"operation\":\"status\",\"attemptId\":\"$attempt_id\"}" | ssh_run "$status_command"
+}
+
+run_stage() {
+  cat "$scratch_dir/header.jsonl" "$release_archive" | ssh_run "$stage_command"
+}
+
+"$fixture_control" reset >/dev/null
+"$fixture_control" inspect > "$scratch_dir/inspect.txt"
+grep -q '0:0:700 /var/lib/sonuvi-bootstrap$' "$scratch_dir/inspect.txt" || fail fixture_root_permissions_invalid 65
+grep -q '0:0:700 /var/lib/sonuvi-bootstrap/attempts$' "$scratch_dir/inspect.txt" || fail fixture_attempt_permissions_invalid 65
+grep -q '0:0:644 /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-release-stage.mjs$' "$scratch_dir/inspect.txt" || fail fixture_stage_helper_permissions_invalid 65
+grep -q '0:0:644 /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-bootstrap-status.mjs$' "$scratch_dir/inspect.txt" || fail fixture_status_helper_permissions_invalid 65
+
+# Pinning is explicit: a deliberately different host key must fail before
+# user authentication, while the expected key permits the fixed status command.
+ssh-keygen -q -t ed25519 -f "$scratch_dir/wrong_host_ed25519" -N '' -C fixture-wrong-host
+awk -v port="$port" '{print "[127.0.0.1]:" port " " $1 " " $2}' "$scratch_dir/wrong_host_ed25519.pub" > "$scratch_dir/wrong_known_hosts"
+set +e
+printf '%s' "{\"operation\":\"status\",\"attemptId\":\"$attempt_id\"}" | ssh -T -p "$port" -i "$client_key" -o "UserKnownHostsFile=$scratch_dir/wrong_known_hosts" -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes -o BatchMode=yes "$account@$host" "$status_command" > /dev/null 2>&1
+wrong_host_rc=$?
+set -e
+[ "$wrong_host_rc" -ne 0 ] || fail fixture_host_key_mismatch_accepted 66
+
+run_status > "$scratch_dir/status-before.json"
+assert_status "$scratch_dir/status-before.json"
+before_status_digest="$(docker exec "$container_name" sha256sum /var/lib/sonuvi-bootstrap/attempts/$attempt_id/state.json /var/lib/sonuvi-bootstrap/attempts/$attempt_id/journal.jsonl | sort)"
+run_status > "$scratch_dir/status-reconnect.json"
+assert_status "$scratch_dir/status-reconnect.json"
+after_status_digest="$(docker exec "$container_name" sha256sum /var/lib/sonuvi-bootstrap/attempts/$attempt_id/state.json /var/lib/sonuvi-bootstrap/attempts/$attempt_id/journal.jsonl | sort)"
+[ "$before_status_digest" = "$after_status_digest" ] || fail fixture_status_mutated_state 67
+
+set +e
+printf '%s' '{"operation":"status","attemptId":"boot_unrelated_1234567890"}' | ssh_run "$status_command" > "$scratch_dir/status-unrelated.json"
+unrelated_rc=$?
+set -e
+[ "$unrelated_rc" -ne 0 ] || fail fixture_unrelated_status_accepted 67
+assert_failure "$scratch_dir/status-unrelated.json" 'bootstrap_attempt_not_found'
+
+make_header
+run_stage > "$scratch_dir/staged.json"
+assert_stage "$scratch_dir/staged.json" staged
+docker exec "$container_name" /bin/sh -ec "test -d /var/lib/sonuvi-bootstrap/releases/$release_id && test \"\$(stat -c %a /var/lib/sonuvi-bootstrap/releases/$release_id)\" = 555"
+run_stage > "$scratch_dir/already-staged.json"
+assert_stage "$scratch_dir/already-staged.json" already_staged
+
+# A fully completed first stream with its output intentionally discarded is
+# indistinguishable to a reconnecting caller from a lost final response. The
+# canonical retry is safely `already_staged`, not a second extraction.
+"$fixture_control" reset >/dev/null
+run_stage > /dev/null
+run_stage > "$scratch_dir/lost-response-retry.json"
+assert_stage "$scratch_dir/lost-response-retry.json" already_staged
+
+"$fixture_control" reset >/dev/null
+set +e
+printf '{"operation":"stage_release"\n' | ssh_run "$stage_command" > "$scratch_dir/malformed.json"
+malformed_rc=$?
+set -e
+[ "$malformed_rc" -ne 0 ] || fail fixture_malformed_header_accepted 68
+assert_failure "$scratch_dir/malformed.json" 'Expected'
+
+"$fixture_control" reset >/dev/null
+set +e
+{ cat "$scratch_dir/header.jsonl"; head -c 1048576 "$release_archive"; } | ssh_run "$stage_command" > "$scratch_dir/truncated.json"
+truncated_rc=$?
+set -e
+[ "$truncated_rc" -ne 0 ] || fail fixture_truncated_archive_accepted 68
+assert_failure "$scratch_dir/truncated.json" 'byte count'
+docker exec "$container_name" /bin/sh -ec "test ! -e /var/lib/sonuvi-bootstrap/releases/$release_id"
+
+"$fixture_control" reset >/dev/null
+cp "$release_archive" "$scratch_dir/corrupt.tar"
+chmod u+w "$scratch_dir/corrupt.tar"
+printf '\001' | dd of="$scratch_dir/corrupt.tar" bs=1 seek=4096 conv=notrunc status=none
+set +e
+cat "$scratch_dir/header.jsonl" "$scratch_dir/corrupt.tar" | ssh_run "$stage_command" > "$scratch_dir/digest-mismatch.json"
+digest_rc=$?
+set -e
+[ "$digest_rc" -ne 0 ] || fail fixture_digest_mismatch_accepted 68
+assert_failure "$scratch_dir/digest-mismatch.json" 'digest'
+
+"$fixture_control" reset >/dev/null
+set +e
+{ cat "$scratch_dir/header.jsonl" "$release_archive"; printf x; } | ssh_run "$stage_command" > "$scratch_dir/trailing.json"
+trailing_rc=$?
+set -e
+[ "$trailing_rc" -ne 0 ] || fail fixture_trailing_archive_accepted 68
+assert_failure "$scratch_dir/trailing.json" 'exceeds metadata'
+
+# This is an actual SSH disconnect mid-stream: the producer keeps the channel
+# open after one MiB, then the SSH process is terminated before it can finish.
+"$fixture_control" reset >/dev/null
+mkfifo "$scratch_dir/interrupted.fifo"
+ssh -T -p "$port" -i "$client_key" -o "UserKnownHostsFile=$scratch_dir/known_hosts" -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes -o BatchMode=yes "$account@$host" "$stage_command" < "$scratch_dir/interrupted.fifo" > "$scratch_dir/interrupted.json" 2> "$scratch_dir/interrupted.err" &
+ssh_pid=$!
+{ cat "$scratch_dir/header.jsonl"; dd if="$release_archive" bs=65536 count=16 status=none; sleep 10; } > "$scratch_dir/interrupted.fifo" &
+producer_pid=$!
+sleep 1
+kill "$ssh_pid" >/dev/null 2>&1 || true
+wait "$ssh_pid" || true
+kill "$producer_pid" >/dev/null 2>&1 || true
+wait "$producer_pid" || true
+sleep 1
+docker exec "$container_name" /bin/sh -ec "test ! -e /var/lib/sonuvi-bootstrap/releases/$release_id"
+
+# The forced dispatcher is an authorization boundary, not a shell. A command
+# outside the two fixed helpers must never reach a user shell or root process.
+set +e
+ssh_run /usr/bin/id > "$scratch_dir/unauthorized.out" 2> "$scratch_dir/unauthorized.err"
+unauthorized_rc=$?
+set -e
+[ "$unauthorized_rc" -eq 126 ] || fail fixture_unauthorized_operation_accepted 69
+grep -q 'operation_rejected' "$scratch_dir/unauthorized.err"
+
+"$fixture_control" reset >/dev/null
+run_status > "$scratch_dir/status-final.json"
+assert_status "$scratch_dir/status-final.json"
+printf '{"fixture":"%s:%s","account":"%s","hostKey":"%s","releaseId":"%s","stage":"actual-archive-verified","status":"reconnect-safe","reset":"container-recreate"}\n' \
+  "$host" "$port" "$account" "$expected_fingerprint" "$release_id"
