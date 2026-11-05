@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
+import { pathToFileURL } from 'node:url';
 
 import {
   buildReleaseArtifact,
@@ -71,6 +72,10 @@ async function dependencyFixture(t, sourceRoot) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'sonuvi-release-dependencies-'));
   t.after(async () => { await fs.rm(root, { recursive: true, force: true }); });
   await write(root, 'node_modules/example/package.json', JSON.stringify({ name: 'example', version: '1.0.0' }));
+  await write(root, 'node_modules/example/index.js', 'module.exports = "fixture package";\n');
+  await write(root, 'node_modules/example/bin/fxparser', '#!/bin/sh\nexit 0\n');
+  await fs.mkdir(path.join(root, 'node_modules', '.bin'), { recursive: true });
+  await fs.symlink('../example/bin/fxparser', path.join(root, 'node_modules', '.bin', 'fxparser'));
   await write(root, 'node_modules/sharp/package.json', JSON.stringify({ name: 'sharp', version: '0.33.5' }));
   await write(root, 'node_modules/@img/sharp-linux-arm64/package.json', JSON.stringify({ name: '@img/sharp-linux-arm64', version: '0.33.5' }));
   await write(root, 'node_modules/@img/sharp-linux-arm64/lib/sharp-linux-arm64.node', 'linux arm64 native fixture');
@@ -185,6 +190,42 @@ test('manifest-backed artifact excludes secrets and detects tampering before sta
 
   await fs.writeFile(path.join(artifactRoot, 'public', 'index.html'), '<!doctype html>tampered');
   await assert.rejects(verifyReleaseArtifact({ artifactRoot }), /inventory|identity|public asset/i);
+});
+
+test('final artifact dependency inventory is recomputed after pruning npm command shims', async (t) => {
+  const source = await sourceFixture(t);
+  const dependencies = await dependencyFixture(t, source);
+  await write(source, 'src/lib/package-import.mjs', 'import value from "example";\nexport { value };\n');
+  await write(source, 'moode-nowplaying-api.mjs', 'import { value } from "./src/lib/package-import.mjs";\nexport const fixtureApi = value;\n');
+  await run('git', ['add', 'moode-nowplaying-api.mjs', 'src/lib/package-import.mjs'], source);
+  await run('git', ['commit', '-m', 'exercise packaged dependency import'], source);
+
+  const metadata = JSON.parse(await fs.readFile(path.join(dependencies, 'target-dependencies.json'), 'utf8'));
+  const parent = await fs.mkdtemp(path.join(os.tmpdir(), 'sonuvi-final-artifact-'));
+  t.after(async () => { await fs.rm(parent, { recursive: true, force: true }); });
+  const first = await buildReleaseArtifact({
+    sourceWorktree: source,
+    outputRoot: path.join(parent, 'first'),
+    dependencyRoot: dependencies,
+    buildTimestamp: '2026-11-04T00:00:00.000Z',
+  });
+  const second = await buildReleaseArtifact({
+    sourceWorktree: source,
+    outputRoot: path.join(parent, 'second'),
+    dependencyRoot: dependencies,
+    buildTimestamp: '2026-11-04T00:00:00.000Z',
+  });
+
+  assert.equal(first.releaseId, second.releaseId);
+  await assert.rejects(fs.lstat(path.join(first.artifactRoot, 'node_modules', '.bin')), { code: 'ENOENT' });
+  assert.equal(first.manifest.dependencies.sourceMetadata.dependencyFilesHash, metadata.dependencyFilesHash);
+  assert.notEqual(first.manifest.dependencies.dependencyFilesHash, metadata.dependencyFilesHash);
+  assert.equal((await verifyReleaseArtifact({ artifactRoot: first.artifactRoot })).releaseId, first.releaseId);
+  assert.equal((await verifyReleaseArtifact({ artifactRoot: second.artifactRoot })).releaseId, second.releaseId);
+  assert.equal((await import(`${pathToFileURL(path.join(first.artifactRoot, 'moode-nowplaying-api.mjs')).href}?fixture=final-tree`)).fixtureApi, 'fixture package');
+
+  await fs.symlink('../../outside-release-root', path.join(first.artifactRoot, 'node_modules', 'escaping-link'));
+  await assert.rejects(verifyReleaseArtifact({ artifactRoot: first.artifactRoot }), /artifact symlink escapes root/);
 });
 
 test('release build fails on a missing static runtime helper and verifies its imported helper closure', async (t) => {

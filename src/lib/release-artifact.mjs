@@ -724,6 +724,14 @@ export async function buildReleaseArtifact({
     // npm command shims are build-time conveniences. Runtime loads package
     // imports directly; omitting .bin avoids shipping mutable CLI symlinks.
     await fs.rm(path.join(stage, 'node_modules', '.bin'), { recursive: true, force: true });
+    // Keep source dependency metadata as evidence of the verified target
+    // dependency tree, but make the release manifest describe the immutable
+    // tree that we actually ship after pruning non-runtime npm shims.
+    const packagedNodeModules = path.join(stage, 'node_modules');
+    const packagedDependencyPackages = await packageInventory(packagedNodeModules);
+    const packagedDependencyFiles = await collectFileInventory(packagedNodeModules);
+    const packagedNativeArtifacts = await nativeArtifacts(packagedNodeModules);
+    assertNoMacNativeArtifacts(packagedNativeArtifacts);
     const publicRoot = path.join(stage, 'public');
     await buildPublicWebRoot({ sourceRoot: snapshot.root, outputRoot: publicRoot });
     const initialPublicInventory = await assertPublicRootIntegrity(publicRoot);
@@ -772,10 +780,16 @@ export async function buildReleaseArtifact({
       packageLockSha256,
       dependencies: {
         contract: dependencies.metadata.contract,
-        packageInventory: dependencies.metadata.packageInventory,
-        packageInventoryHash: dependencies.metadata.packageInventoryHash,
-        dependencyFilesHash: dependencies.metadata.dependencyFilesHash,
-        nativeArtifacts: dependencies.metadata.nativeArtifacts,
+        sourceMetadata: {
+          packageInventory: dependencies.metadata.packageInventory,
+          packageInventoryHash: dependencies.metadata.packageInventoryHash,
+          dependencyFilesHash: dependencies.metadata.dependencyFilesHash,
+          nativeArtifacts: dependencies.metadata.nativeArtifacts,
+        },
+        packageInventory: packagedDependencyPackages,
+        packageInventoryHash: inventoryHash(packagedDependencyPackages),
+        dependencyFilesHash: inventoryHash(packagedDependencyFiles),
+        nativeArtifacts: packagedNativeArtifacts,
       },
       publicAssets: {
         contract: 'sonuvi.public-web-root.v1',
