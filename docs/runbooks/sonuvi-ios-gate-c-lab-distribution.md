@@ -58,6 +58,15 @@ Current lab TLS identity:
 The TLS private key is stored only in local lab credential storage. It is not
 part of the release kit, source repository, or iOS application.
 
+The matching public leaf DER for the lab iOS build is the fixed local input:
+
+```text
+/Volumes/SammySSD/Sonuvi-iOS-Guided-Setup-Lab/ios-inputs/sonuvi-gate-c-lab-distribution-tls-server-cert.der
+```
+
+Its SHA-256 is the certificate digest above. It is exported from the
+protected local certificate source, not retrieved from this endpoint.
+
 The endpoint is self-signed by design. The reviewed, application-scoped
 Security.framework anchor/hostname/validity/leaf/SPKI policy is
 [`sonuvi-ios-gate-c-sftp-and-lab-tls.md`](sonuvi-ios-gate-c-sftp-and-lab-tls.md).

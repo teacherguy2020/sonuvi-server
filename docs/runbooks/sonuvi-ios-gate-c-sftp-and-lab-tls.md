@@ -165,11 +165,27 @@ leaf SPKI SHA-256 (base64url): v5i8HdltMqwPlQJa8D1niB1NnqogY3CIbrKf5_4iLpc
 validity: 2026-11-05T15:05:38Z through 2026-12-05T15:05:38Z
 ```
 
-The public lab leaf certificate is a build-time resource supplied from the
-protected local lab credential directory as `tls-server-cert.der`; it is not a
-private key and must not be fetched from the endpoint it is meant to
-authenticate. The app bundles it only in the lab build that contains this
+The public lab leaf certificate is a build-time resource recovered from the
+protected local lab credential source and published for the lab iOS build at:
+
+```text
+/Volumes/SammySSD/Sonuvi-iOS-Guided-Setup-Lab/ios-inputs/sonuvi-gate-c-lab-distribution-tls-server-cert.der
+```
+
+It is not a private key and must not be fetched from the endpoint it is meant
+to authenticate. The app bundles it only in the lab build that contains this
 exact policy. The release Ed25519 anchor remains separate:
+
+```text
+DER SHA-256: 0f60a0d502ff5fd397f6f14db9ab0680de26595e368072d46abadcfd546cec76
+subject/SAN: M4-Mac-mini.local
+validity: 2026-11-05T15:05:38Z through 2026-12-05T15:05:38Z
+```
+
+The protected local source, the exported DER, and the active
+`M4-Mac-mini.local:9443` listener were compared byte-for-byte before this
+path was recorded. A TLS 1.3 hostname check with that local public anchor
+succeeds only for the expected identity; a wrong hostname rejects.
 
 ```text
 Ed25519 release signer SPKI SHA-256 (base64url):
