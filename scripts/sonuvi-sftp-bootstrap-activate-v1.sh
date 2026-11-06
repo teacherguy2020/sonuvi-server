@@ -105,6 +105,7 @@ expected_tree='.
 ./scripts/sonuvi-debian-node-bootstrap.sh
 ./scripts/sonuvi-first-install-activate.mjs
 ./scripts/sonuvi-release-stage.mjs
+./scripts/sonuvi-target-preflight.sh
 ./src
 ./src/lib
 ./src/lib/atomic-file.mjs
@@ -118,7 +119,8 @@ expected_tree='.
 ./src/lib/sonuvi-fresh-install.mjs
 ./src/lib/sonuvi-gate-c-first-install.mjs
 ./src/lib/sonuvi-gate-c-release.mjs
-./src/lib/sonuvi-gate-c-staging.mjs'
+./src/lib/sonuvi-gate-c-staging.mjs
+./src/lib/sonuvi-gate-c-target-preflight.mjs'
 observed_tree="$(cd "$temporary_root" && find . -print | LC_ALL=C sort)"
 [ "$observed_tree" = "$expected_tree" ] || fail bootstrap_kit_entries_invalid 69
 chown -R root:root "$temporary_root"

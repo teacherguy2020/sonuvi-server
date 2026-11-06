@@ -5,13 +5,16 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 import { makeTreeReadOnly, verifyReleaseArtifact } from './release-artifact.mjs';
+import { appendBootstrapAttemptEvent, BOOTSTRAP_ATTEMPT_STATE_ROOT, readBootstrapAttemptProgress, writeBootstrapAttemptProgress } from './sonuvi-bootstrap-progress.mjs';
 import { verifyGateCReleaseTransfer, verifySignedGateCReleaseMetadata } from './sonuvi-gate-c-release.mjs';
+import { normalizeGateCTargetIdentity, readGateCTargetIdentity, verifyGateCTargetCompatibility } from './sonuvi-gate-c-target-preflight.mjs';
 
 const execFile = promisify(execFileCallback);
 
 export const GATE_C_STAGE_PATHS = Object.freeze({
   uploadRoot: '/var/lib/sonuvi-bootstrap/uploads',
   releaseRoot: '/var/lib/sonuvi-bootstrap/releases',
+  attemptRoot: BOOTSTRAP_ATTEMPT_STATE_ROOT,
 });
 
 function text(value) {
@@ -27,6 +30,12 @@ function absolute(value, label) {
 function sameKeys(value, expected, label) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} is invalid`);
   if (Object.keys(value).sort().join(',') !== [...expected].sort().join(',')) throw new Error(`${label} has unsupported fields`);
+}
+
+function attemptId(value) {
+  const result = text(value);
+  if (!/^boot_[A-Za-z0-9_-]{16,128}$/.test(result)) throw new Error('release stage attempt ID is invalid');
+  return result;
 }
 
 async function ensureRoot(root, mode) {
@@ -69,10 +78,40 @@ async function writeVerifiedArchive({ archive, filePath, metadata }) {
 }
 
 export function normalizeGateCStageRequest(input = {}) {
-  sameKeys(input, ['envelope', 'operation'], 'release stage request');
+  sameKeys(input, ['attemptId', 'envelope', 'operation', 'targetIdentity'], 'release stage request');
   if (text(input.operation) !== 'stage_release') throw new Error('release stage operation is invalid');
   if (!input.envelope || typeof input.envelope !== 'object' || Array.isArray(input.envelope)) throw new Error('release metadata envelope is required');
-  return Object.freeze({ operation: 'stage_release', envelope: input.envelope });
+  return Object.freeze({
+    operation: 'stage_release',
+    envelope: input.envelope,
+    attemptId: attemptId(input.attemptId),
+    targetIdentity: normalizeGateCTargetIdentity(input.targetIdentity),
+  });
+}
+
+async function assertStageAttemptBinding({ attemptId: id, targetIdentity, releaseId, root }) {
+  const existing = await readBootstrapAttemptProgress({ attemptId: id, root });
+  if (!existing) return;
+  if (text(existing.state.targetIdentity) !== targetIdentity || text(existing.state.releaseId) !== releaseId) {
+    throw new Error('release_stage_attempt_binding_mismatch');
+  }
+  if (text(existing.state.phase) !== 'release_staged') throw new Error('release_stage_attempt_unavailable');
+}
+
+async function writeStageBinding({ attemptId: id, targetIdentity, releaseId, root }) {
+  await writeBootstrapAttemptProgress({
+    attemptId: id,
+    targetIdentity,
+    releaseId,
+    phase: 'release_staged',
+    root,
+  });
+  await appendBootstrapAttemptEvent({
+    attemptId: id,
+    targetIdentity,
+    root,
+    event: { requestId: id, stage: 'release_acquisition', state: 'passed' },
+  });
 }
 
 /**
@@ -80,13 +119,24 @@ export function normalizeGateCStageRequest(input = {}) {
  * release ID. There are no caller-provided filesystem paths, URLs, commands,
  * or overwrite semantics. Retrying the same authenticated archive is safe.
  */
-export async function stageGateCReleaseArchive({ request, archive, trustedAnchors, paths = GATE_C_STAGE_PATHS, verifyArtifact = verifyReleaseArtifact, extractArchive = defaultExtractArchive } = {}) {
+export async function stageGateCReleaseArchive({ request, archive, trustedAnchors, paths = GATE_C_STAGE_PATHS, verifyArtifact = verifyReleaseArtifact, extractArchive = defaultExtractArchive, readMachineIdentity = () => fs.readFile('/etc/machine-id'), verifyTargetCompatibility = verifyGateCTargetCompatibility } = {}) {
   const input = normalizeGateCStageRequest(request);
   if (!archive || typeof archive[Symbol.asyncIterator] !== 'function') throw new Error('release archive stream is required');
   const { metadata, keyId } = verifySignedGateCReleaseMetadata({ envelope: input.envelope, trustedAnchors });
+  await verifyTargetCompatibility();
+  if (await readGateCTargetIdentity({ readMachineIdentity }) !== input.targetIdentity) {
+    throw new Error('release_stage_target_identity_mismatch');
+  }
   const roots = Object.freeze({
     uploadRoot: absolute(paths.uploadRoot, 'release upload root'),
     releaseRoot: absolute(paths.releaseRoot, 'release root'),
+    attemptRoot: absolute(paths.attemptRoot, 'release attempt root'),
+  });
+  await assertStageAttemptBinding({
+    attemptId: input.attemptId,
+    targetIdentity: input.targetIdentity,
+    releaseId: metadata.releaseId,
+    root: roots.attemptRoot,
   });
   await Promise.all([ensureRoot(roots.uploadRoot, 0o700), ensureRoot(roots.releaseRoot, 0o755)]);
   const archivePath = path.join(roots.uploadRoot, `.${metadata.releaseId}.${randomUUID()}.tar`);
@@ -101,7 +151,13 @@ export async function stageGateCReleaseArchive({ request, archive, trustedAnchor
       if (createHash('sha256').update(manifest).digest('hex') !== metadata.manifestSha256) {
         throw new Error('existing staged release manifest mismatch');
       }
-      return Object.freeze({ state: 'already_staged', releaseId: metadata.releaseId, keyId, releaseRoot: finalRoot });
+      await writeStageBinding({
+        attemptId: input.attemptId,
+        targetIdentity: input.targetIdentity,
+        releaseId: metadata.releaseId,
+        root: roots.attemptRoot,
+      });
+      return Object.freeze({ state: 'already_staged', releaseId: metadata.releaseId, keyId, attemptId: input.attemptId, targetIdentity: input.targetIdentity, releaseRoot: finalRoot });
     }
     await fs.mkdir(extractionRoot, { recursive: false, mode: 0o700 });
     await extractArchive({ archivePath, outputRoot: extractionRoot });
@@ -113,7 +169,13 @@ export async function stageGateCReleaseArchive({ request, archive, trustedAnchor
     if (verified.releaseId !== metadata.releaseId) throw new Error('staged release identity mismatch');
     await makeTreeReadOnly(extractionRoot);
     await fs.rename(extractionRoot, finalRoot);
-    return Object.freeze({ state: 'staged', releaseId: metadata.releaseId, keyId, releaseRoot: finalRoot });
+    await writeStageBinding({
+      attemptId: input.attemptId,
+      targetIdentity: input.targetIdentity,
+      releaseId: metadata.releaseId,
+      root: roots.attemptRoot,
+    });
+    return Object.freeze({ state: 'staged', releaseId: metadata.releaseId, keyId, attemptId: input.attemptId, targetIdentity: input.targetIdentity, releaseRoot: finalRoot });
   } catch (error) {
     await fs.rm(extractionRoot, { recursive: true, force: true }).catch(() => {});
     throw error;

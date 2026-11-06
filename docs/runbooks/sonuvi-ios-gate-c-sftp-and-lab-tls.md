@@ -90,12 +90,12 @@ It is delivered as exact application-owned stdin, never selected by the user
 or fetched from the target. Its shell command is one of these fixed forms:
 
 ```text
-capsule SHA-256: 6b9e5f4692370aa65cff4b461fd5e8d7906ee5b248060ffb790b64503df136ea
+capsule SHA-256: 5a12aeea3a5ae0dda1fbc8ceb599ee27e0da93055603effff5fd7b559a50f3df
 ```
 
 ```text
 /usr/bin/sudo -n /bin/sh -s -- <64-lowercase-hex-kit-sha256> <decimal-kit-bytes>
-/usr/bin/sudo -S -p '' /bin/sh -s -- <64-lowercase-hex-kit-sha256> <decimal-kit-bytes>
+/usr/bin/sudo -S -k -p '' /bin/sh -s -- <64-lowercase-hex-kit-sha256> <decimal-kit-bytes>
 ```
 
 Only the signed digest and bounded byte count are substituted after strict
@@ -169,7 +169,7 @@ After a successful verified stage, first installation uses only this fixed
 bootstrap command:
 
 ```text
-/usr/bin/sudo -n /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-first-install-activate.mjs
+/usr/bin/sudo -S -k -p '' -- /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-first-install-activate.mjs
 ```
 
 The client sends the typed `activate_first_install` request defined by the

@@ -10,10 +10,12 @@ import { canonicalJson, makeTreeWritableForCleanup } from '../src/lib/release-ar
 import { readBootstrapAttemptProgress, writeBootstrapAttemptProgress } from '../src/lib/sonuvi-bootstrap-progress.mjs';
 import { activateVerifiedStagedRelease, GATE_C_FIRST_INSTALL_CONTRACT, normalizeGateCFirstInstallRequest, runFixedStagedInstaller } from '../src/lib/sonuvi-gate-c-first-install.mjs';
 import { GATE_C_RELEASE_ENVELOPE_CONTRACT, GATE_C_RELEASE_METADATA_CONTRACT, GATE_C_RELEASE_TRANSFER_FORMAT } from '../src/lib/sonuvi-gate-c-release.mjs';
+import { deriveGateCTargetIdentity } from '../src/lib/sonuvi-gate-c-target-preflight.mjs';
 
 const releaseId = `sonuvi-${'c'.repeat(64)}`;
 const attemptId = 'boot_first_install_fixture_20261105';
-const targetIdentity = 'fixture_target_first_install_20261105';
+const machineIdentity = '0123456789abcdef0123456789abcdef';
+const targetIdentity = deriveGateCTargetIdentity(machineIdentity);
 const serverIdentity = 'fixture-server';
 
 function envelope() {
@@ -73,6 +75,13 @@ async function fixture(t) {
   await fs.chmod(scripts, 0o555);
   await fs.chmod(staged, 0o555);
   await fs.chmod(paths.bootstrapReleaseRoot, 0o755);
+  await writeBootstrapAttemptProgress({
+    attemptId,
+    targetIdentity,
+    releaseId,
+    phase: 'release_staged',
+    root: paths.bootstrapAttemptRoot,
+  });
   return Object.freeze({
     paths,
     signed,
@@ -107,7 +116,8 @@ test('first-install activation binds signed metadata to the fixed staged install
     trustedAnchors: f.signed.anchors,
     paths: f.paths,
     ownerUID: f.ownerUID,
-    readMachineIdentity: async () => targetIdentity,
+    readMachineIdentity: async () => machineIdentity,
+    verifyTargetCompatibility: async () => ({ supported: true }),
     verifyArtifact: f.verifyArtifact,
     runInstaller: async (input) => {
       calls += 1;
@@ -131,7 +141,8 @@ test('first-install activation binds signed metadata to the fixed staged install
     trustedAnchors: f.signed.anchors,
     paths: f.paths,
     ownerUID: f.ownerUID,
-    readMachineIdentity: async () => targetIdentity,
+    readMachineIdentity: async () => machineIdentity,
+    verifyTargetCompatibility: async () => ({ supported: true }),
     verifyArtifact: f.verifyArtifact,
     runInstaller: async () => { calls += 1; throw new Error('must not run twice'); },
   });
@@ -147,7 +158,8 @@ test('first-install activation fails closed for staged tampering, attempt rebind
     trustedAnchors: f.signed.anchors,
     paths: f.paths,
     ownerUID: f.ownerUID,
-    readMachineIdentity: async () => targetIdentity,
+    readMachineIdentity: async () => machineIdentity,
+    verifyTargetCompatibility: async () => ({ supported: true }),
     verifyArtifact: async () => { throw new Error('staged_release_integrity_invalid'); },
     runInstaller: async () => { invoked = true; },
   }), /staged_release_integrity_invalid/);
@@ -157,7 +169,7 @@ test('first-install activation fails closed for staged tampering, attempt rebind
 
   await assert.rejects(activateVerifiedStagedRelease({
     request: request(f.signed.value), trustedAnchors: f.signed.anchors, paths: f.paths,
-    ownerUID: f.ownerUID, readMachineIdentity: async () => targetIdentity, verifyArtifact: f.verifyArtifact, runInstaller: successfulRunner(f.paths),
+    ownerUID: f.ownerUID, readMachineIdentity: async () => machineIdentity, verifyTargetCompatibility: async () => ({ supported: true }), verifyArtifact: f.verifyArtifact, runInstaller: successfulRunner(f.paths),
   }), /first_install_recovery_required/);
 
   const second = await fixture(t);
@@ -170,20 +182,20 @@ test('first-install activation fails closed for staged tampering, attempt rebind
   });
   await assert.rejects(activateVerifiedStagedRelease({
     request: request(second.signed.value), trustedAnchors: second.signed.anchors, paths: second.paths,
-    ownerUID: second.ownerUID, readMachineIdentity: async () => targetIdentity, verifyArtifact: second.verifyArtifact, runInstaller: successfulRunner(second.paths),
+    ownerUID: second.ownerUID, readMachineIdentity: async () => machineIdentity, verifyTargetCompatibility: async () => ({ supported: true }), verifyArtifact: second.verifyArtifact, runInstaller: successfulRunner(second.paths),
   }), /first_install_attempt_binding_mismatch/);
 
   const third = await fixture(t);
   await fs.writeFile(path.join(path.dirname(third.paths.bootstrapAttemptRoot), 'first-install.lock'), 'interrupted\n', { mode: 0o600 });
   await assert.rejects(activateVerifiedStagedRelease({
     request: request(third.signed.value), trustedAnchors: third.signed.anchors, paths: third.paths,
-    ownerUID: third.ownerUID, readMachineIdentity: async () => targetIdentity, verifyArtifact: third.verifyArtifact, runInstaller: successfulRunner(third.paths),
+    ownerUID: third.ownerUID, readMachineIdentity: async () => machineIdentity, verifyTargetCompatibility: async () => ({ supported: true }), verifyArtifact: third.verifyArtifact, runInstaller: successfulRunner(third.paths),
   }), /first_install_activation_in_progress/);
 
   const fourth = await fixture(t);
   await assert.rejects(activateVerifiedStagedRelease({
     request: request(fourth.signed.value), trustedAnchors: fourth.signed.anchors, paths: fourth.paths,
-    ownerUID: fourth.ownerUID, readMachineIdentity: async () => 'different_machine_identity_20261105', verifyArtifact: fourth.verifyArtifact,
+    ownerUID: fourth.ownerUID, readMachineIdentity: async () => 'fedcba9876543210fedcba9876543210', verifyTargetCompatibility: async () => ({ supported: true }), verifyArtifact: fourth.verifyArtifact,
     runInstaller: async () => { throw new Error('must not invoke for another machine'); },
   }), /first_install_target_identity_mismatch/);
 });

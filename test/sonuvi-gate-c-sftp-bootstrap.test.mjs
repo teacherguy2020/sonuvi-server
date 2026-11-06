@@ -63,7 +63,7 @@ test('Gate C SFTP bootstrap activation command has no caller-controlled remote p
   );
   assert.equal(
     gateCSftpBootstrapActivationCommand({ sha256, bytes: 98_304 }, { requiresPassword: true }),
-    `/usr/bin/sudo -S -p '' /bin/sh -s -- ${sha256} 98304`,
+    `/usr/bin/sudo -S -k -p '' /bin/sh -s -- ${sha256} 98304`,
   );
   assert.throws(() => gateCSftpBootstrapActivationCommand({ sha256: 'x;rm -rf /', bytes: 1 }), /digest/);
 });

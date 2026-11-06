@@ -13,17 +13,18 @@ readonly account='sonuvi-stage'
 readonly host_key="$credential_dir/ssh_host_ed25519_key"
 readonly host_key_public="$host_key.pub"
 readonly client_key="$credential_dir/client_ed25519"
+readonly sudo_password="$credential_dir/sudo_password"
 readonly release_id="${SONUVI_GATE_C_FIXTURE_RELEASE_ID:-sonuvi-24d0758d0475602a90232dd47bbd46aa01d5e8fd7489187741591bc092101e58}"
 readonly release_root="${SONUVI_GATE_C_FIXTURE_RELEASE_ROOT:-/Volumes/SammySSD/Sonuvi-iOS-Guided-Setup-Lab/distribution/gate-c-lab/$release_id}"
 readonly release_archive="$release_root/$release_id-linux-arm64.tar"
 readonly envelope="$release_root/release-envelope.json"
 readonly attempt_id='boot_fixture_archive_status_20261105'
-readonly target_identity='fixture_target_20261105'
 readonly activation_attempt_id='boot_fixture_first_install_20261105'
 readonly container_name='sonuvi-gate-c-archive-status-fixture'
-readonly status_command='/usr/bin/sudo -n /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-bootstrap-status.mjs'
-readonly stage_command='/usr/bin/sudo -n /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-release-stage.mjs'
-readonly activate_command='/usr/bin/sudo -n /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-first-install-activate.mjs'
+readonly preflight_command='/usr/bin/tar --extract --file "$HOME/.local/share/sonuvi-bootstrap-v1/sonuvi-bootstrap-kit-v1.tar" --to-stdout -- scripts/sonuvi-target-preflight.sh | /bin/sh'
+readonly status_command="/usr/bin/sudo -S -k -p '' -- /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-bootstrap-status.mjs"
+readonly stage_command="/usr/bin/sudo -S -k -p '' -- /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-release-stage.mjs"
+readonly activate_command="/usr/bin/sudo -S -k -p '' -- /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-first-install-activate.mjs"
 
 fail() {
   echo "verify_sonuvi_gate_c_archive_status_fixture:$1" >&2
@@ -37,7 +38,8 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 
-[ -f "$host_key" ] && [ -f "$host_key_public" ] && [ -f "$client_key" ] || fail fixture_credential_missing 64
+"$fixture_control" start >/dev/null
+[ -f "$host_key" ] && [ -f "$host_key_public" ] && [ -f "$client_key" ] && [ -f "$sudo_password" ] || fail fixture_credential_missing 64
 [ -f "$release_archive" ] && [ -f "$envelope" ] || fail fixture_release_missing 64
 expected_fingerprint="$(ssh-keygen -lf "$host_key_public" -E sha256 | awk '{print $2}')"
 [ -n "$expected_fingerprint" ] || fail fixture_host_fingerprint_missing 64
@@ -56,7 +58,7 @@ ssh_run() {
 }
 
 make_stage_header() {
-  SONUVI_FIXTURE_ENVELOPE="$envelope" node --input-type=module --eval "import fs from 'node:fs/promises'; const envelope = JSON.parse(await fs.readFile(process.env.SONUVI_FIXTURE_ENVELOPE, 'utf8')); process.stdout.write(JSON.stringify({ operation: 'stage_release', envelope }) + '\\n');" > "$scratch_dir/header.jsonl"
+  SONUVI_FIXTURE_ENVELOPE="$envelope" SONUVI_FIXTURE_TARGET="$activation_target" node --input-type=module --eval "import fs from 'node:fs/promises'; const envelope = JSON.parse(await fs.readFile(process.env.SONUVI_FIXTURE_ENVELOPE, 'utf8')); process.stdout.write(JSON.stringify({ operation: 'stage_release', envelope, attemptId: '$activation_attempt_id', targetIdentity: process.env.SONUVI_FIXTURE_TARGET }) + '\\n');" > "$scratch_dir/header.jsonl"
   [ "$(wc -c < "$scratch_dir/header.jsonl" | tr -d ' ')" -le 65536 ] || fail fixture_header_limit_invalid 64
 }
 
@@ -92,28 +94,44 @@ assert_failure() {
 }
 
 run_status() {
-  printf '%s' "{\"operation\":\"status\",\"attemptId\":\"$attempt_id\"}" | ssh_run "$status_command"
+  { tr -d '\r\n' < "$sudo_password"; printf '\n%s' "{\"operation\":\"status\",\"attemptId\":\"$attempt_id\"}"; } | ssh_run "$status_command"
 }
 
 run_activation_status() {
-  printf '%s' "{\"operation\":\"status\",\"attemptId\":\"$activation_attempt_id\"}" | ssh_run "$status_command"
+  { tr -d '\r\n' < "$sudo_password"; printf '\n%s' "{\"operation\":\"status\",\"attemptId\":\"$activation_attempt_id\"}"; } | ssh_run "$status_command"
 }
 
 run_stage() {
-  cat "$scratch_dir/header.jsonl" "$release_archive" | ssh_run "$stage_command"
+  { tr -d '\r\n' < "$sudo_password"; printf '\n'; cat "$scratch_dir/header.jsonl" "$release_archive"; } | ssh_run "$stage_command"
 }
 
 run_activation() {
-  cat "$scratch_dir/activation.json" | ssh_run "$activate_command"
+  { tr -d '\r\n' < "$sudo_password"; printf '\n'; cat "$scratch_dir/activation.json"; } | ssh_run "$activate_command"
+}
+
+run_preflight() {
+  ssh_run "$preflight_command"
 }
 
 "$fixture_control" reset >/dev/null
 "$fixture_control" inspect > "$scratch_dir/inspect.txt"
+run_preflight > "$scratch_dir/preflight.json"
+activation_target="$(SONUVI_FIXTURE_PREFLIGHT="$scratch_dir/preflight.json" node --input-type=module --eval "import fs from 'node:fs/promises'; const value = JSON.parse(await fs.readFile(process.env.SONUVI_FIXTURE_PREFLIGHT, 'utf8')); if (value.contract !== 'sonuvi.gate-c-target-preflight.v1' || value.operation !== 'target_preflight' || value.targetIdentity?.contract !== 'sonuvi.gate-c-target-identity.v1' || value.targetIdentity?.algorithm !== 'sha256-machine-id' || !/^sonuvi-target-v1-[a-f0-9]{64}$/.test(value.targetIdentity?.value || '') || value.compatibility?.os !== 'debian' || value.compatibility?.architecture !== 'arm64' || value.compatibility?.systemd !== true || value.compatibility?.supported !== true) throw new Error('unexpected preflight response'); process.stdout.write(value.targetIdentity.value);")"
+target_identity="$activation_target"
 grep -q '0:0:700 /var/lib/sonuvi-bootstrap$' "$scratch_dir/inspect.txt" || fail fixture_root_permissions_invalid 65
 grep -q '0:0:700 /var/lib/sonuvi-bootstrap/attempts$' "$scratch_dir/inspect.txt" || fail fixture_attempt_permissions_invalid 65
 grep -q '0:0:644 /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-release-stage.mjs$' "$scratch_dir/inspect.txt" || fail fixture_stage_helper_permissions_invalid 65
 grep -q '0:0:644 /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-bootstrap-status.mjs$' "$scratch_dir/inspect.txt" || fail fixture_status_helper_permissions_invalid 65
 grep -q '0:0:644 /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-first-install-activate.mjs$' "$scratch_dir/inspect.txt" || fail fixture_first_install_helper_permissions_invalid 65
+
+# Ordinary sudo requires an explicit password for this exact operation. The
+# disposable fixture contains no NOPASSWD rule and no cached authorization.
+set +e
+{ printf 'wrong-password\n%s' "{\"operation\":\"status\",\"attemptId\":\"$attempt_id\"}"; } | ssh_run "$status_command" > "$scratch_dir/status-wrong-password.json" 2> "$scratch_dir/status-wrong-password.err"
+wrong_password_rc=$?
+set -e
+[ "$wrong_password_rc" -ne 0 ] || fail fixture_wrong_sudo_password_accepted 66
+docker exec "$container_name" /bin/sh -ec "su -s /bin/sh sonuvi-stage -c '/usr/bin/sudo -n /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-bootstrap-status.mjs' </dev/null" >/dev/null 2>&1 && fail fixture_noninteractive_sudo_accepted 66 || true
 
 # Pinning is explicit: a deliberately different host key must fail before
 # user authentication, while the expected key permits the fixed status command.
@@ -134,7 +152,7 @@ after_status_digest="$(docker exec "$container_name" sha256sum /var/lib/sonuvi-b
 [ "$before_status_digest" = "$after_status_digest" ] || fail fixture_status_mutated_state 67
 
 set +e
-printf '%s' '{"operation":"status","attemptId":"boot_unrelated_1234567890"}' | ssh_run "$status_command" > "$scratch_dir/status-unrelated.json"
+{ tr -d '\r\n' < "$sudo_password"; printf '\n%s' '{"operation":"status","attemptId":"boot_unrelated_1234567890"}'; } | ssh_run "$status_command" > "$scratch_dir/status-unrelated.json"
 unrelated_rc=$?
 set -e
 [ "$unrelated_rc" -ne 0 ] || fail fixture_unrelated_status_accepted 67
@@ -150,9 +168,8 @@ assert_stage "$scratch_dir/already-staged.json" already_staged
 # First installation is deliberately activated from the verified staged tree;
 # /opt/sonuvi/current must not exist before the root-owned bootstrap bridge.
 docker exec "$container_name" /bin/sh -ec 'test ! -e /opt/sonuvi/current'
-activation_target="$(docker exec "$container_name" /bin/sh -ec 'cat /etc/machine-id' | tr -d '[:space:]')"
-[[ "$activation_target" =~ ^[A-Za-z0-9_-]{16,160}$ ]] || fail fixture_machine_identity_invalid 67
-make_activation_request 'different_fixture_machine_20261105'
+[[ "$activation_target" =~ ^sonuvi-target-v1-[a-f0-9]{64}$ ]] || fail fixture_target_identity_invalid 67
+make_activation_request "sonuvi-target-v1-$(printf 'b%.0s' {1..64})"
 set +e
 run_activation > "$scratch_dir/activation-wrong-machine.json"
 wrong_machine_rc=$?
@@ -164,7 +181,7 @@ assert_failure "$scratch_dir/activation-wrong-machine.json" 'first_install_targe
 # installer invocation. The release ID remains metadata-derived only.
 SONUVI_FIXTURE_ENVELOPE="$envelope" SONUVI_FIXTURE_TARGET="$activation_target" node --input-type=module --eval "import fs from 'node:fs/promises'; const envelope = JSON.parse(await fs.readFile(process.env.SONUVI_FIXTURE_ENVELOPE, 'utf8')); process.stdout.write(JSON.stringify({ operation: 'activate_first_install', envelope, attemptId: '$activation_attempt_id', targetIdentity: process.env.SONUVI_FIXTURE_TARGET, serverIdentity: 'fixture-server', path: '/opt/sonuvi/current' }) + '\\n');" > "$scratch_dir/activation-with-path.json"
 set +e
-cat "$scratch_dir/activation-with-path.json" | ssh_run "$activate_command" > "$scratch_dir/activation-with-path-response.json"
+{ tr -d '\r\n' < "$sudo_password"; printf '\n'; cat "$scratch_dir/activation-with-path.json"; } | ssh_run "$activate_command" > "$scratch_dir/activation-with-path-response.json"
 path_request_rc=$?
 set -e
 [ "$path_request_rc" -ne 0 ] || fail fixture_path_activation_accepted 67
@@ -209,7 +226,7 @@ assert_stage "$scratch_dir/lost-response-retry.json" already_staged
 
 "$fixture_control" reset >/dev/null
 set +e
-printf '{"operation":"stage_release"\n' | ssh_run "$stage_command" > "$scratch_dir/malformed.json"
+{ tr -d '\r\n' < "$sudo_password"; printf '\n{"operation":"stage_release"\n'; } | ssh_run "$stage_command" > "$scratch_dir/malformed.json"
 malformed_rc=$?
 set -e
 [ "$malformed_rc" -ne 0 ] || fail fixture_malformed_header_accepted 68
@@ -217,7 +234,7 @@ assert_failure "$scratch_dir/malformed.json" 'Expected'
 
 "$fixture_control" reset >/dev/null
 set +e
-{ cat "$scratch_dir/header.jsonl"; head -c 1048576 "$release_archive"; } | ssh_run "$stage_command" > "$scratch_dir/truncated.json"
+{ tr -d '\r\n' < "$sudo_password"; printf '\n'; cat "$scratch_dir/header.jsonl"; head -c 1048576 "$release_archive"; } | ssh_run "$stage_command" > "$scratch_dir/truncated.json"
 truncated_rc=$?
 set -e
 [ "$truncated_rc" -ne 0 ] || fail fixture_truncated_archive_accepted 68
@@ -229,7 +246,7 @@ cp "$release_archive" "$scratch_dir/corrupt.tar"
 chmod u+w "$scratch_dir/corrupt.tar"
 printf '\001' | dd of="$scratch_dir/corrupt.tar" bs=1 seek=4096 conv=notrunc status=none
 set +e
-cat "$scratch_dir/header.jsonl" "$scratch_dir/corrupt.tar" | ssh_run "$stage_command" > "$scratch_dir/digest-mismatch.json"
+{ tr -d '\r\n' < "$sudo_password"; printf '\n'; cat "$scratch_dir/header.jsonl" "$scratch_dir/corrupt.tar"; } | ssh_run "$stage_command" > "$scratch_dir/digest-mismatch.json"
 digest_rc=$?
 set -e
 [ "$digest_rc" -ne 0 ] || fail fixture_digest_mismatch_accepted 68
@@ -237,7 +254,7 @@ assert_failure "$scratch_dir/digest-mismatch.json" 'digest'
 
 "$fixture_control" reset >/dev/null
 set +e
-{ cat "$scratch_dir/header.jsonl" "$release_archive"; printf x; } | ssh_run "$stage_command" > "$scratch_dir/trailing.json"
+{ tr -d '\r\n' < "$sudo_password"; printf '\n'; cat "$scratch_dir/header.jsonl" "$release_archive"; printf x; } | ssh_run "$stage_command" > "$scratch_dir/trailing.json"
 trailing_rc=$?
 set -e
 [ "$trailing_rc" -ne 0 ] || fail fixture_trailing_archive_accepted 68
@@ -249,7 +266,7 @@ assert_failure "$scratch_dir/trailing.json" 'exceeds metadata'
 mkfifo "$scratch_dir/interrupted.fifo"
 ssh -T -p "$port" -i "$client_key" -o "UserKnownHostsFile=$scratch_dir/known_hosts" -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes -o BatchMode=yes "$account@$host" "$stage_command" < "$scratch_dir/interrupted.fifo" > "$scratch_dir/interrupted.json" 2> "$scratch_dir/interrupted.err" &
 ssh_pid=$!
-{ cat "$scratch_dir/header.jsonl"; dd if="$release_archive" bs=65536 count=16 status=none; sleep 10; } > "$scratch_dir/interrupted.fifo" &
+{ tr -d '\r\n' < "$sudo_password"; printf '\n'; cat "$scratch_dir/header.jsonl"; dd if="$release_archive" bs=65536 count=16 status=none; sleep 10; } > "$scratch_dir/interrupted.fifo" &
 producer_pid=$!
 sleep 1
 kill "$ssh_pid" >/dev/null 2>&1 || true
@@ -271,5 +288,11 @@ grep -q 'operation_rejected' "$scratch_dir/unauthorized.err"
 "$fixture_control" reset >/dev/null
 run_status > "$scratch_dir/status-final.json"
 assert_status "$scratch_dir/status-final.json"
+# The password is injected only into sudo's stdin. It must not appear in the
+# durable bootstrap state or event journal; the secret mount itself is outside
+# that state and is never copied by the fixture.
+if docker exec "$container_name" /bin/sh -ec 'grep -R -F -f /run/secrets/sudo_password /var/lib/sonuvi-bootstrap/attempts /var/lib/sonuvi-bootstrap/releases 2>/dev/null'; then
+  fail fixture_sudo_password_persisted 69
+fi
 printf '{"fixture":"%s:%s","account":"%s","hostKey":"%s","releaseId":"%s","stage":"actual-archive-verified","status":"reconnect-safe","reset":"container-recreate"}\n' \
   "$host" "$port" "$account" "$expected_fingerprint" "$release_id"

@@ -47,7 +47,7 @@ release manifest SHA-256: b84ea5348057ea5a482eccb70b1c7c9f9ce9c0a9dbeeb01075f0e6
 release archive SHA-256: 198a8dd89c66b332121394083b82d1c73b62da9fa28b8de2798ab9f280bd716e
 bootstrap kit SHA-256: 6a96858161761e6d84cf500a6d808d5008f74d9b650d0a0ecd6303045aac8f0c
 release envelope SHA-256: 017fa0ad06903609e44c4f8429d05d3c73620c850c21cabe7c1f39c99ba86419
-activation capsule SHA-256: 6b9e5f4692370aa65cff4b461fd5e8d7906ee5b248060ffb790b64503df136ea
+activation capsule SHA-256: 5a12aeea3a5ae0dda1fbc8ceb599ee27e0da93055603effff5fd7b559a50f3df
 signed metadata validity: 2026-11-05T18:25:00.000Z through 2026-12-05T18:25:00.000Z
 ```
 

@@ -48,7 +48,8 @@ RUN chown -R root:root /var/lib/sonuvi-bootstrap/bootstrap-kit-v1 /etc/sonuvi /u
  && install -o root -g root -m 0755 /usr/local/lib/sonuvi-fixture/systemctl-fixture.sh /usr/bin/systemctl \
  && chmod 0755 /usr/local/sbin/sonuvi-gate-c-archive-status-dispatch /usr/local/sbin/sonuvi-gate-c-archive-status-fixture-start \
  && printf '%s\n' \
-      'sonuvi-stage ALL=(root) NOPASSWD: /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-release-stage.mjs, /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-bootstrap-status.mjs, /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-first-install-activate.mjs' \
+      'Defaults:sonuvi-stage timestamp_timeout=0' \
+      'sonuvi-stage ALL=(root) PASSWD: /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-release-stage.mjs, /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-bootstrap-status.mjs, /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-first-install-activate.mjs' \
       > /etc/sudoers.d/sonuvi-gate-c-archive-status \
  && chmod 0440 /etc/sudoers.d/sonuvi-gate-c-archive-status \
  && visudo -cf /etc/sudoers.d/sonuvi-gate-c-archive-status

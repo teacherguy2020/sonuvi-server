@@ -12,6 +12,14 @@ iPad never sends an arbitrary command, path, package name, URL, or service
 name. It may invoke only the fixed operations below after explicit host-key
 confirmation and SSH authentication.
 
+The SSH host key proves that the iPad is talking to the pinned SSH endpoint;
+it does **not** prove the target's machine identity. The fixed target
+preflight derives a non-secret identity from local `/etc/machine-id`; every
+root-side mutating operation derives that value again and rejects a mismatch.
+Thus a changed/cloned machine ID, a different pinned SSH host, or a replayed
+attempt cannot be converted into a successful release stage or installation
+merely by reusing a preflight response.
+
 The fresh-install API now binds to `127.0.0.1`. Administrator enrollment,
 first-controller authorization, and normal controller bearer traffic are sent
 to that loopback API over SSH `direct-tcpip`; they must not use LAN HTTP.
@@ -51,13 +59,46 @@ byte count/digest, immutable release ID, manifest digest, ARM64 Linux target,
 and expiry. Unknown key IDs, invalid signatures, URL fields, expired metadata,
 different byte counts, or digest mismatches fail closed.
 
-## 2. Prerequisite preflight and remediation
+## 2. Fixed target preflight and prerequisite remediation
 
-`scripts/sonuvi-debian-node-bootstrap.sh` has exactly two operations:
+Before privilege authorization, iOS runs exactly this read-only command over
+the authenticated pinned SSH session after it has independently verified and
+staged the signed bootstrap-kit archive:
 
-- `preflight`: read-only JSON containing machine identity, architecture,
-  systemd availability, and Node state.
-- `install`: the default, root-authorized remediation operation.
+```text
+/usr/bin/tar --extract --file "$HOME/.local/share/sonuvi-bootstrap-v1/sonuvi-bootstrap-kit-v1.tar" --to-stdout -- scripts/sonuvi-target-preflight.sh | /bin/sh
+```
+
+It accepts no arguments and returns exactly one JSON record:
+
+```json
+{
+  "contract": "sonuvi.gate-c-target-preflight.v1",
+  "operation": "target_preflight",
+  "targetIdentity": {
+    "contract": "sonuvi.gate-c-target-identity.v1",
+    "algorithm": "sha256-machine-id",
+    "value": "sonuvi-target-v1-<64 lowercase hex>"
+  },
+  "compatibility": {
+    "os": "debian",
+    "architecture": "arm64",
+    "systemd": true,
+    "supported": true
+  }
+}
+```
+
+The raw machine ID is never returned. `targetIdentity.value` is the only
+identity value iOS may retain and send to subsequent fixed operations. A
+malformed record, unexpected fields, `supported: false`, a changed identity,
+or an unsupported Debian/ARM64/systemd target is terminal before
+installation. This is a fixed inspection only; it exposes no caller path,
+command, or general-purpose host inspection.
+
+`scripts/sonuvi-debian-node-bootstrap.sh` is the root-only fixed remediation
+operation invoked by the bootstrap activation capsule. Its `install` action
+is the only mutating prerequisite remediation operation.
 
 It accepts no package/repository/source arguments, never edits APT sources,
 and uses only configured official Debian repositories. It preserves compatible
@@ -85,7 +126,8 @@ not substitute generic remote execution.
 After prerequisites are present, iOS sends one framed stream to the fixed
 root helper `scripts/sonuvi-release-stage.mjs`:
 
-1. One UTF-8 JSON line: `{ "operation": "stage_release", "envelope": ... }`.
+1. One UTF-8 JSON line:
+   `{ "operation": "stage_release", "envelope": ..., "attemptId": "boot_<opaque-id>", "targetIdentity": "sonuvi-target-v1-..." }`.
 2. The exact number of raw tar bytes declared by the signed descriptor.
 
 The helper uses only the root-owned trust-anchor map and fixed staging roots:
@@ -98,13 +140,16 @@ It hashes the stream before extraction, verifies the signed descriptor,
 verifies the raw `release-manifest.json` digest, runs the existing
 `verifyReleaseArtifact` verifier, makes the resulting tree read-only, and
 never overwrites an existing release. Repeating the exact release returns
-`already_staged`; a different candidate cannot replace it.
+`already_staged`; a different candidate cannot replace it. Before consuming
+archive bytes it rederives the local target identity and checks Debian/ARM64
+compatibility. Success writes a root-owned `release_staged` binding for the
+exact release ID, target identity, and attempt ID.
 
 First installation then uses this one fixed, root-authorized bootstrap command
 (no release ID, filesystem path, or command text is interpolated by iOS):
 
 ```text
-/usr/bin/sudo -n /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-first-install-activate.mjs
+/usr/bin/sudo -S -k -p '' -- /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-first-install-activate.mjs
 ```
 
 Its complete typed input is:
@@ -120,9 +165,10 @@ Its complete typed input is:
 ```
 
 The helper reads its root-owned trust anchors, derives `releaseId` exclusively
-from the valid signed envelope, confirms `targetIdentity` against
-`/etc/machine-id`, re-hashes the staged manifest, re-verifies the immutable
-artifact, and requires a root-owned non-writable staged tree. It invokes only
+from the valid signed envelope, rederives and confirms `targetIdentity`,
+requires the durable prior `release_staged` binding, re-hashes the staged
+manifest, re-verifies the immutable artifact, and requires a root-owned
+non-writable staged tree. It invokes only
 the verified staged
 `scripts/sonuvi-target-installer.mjs` through fixed `/usr/bin/node`; the
 client cannot select a script, argument, or filesystem path. The target
@@ -151,6 +197,38 @@ attempt is recorded as `recoverable-incomplete` and returns
 bindings, unsigned metadata, altered/missing staging, conflicting existing
 installation state, and insufficient root authorization fail closed.
 
+### One-use interactive privilege authorization
+
+Gate C uses the host's existing Debian `sudo` password policy; it installs no
+privileged daemon and no `NOPASSWD` rule. For every root operation, iOS asks
+the user to explicitly authorize that operation, opens a fresh pinned SSH
+channel, and sends the password as the first UTF-8 line of stdin followed by
+the operation's already-defined request bytes. The password is never an SSH
+command argument, JSON field, URL, log, journal event, or persistent state.
+
+Each command uses `sudo -S -k -p '' --`: `-S` consumes only that first stdin
+line and `-k` invalidates any cached sudo credential before execution. The
+root helper receives only the remaining typed payload. No authorization token
+is stored; its lifetime is one command execution. The root helpers then bind
+that explicit authorization to the locally rederived target identity, attempt
+ID, and Ed25519-verified release envelope. Durable stage/activation state
+rejects replay.
+
+The native adapter may invoke only these fixed privilege commands:
+
+```text
+/usr/bin/sudo -S -k -p '' -- /bin/sh -s -- <verified-kit-sha256> <verified-kit-bytes>
+/usr/bin/sudo -S -k -p '' -- /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-release-stage.mjs
+/usr/bin/sudo -S -k -p '' -- /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-first-install-activate.mjs
+/usr/bin/sudo -S -k -p '' -- /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-bootstrap-status.mjs
+```
+
+The first command receives only the reviewed bootstrap activation capsule on
+stdin after the password. The remaining commands receive only their documented
+typed stdin payload after the password. A missing/wrong password, sudo exit
+`77`, a closed channel, or an unparseable result is explicit authorization
+failure: iOS must not retry with a different command or retain a password.
+
 ## 4. Durable progress and reconnect
 
 The bootstrap bridge and target installer write sanitized, fsync-backed JSONL
@@ -176,7 +254,7 @@ Before a release has been activated, iOS invokes that operation at the fixed
 root-owned bootstrap-kit path:
 
 ```text
-/var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-bootstrap-status.mjs
+/usr/bin/sudo -S -k -p '' -- /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-bootstrap-status.mjs
 ```
 
 After activation, the same status helper is also part of the immutable Server

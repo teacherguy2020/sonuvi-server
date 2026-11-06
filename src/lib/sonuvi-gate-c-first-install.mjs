@@ -6,6 +6,7 @@ import path from 'node:path';
 import { appendBootstrapAttemptEvent, BOOTSTRAP_ATTEMPT_STATE_ROOT, readBootstrapAttemptProgress, writeBootstrapAttemptProgress } from './sonuvi-bootstrap-progress.mjs';
 import { verifyReleaseArtifact } from './release-artifact.mjs';
 import { verifySignedGateCReleaseMetadata } from './sonuvi-gate-c-release.mjs';
+import { normalizeGateCTargetIdentity, readGateCTargetIdentity, verifyGateCTargetCompatibility } from './sonuvi-gate-c-target-preflight.mjs';
 
 export const GATE_C_FIRST_INSTALL_CONTRACT = 'sonuvi.gate-c-first-install.v1';
 export const GATE_C_FIRST_INSTALL_OPERATION = 'activate_first_install';
@@ -34,14 +35,8 @@ function attemptId(value) {
   return result;
 }
 
-function targetIdentity(value) {
-  const result = text(value);
-  if (!/^[A-Za-z0-9_-]{16,160}$/.test(result)) throw new Error('first install target identity is invalid');
-  return result;
-}
-
 async function verifyTargetMachineIdentity({ target, readMachineIdentity }) {
-  const observed = targetIdentity((await readMachineIdentity()).toString('utf8').trim());
+  const observed = await readGateCTargetIdentity({ readMachineIdentity });
   if (observed !== target) throw new Error('first_install_target_identity_mismatch');
   return observed;
 }
@@ -91,7 +86,7 @@ export function normalizeGateCFirstInstallRequest(input = {}) {
     operation: GATE_C_FIRST_INSTALL_OPERATION,
     envelope: input.envelope,
     attemptId: attemptId(input.attemptId),
-    targetIdentity: targetIdentity(input.targetIdentity),
+    targetIdentity: normalizeGateCTargetIdentity(input.targetIdentity),
     serverIdentity: serverIdentity(input.serverIdentity),
   });
 }
@@ -209,6 +204,7 @@ async function existingAttempt({ id, target, releaseId, root }) {
   if (text(existing.state.targetIdentity) !== target || text(existing.state.releaseId) !== releaseId) {
     throw new Error('first_install_attempt_binding_mismatch');
   }
+  if (text(existing.state.phase) === 'release_staged') return Object.freeze({ state: 'ready_for_activation' });
   if (['awaiting-administrator-enrollment', 'administrator-enrolled', 'complete'].includes(text(existing.state.phase))) {
     return Object.freeze({ state: 'already_activated', releaseId, attemptId: id, targetIdentity: target });
   }
@@ -243,9 +239,10 @@ async function recordFailure({ id, target, releaseId, root, code }) {
  * staged release. Client input cannot supply paths, commands, release IDs, or
  * installer arguments; the release ID is taken only from verified metadata.
  */
-export async function activateVerifiedStagedRelease({ request, trustedAnchors, paths = GATE_C_FIRST_INSTALL_PATHS, verifyArtifact = verifyReleaseArtifact, lstat = fs.lstat, readFile = fs.readFile, readMachineIdentity = () => fs.readFile('/etc/machine-id'), ownerUID = expectedOwnerUID(), runInstaller = runFixedStagedInstaller } = {}) {
+export async function activateVerifiedStagedRelease({ request, trustedAnchors, paths = GATE_C_FIRST_INSTALL_PATHS, verifyArtifact = verifyReleaseArtifact, lstat = fs.lstat, readFile = fs.readFile, readMachineIdentity = () => fs.readFile('/etc/machine-id'), verifyTargetCompatibility = verifyGateCTargetCompatibility, ownerUID = expectedOwnerUID(), runInstaller = runFixedStagedInstaller } = {}) {
   const input = normalizeGateCFirstInstallRequest(request);
   const { metadata } = verifySignedGateCReleaseMetadata({ envelope: input.envelope, trustedAnchors });
+  await verifyTargetCompatibility();
   await verifyTargetMachineIdentity({ target: input.targetIdentity, readMachineIdentity });
   const configured = Object.freeze({
     bootstrapReleaseRoot: absolute(paths.bootstrapReleaseRoot, 'bootstrap release root'),
@@ -257,7 +254,8 @@ export async function activateVerifiedStagedRelease({ request, trustedAnchors, p
     releaseId: metadata.releaseId,
     root: configured.bootstrapAttemptRoot,
   });
-  if (prior) return Object.freeze({ contract: GATE_C_FIRST_INSTALL_CONTRACT, ...prior });
+  if (!prior) throw new Error('first_install_stage_binding_missing');
+  if (prior.state !== 'ready_for_activation') return Object.freeze({ contract: GATE_C_FIRST_INSTALL_CONTRACT, ...prior });
 
   const lock = await acquireFirstInstallLock({
     root: configured.bootstrapAttemptRoot,

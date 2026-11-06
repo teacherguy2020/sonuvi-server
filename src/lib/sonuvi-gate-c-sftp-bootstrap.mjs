@@ -6,7 +6,7 @@ export const GATE_C_SFTP_STAGING_RELATIVE_DIRECTORY = '.local/share/sonuvi-boots
 export const GATE_C_SFTP_BOOTSTRAP_PARTIAL_NAME = 'sonuvi-bootstrap-kit-v1.tar.partial';
 export const GATE_C_SFTP_BOOTSTRAP_FINAL_NAME = 'sonuvi-bootstrap-kit-v1.tar';
 export const GATE_C_SFTP_BOOTSTRAP_ACTIVATOR = 'sonuvi_sftp_bootstrap_activate_v1';
-export const GATE_C_SFTP_BOOTSTRAP_ACTIVATOR_SHA256 = '6b9e5f4692370aa65cff4b461fd5e8d7906ee5b248060ffb790b64503df136ea';
+export const GATE_C_SFTP_BOOTSTRAP_ACTIVATOR_SHA256 = '5a12aeea3a5ae0dda1fbc8ceb599ee27e0da93055603effff5fd7b559a50f3df';
 
 const STAGING_SEGMENTS = Object.freeze(GATE_C_SFTP_STAGING_RELATIVE_DIRECTORY.split('/'));
 
@@ -135,6 +135,6 @@ export function gateCSftpBootstrapActivationCommand({ sha256: digest, bytes } = 
     sha256: digest,
     bytes,
   });
-  const sudo = requiresPassword ? "/usr/bin/sudo -S -p ''" : '/usr/bin/sudo -n';
+  const sudo = requiresPassword ? "/usr/bin/sudo -S -k -p ''" : '/usr/bin/sudo -n';
   return `${sudo} /bin/sh -s -- ${transfer.sha256} ${transfer.bytes}`;
 }

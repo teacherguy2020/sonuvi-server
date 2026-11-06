@@ -18,6 +18,7 @@ readonly credential_dir='/Users/brianwis/.openclaw/credentials/sonuvi-gate-c-arc
 readonly host_key="$credential_dir/ssh_host_ed25519_key"
 readonly client_key="$credential_dir/client_ed25519"
 readonly client_public_key="$client_key.pub"
+readonly sudo_password="$credential_dir/sudo_password"
 readonly release_id="${SONUVI_GATE_C_FIXTURE_RELEASE_ID:-sonuvi-24d0758d0475602a90232dd47bbd46aa01d5e8fd7489187741591bc092101e58}"
 readonly release_root="${SONUVI_GATE_C_FIXTURE_RELEASE_ROOT:-/Volumes/SammySSD/Sonuvi-iOS-Guided-Setup-Lab/distribution/gate-c-lab/$release_id}"
 
@@ -43,10 +44,17 @@ ensure_credentials() {
   regular_file "$host_key.pub"
   regular_file "$client_key"
   regular_file "$client_public_key"
+  if [ ! -e "$sudo_password" ]; then
+    umask 077
+    openssl rand -hex 24 > "$sudo_password"
+  fi
+  regular_file "$sudo_password"
   chmod 0600 "$host_key" "$client_key"
+  chmod 0600 "$sudo_password"
   chmod 0644 "$host_key.pub" "$client_public_key"
   [ "$(stat -f '%Lp' "$host_key")" = '600' ] || fail fixture_host_key_mode_invalid 64
   [ "$(stat -f '%Lp' "$client_key")" = '600' ] || fail fixture_client_key_mode_invalid 64
+  [ "$(stat -f '%Lp' "$sudo_password")" = '600' ] || fail fixture_sudo_password_mode_invalid 64
 }
 
 require_release() {
@@ -116,12 +124,12 @@ prepare_build_context() {
     tar --extract --file "$packaged_bootstrap_kit" --directory "$build_context/app"
     (cd "$repo_root" && SONUVI_FIXTURE_BOOTSTRAP_ROOT="$build_context/app" node --input-type=module --eval "import { verifyGateCBootstrapKit } from './src/lib/sonuvi-gate-c-bootstrap-kit.mjs'; await verifyGateCBootstrapKit({ kitRoot: process.env.SONUVI_FIXTURE_BOOTSTRAP_ROOT });") || fail fixture_bootstrap_kit_invalid 64
   else
-    cp "$repo_root/scripts/sonuvi-release-stage.mjs" "$repo_root/scripts/sonuvi-bootstrap-status.mjs" "$repo_root/scripts/sonuvi-first-install-activate.mjs" "$build_context/app/scripts/"
+    cp "$repo_root/scripts/sonuvi-release-stage.mjs" "$repo_root/scripts/sonuvi-bootstrap-status.mjs" "$repo_root/scripts/sonuvi-first-install-activate.mjs" "$repo_root/scripts/sonuvi-target-preflight.sh" "$build_context/app/scripts/"
     local file
     for file in \
       atomic-file.mjs public-web-root.mjs release-artifact.mjs runtime-capabilities.mjs runtime-config-security.mjs \
       sonuvi-bootstrap-contract.mjs sonuvi-bootstrap-progress.mjs sonuvi-bootstrap-status.mjs sonuvi-fresh-install.mjs \
-      sonuvi-gate-c-first-install.mjs sonuvi-gate-c-release.mjs sonuvi-gate-c-staging.mjs; do
+      sonuvi-gate-c-first-install.mjs sonuvi-gate-c-release.mjs sonuvi-gate-c-staging.mjs sonuvi-gate-c-target-preflight.mjs; do
       cp "$repo_root/src/lib/$file" "$build_context/app/src/lib/$file"
     done
   fi
@@ -152,6 +160,7 @@ start() {
     --memory 1g --pids-limit 128 \
     --mount "type=bind,src=$host_key,dst=/run/secrets/ssh_host_ed25519_key,readonly" \
     --mount "type=bind,src=$client_public_key,dst=/run/secrets/authorized_keys,readonly" \
+    --mount "type=bind,src=$sudo_password,dst=/run/secrets/sudo_password,readonly" \
     "$image_name" >/dev/null
   docker run --detach --init \
     --name "$relay_container_name" \
