@@ -20,15 +20,15 @@ service.
 iOS uses the exact host identity and prefix:
 
 ```text
-https://M4-Mac-mini.local:9443/v1/gate-c/releases/sonuvi-24d0758d0475602a90232dd47bbd46aa01d5e8fd7489187741591bc092101e58/
+https://M4-Mac-mini.local:9443/v1/gate-c/releases/sonuvi-e56d85697e23f11a91612918dd2b975b61c81cb035fb8295445e481d942eab67/
 ```
 
 No redirects, query strings, alternate hosts, release IDs, or endpoint paths
 are accepted. The only `GET`/`HEAD` artifacts are:
 
 - `release-envelope.json` — `application/json; charset=utf-8`
-- `sonuvi-24d0758d0475602a90232dd47bbd46aa01d5e8fd7489187741591bc092101e58-linux-arm64.tar` — `application/x-tar`, 53,448,704 bytes
-- `sonuvi-bootstrap-kit-v1.tar` — `application/x-tar`, 147,968 bytes
+- `sonuvi-e56d85697e23f11a91612918dd2b975b61c81cb035fb8295445e481d942eab67-linux-arm64.tar` — `application/x-tar`, 53,454,848 bytes
+- `sonuvi-bootstrap-kit-v1.tar` — `application/x-tar`, 156,672 bytes
 - `release-trust-anchors.json` — `application/json; charset=utf-8`
 - `sonuvi-lab-gate-c-20261105-public.pem` — `application/x-pem-file`
 - `CHECKSUMS.sha256` — `text/plain; charset=utf-8`
@@ -39,16 +39,16 @@ are accepted. The only `GET`/`HEAD` artifacts are:
 
 The currently served immutable lab kit is separate from the preserved,
 superseded B2-era and pre-first-install-bridge lab releases. It was built from
-Server commit `ffc588797cb8077351f95c851b564b3808c58eff`:
+Server commit `39f25ade6a78bac405f2d81ef3426710eb5d72a1`:
 
 ```text
-release ID: sonuvi-24d0758d0475602a90232dd47bbd46aa01d5e8fd7489187741591bc092101e58
-release manifest SHA-256: b84ea5348057ea5a482eccb70b1c7c9f9ce9c0a9dbeeb01075f0e64ed1050f15
-release archive SHA-256: 198a8dd89c66b332121394083b82d1c73b62da9fa28b8de2798ab9f280bd716e
-bootstrap kit SHA-256: 6a96858161761e6d84cf500a6d808d5008f74d9b650d0a0ecd6303045aac8f0c
-release envelope SHA-256: 017fa0ad06903609e44c4f8429d05d3c73620c850c21cabe7c1f39c99ba86419
+release ID: sonuvi-e56d85697e23f11a91612918dd2b975b61c81cb035fb8295445e481d942eab67
+release manifest SHA-256: 07fbfc29493f8f8eecfa11c25ef61336e7aba29393a8c13b5ec692dc539fcd86
+release archive SHA-256: fb705a88aa2d30744e8248c99f7246870be6f3bb2d58166dc2238eb9af1a3035
+bootstrap kit SHA-256: e43a6c9a60c67865b838b09c9606480cb78162e63bfed4c5a0fde0759a4be098
+release envelope SHA-256: 1e3e5402eba8c63e99efad34ffc21cf72b7beca3f200cccb73a10f497ed79454
 activation capsule SHA-256: 5a12aeea3a5ae0dda1fbc8ceb599ee27e0da93055603effff5fd7b559a50f3df
-signed metadata validity: 2026-11-05T18:25:00.000Z through 2026-12-05T18:25:00.000Z
+signed metadata validity: 2026-11-06T11:28:30.000Z through 2026-12-06T11:28:30.000Z
 ```
 
 The capsule accepts the exact `sonuvi.gate-c-bootstrap-kit.v1` inventory

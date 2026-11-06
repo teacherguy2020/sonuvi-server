@@ -19,8 +19,9 @@ readonly host_key="$credential_dir/ssh_host_ed25519_key"
 readonly client_key="$credential_dir/client_ed25519"
 readonly client_public_key="$client_key.pub"
 readonly sudo_password="$credential_dir/sudo_password"
-readonly release_id="${SONUVI_GATE_C_FIXTURE_RELEASE_ID:-sonuvi-24d0758d0475602a90232dd47bbd46aa01d5e8fd7489187741591bc092101e58}"
+readonly release_id="${SONUVI_GATE_C_FIXTURE_RELEASE_ID:-sonuvi-e56d85697e23f11a91612918dd2b975b61c81cb035fb8295445e481d942eab67}"
 readonly release_root="${SONUVI_GATE_C_FIXTURE_RELEASE_ROOT:-/Volumes/SammySSD/Sonuvi-iOS-Guided-Setup-Lab/distribution/gate-c-lab/$release_id}"
+readonly bootstrap_kit="${SONUVI_GATE_C_FIXTURE_BOOTSTRAP_KIT:-$release_root/sonuvi-bootstrap-kit-v1.tar}"
 
 fail() {
   echo "sonuvi_gate_c_archive_status_fixture:$1" >&2
@@ -115,7 +116,7 @@ ensure_network() {
 
 prepare_build_context() {
   local build_context
-  local packaged_bootstrap_kit="${SONUVI_GATE_C_FIXTURE_BOOTSTRAP_KIT:-}"
+  local packaged_bootstrap_kit="$bootstrap_kit"
   build_context="$(mktemp -d /tmp/sonuvi-gate-c-archive-status-build.XXXXXX)"
   install -d -m 0700 "$build_context/app/scripts" "$build_context/app/src/lib"
   cp "$fixture_dir/Dockerfile" "$fixture_dir/sshd_config" "$fixture_dir/dispatcher.sh" "$fixture_dir/seed-status.mjs" "$fixture_dir/start.sh" "$fixture_dir/tcp-relay.mjs" "$fixture_dir/systemctl-fixture.sh" "$build_context/"

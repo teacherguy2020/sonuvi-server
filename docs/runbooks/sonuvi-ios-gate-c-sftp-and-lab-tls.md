@@ -94,8 +94,7 @@ capsule SHA-256: 5a12aeea3a5ae0dda1fbc8ceb599ee27e0da93055603effff5fd7b559a50f3d
 ```
 
 ```text
-/usr/bin/sudo -n /bin/sh -s -- <64-lowercase-hex-kit-sha256> <decimal-kit-bytes>
-/usr/bin/sudo -S -k -p '' /bin/sh -s -- <64-lowercase-hex-kit-sha256> <decimal-kit-bytes>
+/usr/bin/sudo -S -k -p '' -- /bin/sh -s -- <64-lowercase-hex-kit-sha256> <decimal-kit-bytes>
 ```
 
 Only the signed digest and bounded byte count are substituted after strict
@@ -160,10 +159,11 @@ is the fixed root-owned path:
 /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-release-stage.mjs
 ```
 
-iOS sends the existing framed `stage_release` envelope and immutable archive
-to that path. It never derives a command or path from metadata. The staged
-release and the later target installer retain their existing signatures,
-digest checks, fixed roots, and durable status protocol.
+iOS sends the typed `stage_release` request (signed envelope, attempt ID, and
+preflight target identity) followed by the immutable archive to that path. It
+never derives a command or path from metadata. The staged release and the
+later target installer retain their existing signatures, digest checks, fixed
+roots, target/attempt binding, and durable status protocol.
 
 After a successful verified stage, first installation uses only this fixed
 bootstrap command:

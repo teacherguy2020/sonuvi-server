@@ -55,7 +55,7 @@ Send one UTF-8 JSON header, ending in one LF, then raw archive bytes with no
 framing, compression, or trailing bytes:
 
 ```json
-{"operation":"stage_release","envelope":{"<exact signed release envelope>":"..."}}
+{"operation":"stage_release","envelope":{"<exact signed release envelope>":"..."},"attemptId":"boot_fixture_first_install_20261105","targetIdentity":"sonuvi-target-v1-<64 lowercase hex>"}
 ```
 
 The header limit is 64 KiB. Trusted anchors are read only from the root-owned
@@ -65,9 +65,9 @@ protected temporary location, validates all requirements, extracts with
 path-containment/no-follow checks, then makes the final tree read-only.
 
 ```text
-releaseId: sonuvi-24d0758d0475602a90232dd47bbd46aa01d5e8fd7489187741591bc092101e58
-archive:   53,448,704 bytes
-sha256:    198a8dd89c66b332121394083b82d1c73b62da9fa28b8de2798ab9f280bd716e
+releaseId: sonuvi-e56d85697e23f11a91612918dd2b975b61c81cb035fb8295445e481d942eab67
+archive:   53,454,848 bytes
+sha256:    fb705a88aa2d30744e8248c99f7246870be6f3bb2d58166dc2238eb9af1a3035
 ```
 
 > **Published artifact:** the above immutable bundle was rebuilt after the
@@ -91,7 +91,8 @@ Send only:
 {"operation":"status","attemptId":"boot_fixture_archive_status_20261105"}
 ```
 
-The seeded record is bound to `fixture_target_20261105` and returns
+The seeded record is bound to the preflight-derived
+`sonuvi-target-v1-<64 lowercase hex>` identity and returns
 `sonuvi.bootstrap-status.v1`, phase `release_acquisition`, one `waiting` event,
 `next: "observe"`, and `terminal: false`. Unknown/stale attempts are rejected
 with `bootstrap_attempt_not_found`. Polling is read-only: reconnects return the
@@ -101,8 +102,9 @@ same state and leave the durable state/journal bytes unchanged.
 
 The fixture first proves `/opt/sonuvi/current` is absent, then stages the
 verified immutable archive and invokes the new fixed bridge with a signed
-envelope, `boot_fixture_first_install_20261105`, the target's own machine ID,
-and `fixture-server`. It accepts no caller path, command, or release ID.
+envelope, `boot_fixture_first_install_20261105`, the target's preflight
+identity, and `fixture-server`. It accepts no caller path, command, or
+release ID.
 Successful activation returns
 `sonuvi.gate-c-first-install.v1` / `awaiting-administrator-enrollment`,
 creates the expected current pointer, and is visible through the durable
@@ -127,7 +129,9 @@ scripts/sonuvi-gate-c-archive-status-fixture.sh stop
 ```
 
 `reset` recreates all staging and attempt state. It does not touch the B2 VM,
-baseline, immutable lab artifacts, or SFTP fixture.
+baseline, immutable lab artifacts, or SFTP fixture. By default it uses the
+currently published immutable lab bundle (including its packaged bootstrap
+kit); environment overrides are only for a separately named candidate.
 
 ## Helper identity
 
