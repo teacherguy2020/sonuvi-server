@@ -6,7 +6,7 @@ export const GATE_C_SFTP_STAGING_RELATIVE_DIRECTORY = '.local/share/sonuvi-boots
 export const GATE_C_SFTP_BOOTSTRAP_PARTIAL_NAME = 'sonuvi-bootstrap-kit-v1.tar.partial';
 export const GATE_C_SFTP_BOOTSTRAP_FINAL_NAME = 'sonuvi-bootstrap-kit-v1.tar';
 export const GATE_C_SFTP_BOOTSTRAP_ACTIVATOR = 'sonuvi_sftp_bootstrap_activate_v1';
-export const GATE_C_SFTP_BOOTSTRAP_ACTIVATOR_SHA256 = '56ccc9df3888b4360da44939bf26a26384cf5219bd076130437b5741713a8bfd';
+export const GATE_C_SFTP_BOOTSTRAP_ACTIVATOR_SHA256 = '6b9e5f4692370aa65cff4b461fd5e8d7906ee5b248060ffb790b64503df136ea';
 
 const STAGING_SEGMENTS = Object.freeze(GATE_C_SFTP_STAGING_RELATIVE_DIRECTORY.split('/'));
 

@@ -90,7 +90,7 @@ It is delivered as exact application-owned stdin, never selected by the user
 or fetched from the target. Its shell command is one of these fixed forms:
 
 ```text
-capsule SHA-256: 56ccc9df3888b4360da44939bf26a26384cf5219bd076130437b5741713a8bfd
+capsule SHA-256: 6b9e5f4692370aa65cff4b461fd5e8d7906ee5b248060ffb790b64503df136ea
 ```
 
 ```text
