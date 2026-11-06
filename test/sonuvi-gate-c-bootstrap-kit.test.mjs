@@ -82,9 +82,10 @@ test('bootstrap kit includes durable status closure and exactly matches capsule 
   assert.deepEqual(capsuleTree(capsule), GATE_C_BOOTSTRAP_KIT_EXTRACTED_TREE);
 });
 
-test('generated bootstrap kit status entrypoint is syntactically executable', async (t) => {
+test('generated bootstrap kit fixed entrypoints are syntactically executable', async (t) => {
   const { kitRoot } = await buildKit(t, 'status-entrypoint');
   await execFile(process.execPath, ['--check', path.join(kitRoot, 'scripts', 'sonuvi-bootstrap-status.mjs')]);
+  await execFile(process.execPath, ['--check', path.join(kitRoot, 'scripts', 'sonuvi-first-install-activate.mjs')]);
 });
 
 test('bootstrap kit verifier rejects unexpected files, symlinks, malformed manifests, and altered payloads', async (t) => {

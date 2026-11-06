@@ -7,9 +7,11 @@ set -eu
 readonly_root=/var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts
 status_command='/usr/bin/sudo -n /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-bootstrap-status.mjs'
 stage_command='/usr/bin/sudo -n /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-release-stage.mjs'
+activate_command='/usr/bin/sudo -n /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-first-install-activate.mjs'
 
 case "${SSH_ORIGINAL_COMMAND:-}" in
   "$status_command") exec /usr/bin/sudo -n /usr/bin/node "$readonly_root/sonuvi-bootstrap-status.mjs" ;;
   "$stage_command") exec /usr/bin/sudo -n /usr/bin/node "$readonly_root/sonuvi-release-stage.mjs" ;;
+  "$activate_command") exec /usr/bin/sudo -n /usr/bin/node "$readonly_root/sonuvi-first-install-activate.mjs" ;;
   *) printf '%s\n' 'sonuvi_gate_c_archive_status_fixture:operation_rejected' >&2; exit 126 ;;
 esac

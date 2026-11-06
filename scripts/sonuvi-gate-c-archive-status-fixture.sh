@@ -107,17 +107,24 @@ ensure_network() {
 
 prepare_build_context() {
   local build_context
+  local packaged_bootstrap_kit="${SONUVI_GATE_C_FIXTURE_BOOTSTRAP_KIT:-}"
   build_context="$(mktemp -d /tmp/sonuvi-gate-c-archive-status-build.XXXXXX)"
   install -d -m 0700 "$build_context/app/scripts" "$build_context/app/src/lib"
-  cp "$fixture_dir/Dockerfile" "$fixture_dir/sshd_config" "$fixture_dir/dispatcher.sh" "$fixture_dir/seed-status.mjs" "$fixture_dir/start.sh" "$fixture_dir/tcp-relay.mjs" "$build_context/"
-  cp "$repo_root/scripts/sonuvi-release-stage.mjs" "$repo_root/scripts/sonuvi-bootstrap-status.mjs" "$build_context/app/scripts/"
-  local file
-  for file in \
-    atomic-file.mjs public-web-root.mjs release-artifact.mjs runtime-capabilities.mjs runtime-config-security.mjs \
-    sonuvi-bootstrap-contract.mjs sonuvi-bootstrap-progress.mjs sonuvi-bootstrap-status.mjs sonuvi-fresh-install.mjs \
-    sonuvi-gate-c-release.mjs sonuvi-gate-c-staging.mjs; do
-    cp "$repo_root/src/lib/$file" "$build_context/app/src/lib/$file"
-  done
+  cp "$fixture_dir/Dockerfile" "$fixture_dir/sshd_config" "$fixture_dir/dispatcher.sh" "$fixture_dir/seed-status.mjs" "$fixture_dir/start.sh" "$fixture_dir/tcp-relay.mjs" "$fixture_dir/systemctl-fixture.sh" "$build_context/"
+  if [ -n "$packaged_bootstrap_kit" ]; then
+    regular_file "$packaged_bootstrap_kit"
+    tar --extract --file "$packaged_bootstrap_kit" --directory "$build_context/app"
+    (cd "$repo_root" && SONUVI_FIXTURE_BOOTSTRAP_ROOT="$build_context/app" node --input-type=module --eval "import { verifyGateCBootstrapKit } from './src/lib/sonuvi-gate-c-bootstrap-kit.mjs'; await verifyGateCBootstrapKit({ kitRoot: process.env.SONUVI_FIXTURE_BOOTSTRAP_ROOT });") || fail fixture_bootstrap_kit_invalid 64
+  else
+    cp "$repo_root/scripts/sonuvi-release-stage.mjs" "$repo_root/scripts/sonuvi-bootstrap-status.mjs" "$repo_root/scripts/sonuvi-first-install-activate.mjs" "$build_context/app/scripts/"
+    local file
+    for file in \
+      atomic-file.mjs public-web-root.mjs release-artifact.mjs runtime-capabilities.mjs runtime-config-security.mjs \
+      sonuvi-bootstrap-contract.mjs sonuvi-bootstrap-progress.mjs sonuvi-bootstrap-status.mjs sonuvi-fresh-install.mjs \
+      sonuvi-gate-c-first-install.mjs sonuvi-gate-c-release.mjs sonuvi-gate-c-staging.mjs; do
+      cp "$repo_root/src/lib/$file" "$build_context/app/src/lib/$file"
+    done
+  fi
   cp "$release_root/release-trust-anchors.json" "$build_context/release-trust-anchors.json"
   cp "$release_root/release-envelope.json" "$build_context/fixture-release-envelope.json"
   if ! docker build --platform linux/arm64 --tag "$image_name" "$build_context" >/dev/null; then
@@ -189,10 +196,12 @@ inspect() {
       /var/lib/sonuvi-bootstrap/uploads \
       /var/lib/sonuvi-bootstrap/releases \
       /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-release-stage.mjs \
-      /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-bootstrap-status.mjs
+      /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-bootstrap-status.mjs \
+      /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-first-install-activate.mjs
     sha256sum \
       /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-release-stage.mjs \
-      /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-bootstrap-status.mjs
+      /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-bootstrap-status.mjs \
+      /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-first-install-activate.mjs
   '
 }
 

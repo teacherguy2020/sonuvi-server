@@ -100,31 +100,69 @@ verifies the raw `release-manifest.json` digest, runs the existing
 never overwrites an existing release. Repeating the exact release returns
 `already_staged`; a different candidate cannot replace it.
 
-The existing fixed target installer remains the activation operation:
+First installation then uses this one fixed, root-authorized bootstrap command
+(no release ID, filesystem path, or command text is interpolated by iOS):
+
+```text
+/usr/bin/sudo -n /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-first-install-activate.mjs
+```
+
+Its complete typed input is:
 
 ```json
 {
+  "operation": "activate_first_install",
+  "envelope": { "<exact signed release envelope>": "..." },
   "attemptId": "boot_<opaque-id>",
   "targetIdentity": "<preflight machine identity>",
-  "releaseId": "sonuvi-<64 lowercase hex>",
   "serverIdentity": "<validated local server label>"
 }
 ```
 
-No release URL or path enters the installer. It consumes only the verified
-fixed staging root and still uses the Gate B2 artifact verifier, service
-provisioner, first-release transaction, administrator authority, and
-first-controller handoff.
+The helper reads its root-owned trust anchors, derives `releaseId` exclusively
+from the valid signed envelope, confirms `targetIdentity` against
+`/etc/machine-id`, re-hashes the staged manifest, re-verifies the immutable
+artifact, and requires a root-owned non-writable staged tree. It invokes only
+the verified staged
+`scripts/sonuvi-target-installer.mjs` through fixed `/usr/bin/node`; the
+client cannot select a script, argument, or filesystem path. The target
+installer remains the sole installer implementation and retains the Gate B2
+artifact verifier, service provisioner, first-release transaction,
+administrator authority, and first-controller handoff.
+
+Success returns only this sanitized result:
+
+```json
+{
+  "ok": true,
+  "contract": "sonuvi.gate-c-first-install.v1",
+  "state": "awaiting-administrator-enrollment",
+  "releaseId": "sonuvi-<64 lowercase hex>",
+  "attemptId": "boot_<opaque-id>",
+  "targetIdentity": "<preflight machine identity>"
+}
+```
+
+An exact replay after durable completion returns `state: "already_activated"`
+without executing another installer. A held lock or an in-progress attempt
+returns `first_install_activation_in_progress`; an interrupted or failed
+attempt is recorded as `recoverable-incomplete` and returns
+`first_install_recovery_required` on retry. Mismatched machine/release/attempt
+bindings, unsigned metadata, altered/missing staging, conflicting existing
+installation state, and insufficient root authorization fail closed.
 
 ## 4. Durable progress and reconnect
 
-The installer now writes sanitized, fsync-backed JSONL events before the
-normal Sonuvi state root exists at:
+The bootstrap bridge and target installer write sanitized, fsync-backed JSONL
+events before the normal Sonuvi state root exists at:
 
 `/var/lib/sonuvi-bootstrap/attempts/<attemptId>/{state.json,journal.jsonl}`
 
-Once the installation layout exists, it also writes the established Gate B2
-journal at `/var/lib/sonuvi/install/journal.jsonl`. Events remain versioned
+The bridge records `release_verification` and `activation` started/passed or
+failed transitions; the target installer records prerequisite, configuration,
+checkpoint, health, and administrator-enrollment transitions. Once the
+installation layout exists, it also writes the established Gate B2 journal at
+`/var/lib/sonuvi/install/journal.jsonl`. Events remain versioned
 `sonuvi.fresh-install-journal.v1` records with `eventId`, `attemptId`, target
 identity, stage, state, timestamp, and optional safe error.
 

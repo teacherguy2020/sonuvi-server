@@ -3,8 +3,11 @@
 ## Purpose and boundary
 
 This disposable Debian ARM64 Docker fixture exercises the real root-only Gate C
-archive-stage and durable-status entrypoints without activating or installing
-Sonuvi. It is separate from the B2 VM, pristine baseline, and SFTP fixture.
+archive-stage, first-install bridge, and durable-status entrypoints. Its
+fixture-only systemd shim admits only the fixed unit operations used by the
+real packaged target installer; it never provides a shell or a second
+installer implementation. It is separate from the B2 VM, pristine baseline,
+and SFTP fixture.
 
 It contains only fixed helpers and public signed release metadata. It mounts
 only a test-only SSH host private key and test-only client **public** key—never
@@ -40,6 +43,7 @@ other command exits `126` with `operation_rejected`.
 ```text
 /usr/bin/sudo -n /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-release-stage.mjs
 /usr/bin/sudo -n /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-bootstrap-status.mjs
+/usr/bin/sudo -n /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-first-install-activate.mjs
 ```
 
 `sonuvi-stage` has sudo authority only for those invocations. Password/root
@@ -93,6 +97,19 @@ The seeded record is bound to `fixture_target_20261105` and returns
 with `bootstrap_attempt_not_found`. Polling is read-only: reconnects return the
 same state and leave the durable state/journal bytes unchanged.
 
+### `activate_first_install`
+
+The fixture first proves `/opt/sonuvi/current` is absent, then stages the
+verified immutable archive and invokes the new fixed bridge with a signed
+envelope, `boot_fixture_first_install_20261105`, the target's own machine ID,
+and `fixture-server`. It accepts no caller path, command, or release ID.
+Successful activation returns
+`sonuvi.gate-c-first-install.v1` / `awaiting-administrator-enrollment`,
+creates the expected current pointer, and is visible through the durable
+status helper with `next: administrator_enrollment`. An exact replay returns
+`already_activated`; mismatched machine identity, an extra path field, stale
+activation lock, and direct unprivileged execution are rejected.
+
 ## Lifecycle
 
 ```bash
@@ -119,6 +136,7 @@ The source and in-container helper hashes match:
 ```text
 sonuvi-release-stage.mjs:     22bc925a46681c80dd81a351288f12b920a25073bfbffbc3e410b4decbf3165b
 sonuvi-bootstrap-status.mjs:  8beee776c14235f77499a5a3397b0e80a17722de77d00c15697ed55b8f18c5ac
+sonuvi-first-install-activate.mjs: published with the next immutable kit
 ```
 
 `/var/lib/sonuvi-bootstrap`, `attempts`, and `uploads` are root-owned `0700`;
@@ -132,6 +150,8 @@ scripts/verify-sonuvi-gate-c-archive-status-fixture.sh
 
 The independent OpenSSH acceptance pins the host key and covers valid staging,
 idempotent retry/lost-final-response, malformed/truncated/corrupt/trailing
-input, an actual midstream SSH kill, status reconnect, attempt binding,
-permission boundaries, and arbitrary-command rejection. It intentionally does
-not install Sonuvi or run administrator/controller operations.
+input, an actual midstream SSH kill, status reconnect, first installation from
+verified staging with no pre-existing current pointer, attempt/machine
+binding, lock/replay safety, privilege boundaries, and arbitrary-command
+rejection. It stops at administrator enrollment and never runs controller
+authorization.

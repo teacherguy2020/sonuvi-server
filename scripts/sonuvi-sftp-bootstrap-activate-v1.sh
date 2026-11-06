@@ -103,6 +103,7 @@ expected_tree='.
 ./scripts
 ./scripts/sonuvi-bootstrap-status.mjs
 ./scripts/sonuvi-debian-node-bootstrap.sh
+./scripts/sonuvi-first-install-activate.mjs
 ./scripts/sonuvi-release-stage.mjs
 ./src
 ./src/lib
@@ -115,6 +116,7 @@ expected_tree='.
 ./src/lib/sonuvi-bootstrap-progress.mjs
 ./src/lib/sonuvi-bootstrap-status.mjs
 ./src/lib/sonuvi-fresh-install.mjs
+./src/lib/sonuvi-gate-c-first-install.mjs
 ./src/lib/sonuvi-gate-c-release.mjs
 ./src/lib/sonuvi-gate-c-staging.mjs'
 observed_tree="$(cd "$temporary_root" && find . -print | LC_ALL=C sort)"

@@ -19,9 +19,11 @@ readonly release_archive="$release_root/$release_id-linux-arm64.tar"
 readonly envelope="$release_root/release-envelope.json"
 readonly attempt_id='boot_fixture_archive_status_20261105'
 readonly target_identity='fixture_target_20261105'
+readonly activation_attempt_id='boot_fixture_first_install_20261105'
 readonly container_name='sonuvi-gate-c-archive-status-fixture'
 readonly status_command='/usr/bin/sudo -n /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-bootstrap-status.mjs'
 readonly stage_command='/usr/bin/sudo -n /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-release-stage.mjs'
+readonly activate_command='/usr/bin/sudo -n /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-first-install-activate.mjs'
 
 fail() {
   echo "verify_sonuvi_gate_c_archive_status_fixture:$1" >&2
@@ -30,6 +32,10 @@ fail() {
 
 scratch_dir="$(mktemp -d /tmp/sonuvi-gate-c-archive-status-fixture.XXXXXX)"
 cleanup() {
+  if [ "${SONUVI_FIXTURE_KEEP_SCRATCH:-}" = '1' ]; then
+    printf 'verify_sonuvi_gate_c_archive_status_fixture:debug_scratch=%s\n' "$scratch_dir" >&2
+    return
+  fi
   "$fixture_control" reset >/dev/null 2>&1 || true
   trash "$scratch_dir" >/dev/null 2>&1 || true
 }
@@ -53,9 +59,15 @@ ssh_run() {
     "$account@$host" "$@"
 }
 
-make_header() {
+make_stage_header() {
   SONUVI_FIXTURE_ENVELOPE="$envelope" node --input-type=module --eval "import fs from 'node:fs/promises'; const envelope = JSON.parse(await fs.readFile(process.env.SONUVI_FIXTURE_ENVELOPE, 'utf8')); process.stdout.write(JSON.stringify({ operation: 'stage_release', envelope }) + '\\n');" > "$scratch_dir/header.jsonl"
   [ "$(wc -c < "$scratch_dir/header.jsonl" | tr -d ' ')" -le 65536 ] || fail fixture_header_limit_invalid 64
+}
+
+make_activation_request() {
+  local requested_target="$1"
+  SONUVI_FIXTURE_ENVELOPE="$envelope" SONUVI_FIXTURE_TARGET="$requested_target" node --input-type=module --eval "import fs from 'node:fs/promises'; const envelope = JSON.parse(await fs.readFile(process.env.SONUVI_FIXTURE_ENVELOPE, 'utf8')); process.stdout.write(JSON.stringify({ operation: 'activate_first_install', envelope, attemptId: '$activation_attempt_id', targetIdentity: process.env.SONUVI_FIXTURE_TARGET, serverIdentity: 'fixture-server' }) + '\\n');" > "$scratch_dir/activation.json"
+  [ "$(wc -c < "$scratch_dir/activation.json" | tr -d ' ')" -le 65536 ] || fail fixture_activation_request_limit_invalid 64
 }
 
 assert_status() {
@@ -68,6 +80,16 @@ assert_stage() {
   SONUVI_FIXTURE_RESULT="$file" SONUVI_FIXTURE_STATE="$expected" node --input-type=module --eval "import fs from 'node:fs/promises'; const value = JSON.parse(await fs.readFile(process.env.SONUVI_FIXTURE_RESULT, 'utf8')); if (!value.ok || value.state !== process.env.SONUVI_FIXTURE_STATE || value.releaseId !== '$release_id') throw new Error('unexpected release stage response');"
 }
 
+assert_activation() {
+  local file="$1" expected="$2"
+  SONUVI_FIXTURE_RESULT="$file" SONUVI_FIXTURE_STATE="$expected" node --input-type=module --eval "import fs from 'node:fs/promises'; const value = JSON.parse(await fs.readFile(process.env.SONUVI_FIXTURE_RESULT, 'utf8')); if (!value.ok || value.contract !== 'sonuvi.gate-c-first-install.v1' || value.state !== process.env.SONUVI_FIXTURE_STATE || value.releaseId !== '$release_id' || value.attemptId !== '$activation_attempt_id' || value.targetIdentity !== '$activation_target') throw new Error('unexpected first-install activation response');"
+}
+
+assert_activation_status() {
+  local file="$1"
+  SONUVI_FIXTURE_RESULT="$file" node --input-type=module --eval "import fs from 'node:fs/promises'; const value = JSON.parse(await fs.readFile(process.env.SONUVI_FIXTURE_RESULT, 'utf8')); if (!value.ok || value.contract !== 'sonuvi.bootstrap-status.v1' || value.attemptId !== '$activation_attempt_id' || value.targetIdentity !== '$activation_target' || value.releaseId !== '$release_id' || value.phase !== 'awaiting-administrator-enrollment' || value.next !== 'administrator_enrollment' || value.terminal !== false || !Array.isArray(value.events) || !value.events.some((event) => event.stage === 'activation' && event.state === 'passed')) throw new Error('unexpected durable activation status response');"
+}
+
 assert_failure() {
   local file="$1" expected="$2"
   SONUVI_FIXTURE_RESULT="$file" SONUVI_FIXTURE_CODE="$expected" node --input-type=module --eval "import fs from 'node:fs/promises'; const value = JSON.parse(await fs.readFile(process.env.SONUVI_FIXTURE_RESULT, 'utf8')); if (value.ok || !String(value.code || '').includes(process.env.SONUVI_FIXTURE_CODE)) throw new Error('unexpected fixture rejection response');"
@@ -77,8 +99,16 @@ run_status() {
   printf '%s' "{\"operation\":\"status\",\"attemptId\":\"$attempt_id\"}" | ssh_run "$status_command"
 }
 
+run_activation_status() {
+  printf '%s' "{\"operation\":\"status\",\"attemptId\":\"$activation_attempt_id\"}" | ssh_run "$status_command"
+}
+
 run_stage() {
   cat "$scratch_dir/header.jsonl" "$release_archive" | ssh_run "$stage_command"
+}
+
+run_activation() {
+  cat "$scratch_dir/activation.json" | ssh_run "$activate_command"
 }
 
 "$fixture_control" reset >/dev/null
@@ -87,6 +117,7 @@ grep -q '0:0:700 /var/lib/sonuvi-bootstrap$' "$scratch_dir/inspect.txt" || fail 
 grep -q '0:0:700 /var/lib/sonuvi-bootstrap/attempts$' "$scratch_dir/inspect.txt" || fail fixture_attempt_permissions_invalid 65
 grep -q '0:0:644 /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-release-stage.mjs$' "$scratch_dir/inspect.txt" || fail fixture_stage_helper_permissions_invalid 65
 grep -q '0:0:644 /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-bootstrap-status.mjs$' "$scratch_dir/inspect.txt" || fail fixture_status_helper_permissions_invalid 65
+grep -q '0:0:644 /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-first-install-activate.mjs$' "$scratch_dir/inspect.txt" || fail fixture_first_install_helper_permissions_invalid 65
 
 # Pinning is explicit: a deliberately different host key must fail before
 # user authentication, while the expected key permits the fixed status command.
@@ -113,12 +144,65 @@ set -e
 [ "$unrelated_rc" -ne 0 ] || fail fixture_unrelated_status_accepted 67
 assert_failure "$scratch_dir/status-unrelated.json" 'bootstrap_attempt_not_found'
 
-make_header
+make_stage_header
 run_stage > "$scratch_dir/staged.json"
 assert_stage "$scratch_dir/staged.json" staged
 docker exec "$container_name" /bin/sh -ec "test -d /var/lib/sonuvi-bootstrap/releases/$release_id && test \"\$(stat -c %a /var/lib/sonuvi-bootstrap/releases/$release_id)\" = 555"
 run_stage > "$scratch_dir/already-staged.json"
 assert_stage "$scratch_dir/already-staged.json" already_staged
+
+# First installation is deliberately activated from the verified staged tree;
+# /opt/sonuvi/current must not exist before the root-owned bootstrap bridge.
+docker exec "$container_name" /bin/sh -ec 'test ! -e /opt/sonuvi/current'
+activation_target="$(docker exec "$container_name" /bin/sh -ec 'cat /etc/machine-id' | tr -d '[:space:]')"
+[[ "$activation_target" =~ ^[A-Za-z0-9_-]{16,160}$ ]] || fail fixture_machine_identity_invalid 67
+make_activation_request 'different_fixture_machine_20261105'
+set +e
+run_activation > "$scratch_dir/activation-wrong-machine.json"
+wrong_machine_rc=$?
+set -e
+[ "$wrong_machine_rc" -ne 0 ] || fail fixture_wrong_machine_activation_accepted 67
+assert_failure "$scratch_dir/activation-wrong-machine.json" 'first_install_target_identity_mismatch'
+
+# Caller-controlled paths are rejected by the fixed typed schema before any
+# installer invocation. The release ID remains metadata-derived only.
+SONUVI_FIXTURE_ENVELOPE="$envelope" SONUVI_FIXTURE_TARGET="$activation_target" node --input-type=module --eval "import fs from 'node:fs/promises'; const envelope = JSON.parse(await fs.readFile(process.env.SONUVI_FIXTURE_ENVELOPE, 'utf8')); process.stdout.write(JSON.stringify({ operation: 'activate_first_install', envelope, attemptId: '$activation_attempt_id', targetIdentity: process.env.SONUVI_FIXTURE_TARGET, serverIdentity: 'fixture-server', path: '/opt/sonuvi/current' }) + '\\n');" > "$scratch_dir/activation-with-path.json"
+set +e
+cat "$scratch_dir/activation-with-path.json" | ssh_run "$activate_command" > "$scratch_dir/activation-with-path-response.json"
+path_request_rc=$?
+set -e
+[ "$path_request_rc" -ne 0 ] || fail fixture_path_activation_accepted 67
+assert_failure "$scratch_dir/activation-with-path-response.json" 'unsupported_fields'
+
+# A stale lock is a durable interrupted-request boundary: it must not run a
+# second installer process, and a later explicit retry can proceed after the
+# lock is cleared by recovery.
+make_activation_request "$activation_target"
+docker exec "$container_name" /bin/sh -ec "printf interrupted > /var/lib/sonuvi-bootstrap/first-install.lock && chmod 600 /var/lib/sonuvi-bootstrap/first-install.lock"
+set +e
+run_activation > "$scratch_dir/activation-locked.json"
+locked_rc=$?
+set -e
+[ "$locked_rc" -ne 0 ] || fail fixture_locked_activation_accepted 67
+assert_failure "$scratch_dir/activation-locked.json" 'first_install_activation_in_progress'
+docker exec "$container_name" /bin/sh -ec 'rm -f /var/lib/sonuvi-bootstrap/first-install.lock'
+
+run_activation > "$scratch_dir/activation.json.result"
+assert_activation "$scratch_dir/activation.json.result" awaiting-administrator-enrollment
+docker exec "$container_name" /bin/sh -ec "test -L /opt/sonuvi/current && test \"\$(readlink -f /opt/sonuvi/current)\" = /opt/sonuvi/releases/$release_id"
+run_activation_status > "$scratch_dir/activation-status.json"
+assert_activation_status "$scratch_dir/activation-status.json"
+run_activation > "$scratch_dir/activation-repeat.json"
+assert_activation "$scratch_dir/activation-repeat.json" already_activated
+
+# Direct unprivileged execution does not gain a root operation merely because
+# the bootstrap script is readable.
+set +e
+docker exec "$container_name" /bin/sh -ec "printf '{}' | su -s /bin/sh sonuvi-stage -c '/usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-first-install-activate.mjs'" > "$scratch_dir/activation-unprivileged.out" 2> "$scratch_dir/activation-unprivileged.err"
+unprivileged_rc=$?
+set -e
+[ "$unprivileged_rc" -eq 77 ] || fail fixture_unprivileged_activation_accepted 67
+grep -q 'requires explicit root authorization' "$scratch_dir/activation-unprivileged.err"
 
 # A fully completed first stream with its output intentionally discarded is
 # indistinguishable to a reconnecting caller from a lost final response. The

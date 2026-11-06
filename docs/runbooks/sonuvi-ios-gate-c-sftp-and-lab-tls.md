@@ -131,6 +131,7 @@ The fixed extracted bootstrap-kit inventory is versioned as
 etc/sonuvi/release-trust-anchors.json
 scripts/sonuvi-bootstrap-status.mjs
 scripts/sonuvi-debian-node-bootstrap.sh
+scripts/sonuvi-first-install-activate.mjs
 scripts/sonuvi-release-stage.mjs
 src/lib/atomic-file.mjs
 src/lib/public-web-root.mjs
@@ -141,6 +142,7 @@ src/lib/sonuvi-bootstrap-contract.mjs
 src/lib/sonuvi-bootstrap-progress.mjs
 src/lib/sonuvi-bootstrap-status.mjs
 src/lib/sonuvi-fresh-install.mjs
+src/lib/sonuvi-gate-c-first-install.mjs
 src/lib/sonuvi-gate-c-release.mjs
 src/lib/sonuvi-gate-c-staging.mjs
 ```
@@ -162,6 +164,20 @@ iOS sends the existing framed `stage_release` envelope and immutable archive
 to that path. It never derives a command or path from metadata. The staged
 release and the later target installer retain their existing signatures,
 digest checks, fixed roots, and durable status protocol.
+
+After a successful verified stage, first installation uses only this fixed
+bootstrap command:
+
+```text
+/usr/bin/sudo -n /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-first-install-activate.mjs
+```
+
+The client sends the typed `activate_first_install` request defined by the
+Server contract: signed envelope, attempt ID, preflight machine identity, and
+validated server identity only. It must not send a release ID, path, script,
+or shell fragment. The bootstrap bridge independently binds those identities,
+re-verifies the staged immutable release, and invokes the one packaged target
+installer through fixed `/usr/bin/node`.
 
 ### Transfer errors and recovery
 

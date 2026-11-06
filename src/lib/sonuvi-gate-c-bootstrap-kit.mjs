@@ -15,6 +15,7 @@ export const GATE_C_BOOTSTRAP_KIT_VERSION = 1;
 const SOURCE_FILES = Object.freeze([
   'scripts/sonuvi-bootstrap-status.mjs',
   'scripts/sonuvi-debian-node-bootstrap.sh',
+  'scripts/sonuvi-first-install-activate.mjs',
   'scripts/sonuvi-release-stage.mjs',
   'src/lib/atomic-file.mjs',
   'src/lib/public-web-root.mjs',
@@ -26,6 +27,7 @@ const SOURCE_FILES = Object.freeze([
   'src/lib/sonuvi-bootstrap-status.mjs',
   'src/lib/sonuvi-fresh-install.mjs',
   'src/lib/sonuvi-gate-c-release.mjs',
+  'src/lib/sonuvi-gate-c-first-install.mjs',
   'src/lib/sonuvi-gate-c-staging.mjs',
 ]);
 
