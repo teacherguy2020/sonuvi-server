@@ -18,8 +18,8 @@ readonly credential_dir='/Users/brianwis/.openclaw/credentials/sonuvi-gate-c-arc
 readonly host_key="$credential_dir/ssh_host_ed25519_key"
 readonly client_key="$credential_dir/client_ed25519"
 readonly client_public_key="$client_key.pub"
-readonly release_id='sonuvi-7bfc8c4eb23ef0e00c7718bb4ae5089c42eb6c65fa29c2eb1ea097a080d5c5e7'
-readonly release_root="/Volumes/SammySSD/Sonuvi-iOS-Guided-Setup-Lab/distribution/gate-c-lab/$release_id"
+readonly release_id="${SONUVI_GATE_C_FIXTURE_RELEASE_ID:-sonuvi-24d0758d0475602a90232dd47bbd46aa01d5e8fd7489187741591bc092101e58}"
+readonly release_root="${SONUVI_GATE_C_FIXTURE_RELEASE_ROOT:-/Volumes/SammySSD/Sonuvi-iOS-Guided-Setup-Lab/distribution/gate-c-lab/$release_id}"
 
 fail() {
   echo "sonuvi_gate_c_archive_status_fixture:$1" >&2

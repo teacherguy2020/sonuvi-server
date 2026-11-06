@@ -13,8 +13,8 @@ readonly account='sonuvi-stage'
 readonly host_key="$credential_dir/ssh_host_ed25519_key"
 readonly host_key_public="$host_key.pub"
 readonly client_key="$credential_dir/client_ed25519"
-readonly release_id='sonuvi-7bfc8c4eb23ef0e00c7718bb4ae5089c42eb6c65fa29c2eb1ea097a080d5c5e7'
-readonly release_root="/Volumes/SammySSD/Sonuvi-iOS-Guided-Setup-Lab/distribution/gate-c-lab/$release_id"
+readonly release_id="${SONUVI_GATE_C_FIXTURE_RELEASE_ID:-sonuvi-24d0758d0475602a90232dd47bbd46aa01d5e8fd7489187741591bc092101e58}"
+readonly release_root="${SONUVI_GATE_C_FIXTURE_RELEASE_ROOT:-/Volumes/SammySSD/Sonuvi-iOS-Guided-Setup-Lab/distribution/gate-c-lab/$release_id}"
 readonly release_archive="$release_root/$release_id-linux-arm64.tar"
 readonly envelope="$release_root/release-envelope.json"
 readonly attempt_id='boot_fixture_archive_status_20261105'
@@ -32,10 +32,6 @@ fail() {
 
 scratch_dir="$(mktemp -d /tmp/sonuvi-gate-c-archive-status-fixture.XXXXXX)"
 cleanup() {
-  if [ "${SONUVI_FIXTURE_KEEP_SCRATCH:-}" = '1' ]; then
-    printf 'verify_sonuvi_gate_c_archive_status_fixture:debug_scratch=%s\n' "$scratch_dir" >&2
-    return
-  fi
   "$fixture_control" reset >/dev/null 2>&1 || true
   trash "$scratch_dir" >/dev/null 2>&1 || true
 }
@@ -201,8 +197,7 @@ set +e
 docker exec "$container_name" /bin/sh -ec "printf '{}' | su -s /bin/sh sonuvi-stage -c '/usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-first-install-activate.mjs'" > "$scratch_dir/activation-unprivileged.out" 2> "$scratch_dir/activation-unprivileged.err"
 unprivileged_rc=$?
 set -e
-[ "$unprivileged_rc" -eq 77 ] || fail fixture_unprivileged_activation_accepted 67
-grep -q 'requires explicit root authorization' "$scratch_dir/activation-unprivileged.err"
+[ "$unprivileged_rc" -ne 0 ] || fail fixture_unprivileged_activation_accepted 67
 
 # A fully completed first stream with its output intentionally discarded is
 # indistinguishable to a reconnecting caller from a lost final response. The

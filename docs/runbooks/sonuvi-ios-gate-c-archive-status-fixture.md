@@ -65,15 +65,15 @@ protected temporary location, validates all requirements, extracts with
 path-containment/no-follow checks, then makes the final tree read-only.
 
 ```text
-releaseId: sonuvi-7bfc8c4eb23ef0e00c7718bb4ae5089c42eb6c65fa29c2eb1ea097a080d5c5e7
-archive:   53,431,808 bytes
-sha256:    f5375a722c4e82666577899231215f387c2e96751461d1383d3ac3d29ff06f97
+releaseId: sonuvi-24d0758d0475602a90232dd47bbd46aa01d5e8fd7489187741591bc092101e58
+archive:   53,448,704 bytes
+sha256:    198a8dd89c66b332121394083b82d1c73b62da9fa28b8de2798ab9f280bd716e
 ```
 
 > **Published artifact:** the above immutable bundle was rebuilt after the
-> status-entrypoint syntax correction. The actual extracted release and
-> bootstrap-kit copies both pass `node --check`; the older signed artifacts
-> remain preserved and unmodified.
+> first-install bridge and staged-installer stdin correction. The actual
+> extracted release and bootstrap-kit copies both pass `node --check`; older
+> signed artifacts remain preserved and unmodified.
 
 Success returns `ok: true` and `state: "staged"`; a complete retry returns
 `state: "already_staged"` without a second extraction. Malformed JSON,
@@ -134,9 +134,9 @@ baseline, immutable lab artifacts, or SFTP fixture.
 The source and in-container helper hashes match:
 
 ```text
-sonuvi-release-stage.mjs:     22bc925a46681c80dd81a351288f12b920a25073bfbffbc3e410b4decbf3165b
-sonuvi-bootstrap-status.mjs:  8beee776c14235f77499a5a3397b0e80a17722de77d00c15697ed55b8f18c5ac
-sonuvi-first-install-activate.mjs: published with the next immutable kit
+sonuvi-release-stage.mjs:          22bc925a46681c80dd81a351288f12b920a25073bfbffbc3e410b4decbf3165b
+sonuvi-bootstrap-status.mjs:       8beee776c14235f77499a5a3397b0e80a17722de77d00c15697ed55b8f18c5ac
+sonuvi-first-install-activate.mjs: 0dbe409dd41d0d293be0b0edad01408c54bf8c3e8e3ece0536a3f28cf331a594
 ```
 
 `/var/lib/sonuvi-bootstrap`, `attempts`, and `uploads` are root-owned `0700`;
