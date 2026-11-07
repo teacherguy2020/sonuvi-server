@@ -65,23 +65,27 @@ protected temporary location, validates all requirements, extracts with
 path-containment/no-follow checks, then makes the final tree read-only.
 
 ```text
-releaseId: sonuvi-27e06697eb80776ff7189cbdd9c813cb04893c41d392a37fc975522c56e369a0
-archive:   53,455,360 bytes
-sha256:    ac19993e541467067fea6849cf506b8ace4b9d050947ac24ee70f94cb96de6cc
+releaseId: sonuvi-baa3323da488662fd8b39a0ac805fab5ea18525020dc41dddf734087c890e912
+archive:   53,460,480 bytes
+sha256:    4cc92d789d45f2cd9fb9f3f2abc66c0dfc524c4e06781f2727f6f8ed4829c0db
 ```
 
-> **Published artifact:** the above immutable bundle was rebuilt after the
-> first-install bridge and staged-installer stdin correction. The actual
-> extracted release and bootstrap-kit copies both pass `node --check`; older
-> signed artifacts remain preserved and unmodified.
+> **Published artifact:** the above immutable bundle contains the fixed
+> `sonuvi.gate-c-stage-response.v1` error contract. The actual extracted
+> release and bootstrap-kit copies both pass `node --check`; older signed
+> artifacts remain preserved and unmodified.
 
-Success returns `ok: true` and `state: "staged"`; a complete retry returns
-`state: "already_staged"` without a second extraction. Malformed JSON,
-oversized headers, truncated/altered/trailing archive bytes, incompatible
-metadata, symlinks, unexpected entries, and unauthorized operations return
-`ok: false` with a nonzero exit. A caller that loses the final response retries
-the identical stream: `already_staged` means completion occurred; an SSH
-interruption leaves no final release tree.
+Success returns `sonuvi.gate-c-stage-response.v1`, `ok: true`, and
+`state: "staged"`; a complete retry returns `state: "already_staged"` without
+a second extraction. Every stage failure returns only the same contract,
+`operation: "stage_release"`, `ok: false`, and one reviewed code:
+`stage_input_invalid`, `stage_release_identity_mismatch`,
+`stage_release_digest_mismatch`, `stage_target_mismatch`,
+`stage_attempt_mismatch`, `stage_conflict`, `stage_permission_denied`,
+`stage_helper_unavailable`, or `stage_internal_error`. No raw exception text,
+stack, path, or credential is client-visible. A caller that loses the final
+response retries the identical stream: `already_staged` means completion
+occurred; an SSH interruption leaves no final release tree.
 
 ### `status`
 
@@ -138,7 +142,7 @@ kit); environment overrides are only for a separately named candidate.
 The source and in-container helper hashes match:
 
 ```text
-sonuvi-release-stage.mjs:          22bc925a46681c80dd81a351288f12b920a25073bfbffbc3e410b4decbf3165b
+sonuvi-release-stage.mjs:          8ce5a8d9faea66cb26687355701ac150641968b52a7ea24d2faa201fd8e8ef39
 sonuvi-bootstrap-status.mjs:       8beee776c14235f77499a5a3397b0e80a17722de77d00c15697ed55b8f18c5ac
 sonuvi-first-install-activate.mjs: 0dbe409dd41d0d293be0b0edad01408c54bf8c3e8e3ece0536a3f28cf331a594
 ```
@@ -154,8 +158,9 @@ scripts/verify-sonuvi-gate-c-archive-status-fixture.sh
 
 The independent OpenSSH acceptance pins the host key and covers valid staging,
 idempotent retry/lost-final-response, malformed/truncated/corrupt/trailing
-input, an actual midstream SSH kill, status reconnect, first installation from
-verified staging with no pre-existing current pointer, attempt/machine
-binding, lock/replay safety, privilege boundaries, and arbitrary-command
-rejection. It stops at administrator enrollment and never runs controller
-authorization.
+input, bad signed metadata, target/attempt mismatch, helper unavailability,
+staging conflict, an actual midstream SSH kill, status reconnect, first
+installation from verified staging with no pre-existing current pointer,
+lock/replay safety, privilege boundaries, arbitrary-command rejection, and an
+explicit final Docker lifecycle status assertion. It stops at administrator
+enrollment and never runs controller authorization.
