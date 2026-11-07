@@ -25,7 +25,7 @@ Before opening SFTP, iOS must have completed all of the following locally:
 3. Verify the signed Ed25519 release envelope, signer key ID, expiry,
    Linux/ARM64 target, and `payload.bootstrap.sha256`.
 4. Verify the downloaded `sonuvi-bootstrap-kit-v1.tar` SHA-256 against that
-   signed digest. The current lab artifact is 129,536 bytes. Its size is also
+   signed digest. The current lab artifact is 157,184 bytes. Its size is also
    capped at 16 MiB by this contract.
 
 The SFTP upload never grants execution authority. It is merely a transfer of

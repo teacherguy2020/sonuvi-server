@@ -65,9 +65,9 @@ protected temporary location, validates all requirements, extracts with
 path-containment/no-follow checks, then makes the final tree read-only.
 
 ```text
-releaseId: sonuvi-e56d85697e23f11a91612918dd2b975b61c81cb035fb8295445e481d942eab67
-archive:   53,454,848 bytes
-sha256:    fb705a88aa2d30744e8248c99f7246870be6f3bb2d58166dc2238eb9af1a3035
+releaseId: sonuvi-27e06697eb80776ff7189cbdd9c813cb04893c41d392a37fc975522c56e369a0
+archive:   53,455,360 bytes
+sha256:    ac19993e541467067fea6849cf506b8ace4b9d050947ac24ee70f94cb96de6cc
 ```
 
 > **Published artifact:** the above immutable bundle was rebuilt after the

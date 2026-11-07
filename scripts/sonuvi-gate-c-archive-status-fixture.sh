@@ -20,7 +20,7 @@ readonly host_key_public="$host_key.pub"
 readonly client_key="$credential_dir/client_ed25519"
 readonly client_public_key="$client_key.pub"
 readonly sudo_password="$credential_dir/sudo_password"
-readonly release_id="${SONUVI_GATE_C_FIXTURE_RELEASE_ID:-sonuvi-e56d85697e23f11a91612918dd2b975b61c81cb035fb8295445e481d942eab67}"
+readonly release_id="${SONUVI_GATE_C_FIXTURE_RELEASE_ID:-sonuvi-27e06697eb80776ff7189cbdd9c813cb04893c41d392a37fc975522c56e369a0}"
 readonly release_root="${SONUVI_GATE_C_FIXTURE_RELEASE_ROOT:-/Volumes/SammySSD/Sonuvi-iOS-Guided-Setup-Lab/distribution/gate-c-lab/$release_id}"
 readonly bootstrap_kit="${SONUVI_GATE_C_FIXTURE_BOOTSTRAP_KIT:-$release_root/sonuvi-bootstrap-kit-v1.tar}"
 
