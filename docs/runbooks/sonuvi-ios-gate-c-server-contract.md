@@ -289,11 +289,40 @@ plain HTTP LAN API is safe:
 
 ## Structured errors and recovery
 
+`stage_release` returns exactly one versioned envelope on both success and
+failure:
+
+```json
+{
+  "ok": false,
+  "contract": "sonuvi.gate-c-stage-response.v1",
+  "operation": "stage_release",
+  "code": "stage_<reviewed-code>"
+}
+```
+
+The failure response has **only** those four fields. It never contains an
+exception message, stack trace, filesystem path, input bytes, or credentials.
+Unknown exceptions fail closed as `stage_internal_error`.
+
+| Code | Meaning | iOS behavior |
+| --- | --- | --- |
+| `stage_input_invalid` | malformed/framing/schema input | discard the request; rebuild only from the pinned contract |
+| `stage_release_identity_mismatch` | envelope, signer, metadata, target, or signature identity is not accepted | stop; re-fetch only the pinned immutable release and verify it |
+| `stage_release_digest_mismatch` | transferred archive byte count or digest differs from signed metadata | discard bytes and restart the same verified transfer from zero |
+| `stage_target_mismatch` | locally derived target identity differs from the preflight binding | stop; run fixed read-only preflight again before a new attempt |
+| `stage_attempt_mismatch` | durable attempt/release/target binding cannot be replayed | observe durable status; never substitute an attempt ID |
+| `stage_conflict` | an existing staged tree is not the verified immutable release | stop and surface the conflict; never overwrite it |
+| `stage_permission_denied` | root authorization cannot be obtained | do not retry another command; request fresh interactive authorization |
+| `stage_helper_unavailable` | fixed root helper or its trusted dependency is unavailable | stop; do not fall back to another path or helper |
+| `stage_internal_error` | unexpected internal failure | stop and preserve only this code for diagnostics |
+
+Success returns `ok: true`, the same contract/operation, `state`, `releaseId`,
+`keyId`, `attemptId`, and `targetIdentity`. The root-side `releaseRoot` is not
+client-visible.
+
 | Condition | Server result | iOS behavior |
 | --- | --- | --- |
-| unknown/mismatched signer | `release_trust_anchor_unavailable` / signature error | stop; do not download or stage |
-| unsupported/expired metadata | metadata validation error | choose a supported release |
-| archive digest/length mismatch | release artifact mismatch | discard bytes and retry verified transfer |
 | incompatible Debian/runtime | bounded bootstrap exit 78–83 | show prerequisite/repository failure |
 | interrupted install | status phase/events | reconnect and observe; never start a duplicate attempt |
 | enrollment expiry/replay | existing enrollment error | create a new enrollment, never reuse proof |

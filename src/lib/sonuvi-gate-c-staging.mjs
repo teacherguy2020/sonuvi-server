@@ -21,6 +21,12 @@ function text(value) {
   return String(value ?? '').trim();
 }
 
+function stageFailure(code) {
+  const error = new Error(code);
+  error.stageCode = code;
+  return error;
+}
+
 function absolute(value, label) {
   const result = text(value);
   if (!path.isAbsolute(result)) throw new Error(`${label} must be absolute`);
@@ -93,9 +99,9 @@ async function assertStageAttemptBinding({ attemptId: id, targetIdentity, releas
   const existing = await readBootstrapAttemptProgress({ attemptId: id, root });
   if (!existing) return;
   if (text(existing.state.targetIdentity) !== targetIdentity || text(existing.state.releaseId) !== releaseId) {
-    throw new Error('release_stage_attempt_binding_mismatch');
+    throw stageFailure('stage_attempt_mismatch');
   }
-  if (text(existing.state.phase) !== 'release_staged') throw new Error('release_stage_attempt_unavailable');
+  if (text(existing.state.phase) !== 'release_staged') throw stageFailure('stage_attempt_mismatch');
 }
 
 async function writeStageBinding({ attemptId: id, targetIdentity, releaseId, root }) {
@@ -125,7 +131,7 @@ export async function stageGateCReleaseArchive({ request, archive, trustedAnchor
   const { metadata, keyId } = verifySignedGateCReleaseMetadata({ envelope: input.envelope, trustedAnchors });
   await verifyTargetCompatibility();
   if (await readGateCTargetIdentity({ readMachineIdentity }) !== input.targetIdentity) {
-    throw new Error('release_stage_target_identity_mismatch');
+    throw stageFailure('stage_target_mismatch');
   }
   const roots = Object.freeze({
     uploadRoot: absolute(paths.uploadRoot, 'release upload root'),
@@ -145,11 +151,16 @@ export async function stageGateCReleaseArchive({ request, archive, trustedAnchor
   try {
     await writeVerifiedArchive({ archive, filePath: archivePath, metadata });
     if (await fileExists(finalRoot)) {
-      const existing = await verifyArtifact({ artifactRoot: finalRoot });
-      if (existing.releaseId !== metadata.releaseId) throw new Error('existing staged release identity mismatch');
-      const manifest = await fs.readFile(path.join(finalRoot, 'release-manifest.json'));
-      if (createHash('sha256').update(manifest).digest('hex') !== metadata.manifestSha256) {
-        throw new Error('existing staged release manifest mismatch');
+      let existing;
+      try {
+        existing = await verifyArtifact({ artifactRoot: finalRoot });
+        if (existing.releaseId !== metadata.releaseId) throw new Error('existing staged release identity mismatch');
+        const manifest = await fs.readFile(path.join(finalRoot, 'release-manifest.json'));
+        if (createHash('sha256').update(manifest).digest('hex') !== metadata.manifestSha256) {
+          throw new Error('existing staged release manifest mismatch');
+        }
+      } catch {
+        throw stageFailure('stage_conflict');
       }
       await writeStageBinding({
         attemptId: input.attemptId,

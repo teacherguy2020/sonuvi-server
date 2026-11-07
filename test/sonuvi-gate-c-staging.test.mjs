@@ -109,6 +109,6 @@ test('staging rejects a changed preflight identity before consuming archive byte
     paths,
     readMachineIdentity: async () => 'fedcba9876543210fedcba9876543210',
     verifyTargetCompatibility: async () => ({ supported: true }),
-  }), /release_stage_target_identity_mismatch/);
+  }), /stage_target_mismatch/);
   assert.equal(read, false);
 });

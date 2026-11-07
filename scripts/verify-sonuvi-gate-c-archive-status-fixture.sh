@@ -32,9 +32,18 @@ fail() {
 }
 
 scratch_dir="$(mktemp -d /tmp/sonuvi-gate-c-archive-status-fixture.XXXXXX)"
+fixture_completed=false
 cleanup() {
-  "$fixture_control" reset >/dev/null 2>&1 || true
+  local result=$?
+  # Every ordinary test path ends with an explicit reset and status probe. Do
+  # not launch another unobserved Docker lifecycle after a successful fixture:
+  # that was harness work rather than acceptance evidence and obscured the
+  # final completion boundary.
+  if [ "$fixture_completed" != true ]; then
+    "$fixture_control" reset >/dev/null 2>&1 || true
+  fi
   trash "$scratch_dir" >/dev/null 2>&1 || true
+  return "$result"
 }
 trap cleanup EXIT HUP INT TERM
 
@@ -58,7 +67,14 @@ ssh_run() {
 }
 
 make_stage_header() {
-  SONUVI_FIXTURE_ENVELOPE="$envelope" SONUVI_FIXTURE_TARGET="$activation_target" node --input-type=module --eval "import fs from 'node:fs/promises'; const envelope = JSON.parse(await fs.readFile(process.env.SONUVI_FIXTURE_ENVELOPE, 'utf8')); process.stdout.write(JSON.stringify({ operation: 'stage_release', envelope, attemptId: '$activation_attempt_id', targetIdentity: process.env.SONUVI_FIXTURE_TARGET }) + '\\n');" > "$scratch_dir/header.jsonl"
+  local requested_target="${1:-$activation_target}"
+  local requested_attempt="${2:-$activation_attempt_id}"
+  SONUVI_FIXTURE_ENVELOPE="$envelope" SONUVI_FIXTURE_TARGET="$requested_target" SONUVI_FIXTURE_ATTEMPT="$requested_attempt" node --input-type=module --eval "import fs from 'node:fs/promises'; const envelope = JSON.parse(await fs.readFile(process.env.SONUVI_FIXTURE_ENVELOPE, 'utf8')); process.stdout.write(JSON.stringify({ operation: 'stage_release', envelope, attemptId: process.env.SONUVI_FIXTURE_ATTEMPT, targetIdentity: process.env.SONUVI_FIXTURE_TARGET }) + '\\n');" > "$scratch_dir/header.jsonl"
+  [ "$(wc -c < "$scratch_dir/header.jsonl" | tr -d ' ')" -le 65536 ] || fail fixture_header_limit_invalid 64
+}
+
+make_invalid_signature_header() {
+  SONUVI_FIXTURE_ENVELOPE="$envelope" SONUVI_FIXTURE_TARGET="$activation_target" node --input-type=module --eval "import fs from 'node:fs/promises'; const envelope = JSON.parse(await fs.readFile(process.env.SONUVI_FIXTURE_ENVELOPE, 'utf8')); envelope.signature = (envelope.signature[0] === 'A' ? 'B' : 'A') + envelope.signature.slice(1); process.stdout.write(JSON.stringify({ operation: 'stage_release', envelope, attemptId: '$activation_attempt_id', targetIdentity: process.env.SONUVI_FIXTURE_TARGET }) + '\\n');" > "$scratch_dir/header.jsonl"
   [ "$(wc -c < "$scratch_dir/header.jsonl" | tr -d ' ')" -le 65536 ] || fail fixture_header_limit_invalid 64
 }
 
@@ -75,7 +91,7 @@ assert_status() {
 
 assert_stage() {
   local file="$1" expected="$2"
-  SONUVI_FIXTURE_RESULT="$file" SONUVI_FIXTURE_STATE="$expected" node --input-type=module --eval "import fs from 'node:fs/promises'; const value = JSON.parse(await fs.readFile(process.env.SONUVI_FIXTURE_RESULT, 'utf8')); if (!value.ok || value.state !== process.env.SONUVI_FIXTURE_STATE || value.releaseId !== '$release_id') throw new Error('unexpected release stage response');"
+  SONUVI_FIXTURE_RESULT="$file" SONUVI_FIXTURE_STATE="$expected" node --input-type=module --eval "import fs from 'node:fs/promises'; const value = JSON.parse(await fs.readFile(process.env.SONUVI_FIXTURE_RESULT, 'utf8')); if (!value.ok || value.contract !== 'sonuvi.gate-c-stage-response.v1' || value.operation !== 'stage_release' || value.state !== process.env.SONUVI_FIXTURE_STATE || value.releaseId !== '$release_id' || value.attemptId !== '$activation_attempt_id' || value.targetIdentity !== '$activation_target' || typeof value.keyId !== 'string' || 'releaseRoot' in value) throw new Error('unexpected release stage response');"
 }
 
 assert_activation() {
@@ -91,6 +107,11 @@ assert_activation_status() {
 assert_failure() {
   local file="$1" expected="$2"
   SONUVI_FIXTURE_RESULT="$file" SONUVI_FIXTURE_CODE="$expected" node --input-type=module --eval "import fs from 'node:fs/promises'; const value = JSON.parse(await fs.readFile(process.env.SONUVI_FIXTURE_RESULT, 'utf8')); if (value.ok || !String(value.code || '').includes(process.env.SONUVI_FIXTURE_CODE)) throw new Error('unexpected fixture rejection response');"
+}
+
+assert_stage_failure() {
+  local file="$1" expected="$2"
+  SONUVI_FIXTURE_RESULT="$file" SONUVI_FIXTURE_CODE="$expected" node --input-type=module --eval "import fs from 'node:fs/promises'; const value = JSON.parse(await fs.readFile(process.env.SONUVI_FIXTURE_RESULT, 'utf8')); if (value.ok || value.contract !== 'sonuvi.gate-c-stage-response.v1' || value.operation !== 'stage_release' || value.code !== process.env.SONUVI_FIXTURE_CODE || Object.keys(value).sort().join(',') !== 'code,contract,ok,operation') throw new Error('unexpected typed stage rejection response');"
 }
 
 run_status() {
@@ -132,6 +153,16 @@ wrong_password_rc=$?
 set -e
 [ "$wrong_password_rc" -ne 0 ] || fail fixture_wrong_sudo_password_accepted 66
 docker exec "$container_name" /bin/sh -ec "su -s /bin/sh sonuvi-stage -c '/usr/bin/sudo -n /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-bootstrap-status.mjs' </dev/null" >/dev/null 2>&1 && fail fixture_noninteractive_sudo_accepted 66 || true
+set +e
+docker exec "$container_name" /bin/sh -ec "printf '{}' | su -s /bin/sh sonuvi-stage -c '/usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-release-stage.mjs'" > "$scratch_dir/stage-unprivileged.json" 2> "$scratch_dir/stage-unprivileged.err"
+stage_unprivileged_rc=$?
+set -e
+[ "$stage_unprivileged_rc" -ne 0 ] || fail fixture_unprivileged_stage_accepted 66
+# The account cannot traverse the root-only bootstrap directory at all; this
+# is a stronger actual privilege boundary than reaching a helper that reports
+# a typed denial. The wrapper's reachable non-root response is covered by its
+# direct contract test above.
+grep -q 'Cannot find module' "$scratch_dir/stage-unprivileged.err" || fail fixture_unprivileged_stage_boundary_invalid 66
 
 # Pinning is explicit: a deliberately different host key must fail before
 # user authentication, while the expected key permits the fixed status command.
@@ -157,6 +188,30 @@ unrelated_rc=$?
 set -e
 [ "$unrelated_rc" -ne 0 ] || fail fixture_unrelated_status_accepted 67
 assert_failure "$scratch_dir/status-unrelated.json" 'bootstrap_attempt_not_found'
+
+make_stage_header "sonuvi-target-v1-$(printf 'b%.0s' {1..64})"
+set +e
+run_stage > "$scratch_dir/stage-wrong-target.json"
+stage_wrong_target_rc=$?
+set -e
+[ "$stage_wrong_target_rc" -ne 0 ] || fail fixture_wrong_target_stage_accepted 67
+assert_stage_failure "$scratch_dir/stage-wrong-target.json" stage_target_mismatch
+
+make_invalid_signature_header
+set +e
+run_stage > "$scratch_dir/stage-bad-signature.json"
+stage_bad_signature_rc=$?
+set -e
+[ "$stage_bad_signature_rc" -ne 0 ] || fail fixture_bad_signature_stage_accepted 67
+assert_stage_failure "$scratch_dir/stage-bad-signature.json" stage_release_identity_mismatch
+
+make_stage_header "$activation_target" "$attempt_id"
+set +e
+run_stage > "$scratch_dir/stage-attempt-mismatch.json"
+stage_attempt_mismatch_rc=$?
+set -e
+[ "$stage_attempt_mismatch_rc" -ne 0 ] || fail fixture_attempt_mismatch_stage_accepted 67
+assert_stage_failure "$scratch_dir/stage-attempt-mismatch.json" stage_attempt_mismatch
 
 make_stage_header
 run_stage > "$scratch_dir/staged.json"
@@ -230,7 +285,7 @@ set +e
 malformed_rc=$?
 set -e
 [ "$malformed_rc" -ne 0 ] || fail fixture_malformed_header_accepted 68
-assert_failure "$scratch_dir/malformed.json" 'Expected'
+assert_stage_failure "$scratch_dir/malformed.json" stage_input_invalid
 
 "$fixture_control" reset >/dev/null
 set +e
@@ -238,7 +293,7 @@ set +e
 truncated_rc=$?
 set -e
 [ "$truncated_rc" -ne 0 ] || fail fixture_truncated_archive_accepted 68
-assert_failure "$scratch_dir/truncated.json" 'byte count'
+assert_stage_failure "$scratch_dir/truncated.json" stage_release_digest_mismatch
 docker exec "$container_name" /bin/sh -ec "test ! -e /var/lib/sonuvi-bootstrap/releases/$release_id"
 
 "$fixture_control" reset >/dev/null
@@ -250,7 +305,7 @@ set +e
 digest_rc=$?
 set -e
 [ "$digest_rc" -ne 0 ] || fail fixture_digest_mismatch_accepted 68
-assert_failure "$scratch_dir/digest-mismatch.json" 'digest'
+assert_stage_failure "$scratch_dir/digest-mismatch.json" stage_release_digest_mismatch
 
 "$fixture_control" reset >/dev/null
 set +e
@@ -258,7 +313,27 @@ set +e
 trailing_rc=$?
 set -e
 [ "$trailing_rc" -ne 0 ] || fail fixture_trailing_archive_accepted 68
-assert_failure "$scratch_dir/trailing.json" 'exceeds metadata'
+assert_stage_failure "$scratch_dir/trailing.json" stage_release_digest_mismatch
+
+# The fixed wrapper must not surface filesystem/parser detail when its helper
+# dependencies are unavailable or when a pre-existing release conflicts.
+"$fixture_control" reset >/dev/null
+docker exec "$container_name" /bin/sh -ec 'mv /etc/sonuvi/release-trust-anchors.json /etc/sonuvi/release-trust-anchors.json.fixture-hidden'
+set +e
+run_stage > "$scratch_dir/helper-unavailable.json"
+helper_unavailable_rc=$?
+set -e
+[ "$helper_unavailable_rc" -ne 0 ] || fail fixture_helper_unavailable_accepted 68
+assert_stage_failure "$scratch_dir/helper-unavailable.json" stage_helper_unavailable
+
+"$fixture_control" reset >/dev/null
+docker exec "$container_name" /bin/sh -ec "mkdir -p /var/lib/sonuvi-bootstrap/releases/$release_id"
+set +e
+run_stage > "$scratch_dir/stage-conflict.json"
+stage_conflict_rc=$?
+set -e
+[ "$stage_conflict_rc" -ne 0 ] || fail fixture_stage_conflict_accepted 68
+assert_stage_failure "$scratch_dir/stage-conflict.json" stage_conflict
 
 # This is an actual SSH disconnect mid-stream: the producer keeps the channel
 # open after one MiB, then the SSH process is terminated before it can finish.
@@ -288,6 +363,8 @@ grep -q 'operation_rejected' "$scratch_dir/unauthorized.err"
 "$fixture_control" reset >/dev/null
 run_status > "$scratch_dir/status-final.json"
 assert_status "$scratch_dir/status-final.json"
+"$fixture_control" status > "$scratch_dir/lifecycle-final.txt"
+grep -q "release=$release_id" "$scratch_dir/lifecycle-final.txt" || fail fixture_final_lifecycle_status_invalid 69
 # The password is injected only into sudo's stdin. It must not appear in the
 # durable bootstrap state or event journal; the secret mount itself is outside
 # that state and is never copied by the fixture.
@@ -296,3 +373,4 @@ if docker exec "$container_name" /bin/sh -ec 'grep -R -F -f /run/secrets/sudo_pa
 fi
 printf '{"fixture":"%s:%s","account":"%s","hostKey":"%s","releaseId":"%s","stage":"actual-archive-verified","status":"reconnect-safe","reset":"container-recreate"}\n' \
   "$host" "$port" "$account" "$expected_fingerprint" "$release_id"
+fixture_completed=true
