@@ -16,6 +16,7 @@ readonly host_port='2225'
 readonly account='sonuvi-stage'
 readonly credential_dir='/Users/brianwis/.openclaw/credentials/sonuvi-gate-c-archive-status-fixture-20261105'
 readonly host_key="$credential_dir/ssh_host_ed25519_key"
+readonly host_key_public="$host_key.pub"
 readonly client_key="$credential_dir/client_ed25519"
 readonly client_public_key="$client_key.pub"
 readonly sudo_password="$credential_dir/sudo_password"
@@ -82,6 +83,37 @@ relay_running() {
 }
 
 container_running() { fixture_running && relay_running; }
+
+# Container state alone does not guarantee the relay and forced SSH dispatcher
+# have accepted their first connection. A reset is a test-fixture operation,
+# but the verifier must not mistake that brief readiness window for an
+# interrupted fixed archive stream. This probes only a deliberately rejected
+# command: exit 126 proves that authentication, host-key pinning, relay, and
+# forced-command dispatch are all live without running a fixture operation.
+wait_for_ssh_dispatcher() {
+  local known_hosts result attempt
+  known_hosts="$(mktemp "${TMPDIR:-/tmp}/sonuvi-gate-c-fixture-known-hosts.XXXXXX")"
+  awk -v port="$host_port" '{print "[127.0.0.1]:" port " " $1 " " $2}' "$host_key_public" > "$known_hosts"
+  for attempt in $(seq 1 40); do
+    set +e
+    ssh -T -p "$host_port" -i "$client_key" \
+      -o "UserKnownHostsFile=$known_hosts" \
+      -o GlobalKnownHostsFile=/dev/null \
+      -o StrictHostKeyChecking=yes \
+      -o IdentitiesOnly=yes \
+      -o BatchMode=yes \
+      "$account@$bind_address" /usr/bin/true >/dev/null 2>&1
+    result=$?
+    set -e
+    if [ "$result" -eq 126 ]; then
+      rm -f "$known_hosts"
+      return 0
+    fi
+    sleep 0.25
+  done
+  rm -f "$known_hosts"
+  fail fixture_ssh_dispatcher_not_ready 70
+}
 
 remove_containers() {
   if relay_exists; then docker container rm --force "$relay_container_name" >/dev/null; fi
@@ -174,6 +206,7 @@ start() {
   docker network connect "$fixture_network_name" "$relay_container_name"
   sleep 1
   container_running || fail fixture_failed_to_start 70
+  wait_for_ssh_dispatcher
   status
 }
 
