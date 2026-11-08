@@ -61,6 +61,7 @@ async function createFixture(t) {
   await write(source, 'scripts/sonuvi-bootstrap-status.mjs', 'console.log("bootstrap status");\n');
   await write(source, 'scripts/sonuvi-release-stage.mjs', 'console.log("release stage");\n');
   await write(source, 'scripts/sonuvi-admin-bootstrap.mjs', 'console.log("administrator bootstrap");\n');
+  await write(source, 'scripts/sonuvi-admin-session.mjs', 'console.log("administrator session");\n');
   await write(source, 'scripts/sonuvi-debian-node-bootstrap.sh', '#!/bin/sh\nexit 0\n');
   await write(source, 'scripts/sonuvi-target-installer.mjs', 'console.log("target installer");\n');
   await write(source, 'ops/systemd/sonuvi-api.service.in', '[Service]\nExecStart=/usr/bin/node api.mjs\n');

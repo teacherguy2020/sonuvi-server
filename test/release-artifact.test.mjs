@@ -54,6 +54,7 @@ async function sourceFixture(t) {
   await write(root, 'scripts/sonuvi-bootstrap-status.mjs', 'console.log("fixture bootstrap status");\n');
   await write(root, 'scripts/sonuvi-release-stage.mjs', 'console.log("fixture release stage");\n');
   await write(root, 'scripts/sonuvi-admin-bootstrap.mjs', 'console.log("fixture administrator bootstrap");\n');
+  await write(root, 'scripts/sonuvi-admin-session.mjs', 'console.log("fixture administrator session");\n');
   await write(root, 'scripts/sonuvi-debian-node-bootstrap.sh', '#!/bin/sh\nexit 0\n');
   await write(root, 'scripts/sonuvi-target-installer.mjs', 'console.log("fixture target installer");\n');
   await write(root, 'ops/systemd/sonuvi-api.service.in', '[Service]\nUser=@SERVICE_ACCOUNT@\nExecStart=node @RELEASE_ID@\n');

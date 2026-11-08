@@ -69,6 +69,7 @@ const RELEASE_RUNTIME_SCRIPTS = new Set([
   'scripts/sonuvi-bootstrap-status.mjs',
   'scripts/sonuvi-release-stage.mjs',
   'scripts/sonuvi-admin-bootstrap.mjs',
+  'scripts/sonuvi-admin-session.mjs',
   'scripts/sonuvi-debian-node-bootstrap.sh',
   'scripts/sonuvi-target-installer.mjs',
   'scripts/lastfm-authorize.mjs',
@@ -89,6 +90,7 @@ const RELEASE_STATIC_ENTRYPOINTS = [
   'scripts/sonuvi-bootstrap-status.mjs',
   'scripts/sonuvi-release-stage.mjs',
   'scripts/sonuvi-admin-bootstrap.mjs',
+  'scripts/sonuvi-admin-session.mjs',
   'scripts/sonuvi-debian-node-bootstrap.sh',
   'scripts/sonuvi-target-installer.mjs',
 ];

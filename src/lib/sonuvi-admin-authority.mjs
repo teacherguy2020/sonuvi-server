@@ -2,6 +2,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import { normalizeAdministratorPublicKey } from './sonuvi-bootstrap-security.mjs';
+
 const TOKEN_TYPE = 'sonuvi-administrator';
 const TOKEN_ALGORITHM = 'ES256';
 const VERIFIER_VERSION = 1;
@@ -10,6 +12,7 @@ function text(value) { return String(value ?? '').trim(); }
 function absolute(value) { const result = text(value); if (!result || !path.isAbsolute(result)) throw new Error('state root must be absolute'); return path.resolve(result); }
 function encode(value) { return Buffer.from(JSON.stringify(value)).toString('base64url'); }
 function decode(value) { return JSON.parse(Buffer.from(String(value), 'base64url').toString('utf8')); }
+function digest(value) { return crypto.createHash('sha256').update(String(value), 'utf8').digest('base64url'); }
 async function readJson(file) { return JSON.parse(await fs.readFile(file, 'utf8')); }
 async function readJsonOrNull(file) { try { return await readJson(file); } catch (error) { if (error?.code === 'ENOENT') return null; throw error; } }
 async function writePrivate(file, value) { await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 }); const temp = `${file}.${crypto.randomUUID()}.tmp`; await fs.writeFile(temp, `${JSON.stringify(value)}\n`, { mode: 0o600 }); await fs.rename(temp, file); }
@@ -71,16 +74,31 @@ export class AdministratorAuthority {
     const claimed = await enrollment.claim({ attemptId, targetIdentity, enrollmentToken, administratorDeviceId, administratorPublicKey, administratorProof });
     if (existing) {
       if (existing.role !== 'administrator' || existing.attemptId !== text(attemptId) || existing.targetIdentity !== text(targetIdentity) || existing.deviceId !== text(claimed.administratorDeviceId) || existing.publicKeyHash !== text(claimed.administratorPublicKeyHash) || !text(existing.administratorId) || !text(existing.createdAt)) throw new Error('administrator_authority_exists');
+      // Version 1 records retained only the hash. A resumable first-install
+      // claim proves possession again, so it is the only safe automatic path
+      // that may upgrade such a record with its non-secret SPKI verifier.
+      const storedPublicKey = text(existing.administratorPublicKey);
+      if (storedPublicKey) {
+        const normalized = normalizeAdministratorPublicKey(storedPublicKey);
+        if (normalized.spki !== text(claimed.administratorPublicKey) || digest(normalized.spki) !== text(existing.publicKeyHash)) throw new Error('administrator_authority_exists');
+      } else {
+        await writePrivate(this.identityFile, {
+          ...existing,
+          version: 2,
+          administratorPublicKey: text(claimed.administratorPublicKey),
+        });
+      }
       if (verifier.status !== 'claimed' || verifier.administratorId !== existing.administratorId) {
         await writeVerifier(this.verifierFile, { version: VERIFIER_VERSION, algorithm: TOKEN_ALGORITHM, publicKey: verifier.publicKey, status: 'claimed', administratorId: existing.administratorId });
       }
       return Object.freeze({ administratorId: existing.administratorId, role: existing.role, createdAt: existing.createdAt });
     }
     const identity = {
-      version: 1,
+      version: 2,
       role: 'administrator',
       administratorId: `adm_${crypto.randomBytes(16).toString('base64url')}`,
       deviceId: text(claimed.administratorDeviceId),
+      administratorPublicKey: text(claimed.administratorPublicKey),
       publicKeyHash: text(claimed.administratorPublicKeyHash),
       createdAt: new Date(this.now()).toISOString(),
       attemptId: text(attemptId),
@@ -90,6 +108,84 @@ export class AdministratorAuthority {
     await writePrivate(this.identityFile, identity);
     await writeVerifier(this.verifierFile, { version: VERIFIER_VERSION, algorithm: TOKEN_ALGORITHM, publicKey: verifier.publicKey, status: 'claimed', administratorId: identity.administratorId });
     return Object.freeze({ administratorId: identity.administratorId, role: identity.role, createdAt: identity.createdAt });
+  }
+
+  /**
+   * Returns only non-secret administrator identity material. Version 1
+   * records remain valid for the bootstrap handoff but cannot issue a new
+   * post-install session because they have no public-key verifier.
+   */
+  async administratorRecord() {
+    const identity = await readJson(this.identityFile);
+    if (identity?.role !== 'administrator' || !text(identity.administratorId) || !text(identity.deviceId) || !text(identity.targetIdentity) || !text(identity.publicKeyHash)) {
+      throw new Error('administrator_identity_invalid');
+    }
+    const version = Number(identity.version) || 1;
+    const administratorPublicKey = text(identity.administratorPublicKey);
+    if (!administratorPublicKey) {
+      if (version !== 1) throw new Error('administrator_identity_invalid');
+      return Object.freeze({
+        version: 1,
+        administratorId: text(identity.administratorId),
+        deviceId: text(identity.deviceId),
+        targetIdentity: text(identity.targetIdentity),
+        publicKeyHash: text(identity.publicKeyHash),
+        legacy: true,
+      });
+    }
+    if (version !== 2) throw new Error('administrator_identity_invalid');
+    const normalized = normalizeAdministratorPublicKey(administratorPublicKey);
+    if (digest(normalized.spki) !== text(identity.publicKeyHash)) throw new Error('administrator_identity_invalid');
+    return Object.freeze({
+      version,
+      administratorId: text(identity.administratorId),
+      deviceId: text(identity.deviceId),
+      targetIdentity: text(identity.targetIdentity),
+      publicKeyHash: text(identity.publicKeyHash),
+      administratorPublicKey: normalized.spki,
+      legacy: false,
+    });
+  }
+
+  /**
+   * This is deliberately a root-side recovery primitive. Callers must have
+   * already obtained explicit local root authorization; ordinary API, mobile,
+   * Track Key, and SSH credentials are never accepted here as authority.
+   */
+  async rebindLegacyAdministrator({ targetIdentity, administratorDeviceId, administratorPublicKey } = {}) {
+    const identity = await readJson(this.identityFile);
+    const current = await this.administratorRecord();
+    if (!current.legacy) throw new Error('administrator_rebind_not_required');
+    if (text(targetIdentity) !== current.targetIdentity || text(administratorDeviceId) !== current.deviceId) throw new Error('administrator_rebind_identity_mismatch');
+    const normalized = normalizeAdministratorPublicKey(administratorPublicKey);
+    // A legacy record still pins a hash of its original P-256 SPKI. Root
+    // authorization selects this recovery operation; the matching hash and
+    // the caller's fresh proof prove it is the enrolled administrator key,
+    // rather than a newly supplied key paired with a claimed device ID.
+    if (digest(normalized.spki) !== current.publicKeyHash) throw new Error('administrator_rebind_key_mismatch');
+    // Rebinding changes the proof verifier. Rotate the Server token signing
+    // material first so any short-lived token issued before explicit recovery
+    // dies even if a crash occurs before the durable identity upgrade. The
+    // legacy record then remains safely recoverable through this same explicit
+    // root-authorized path.
+    const material = createMaterial();
+    await writePrivate(this.keyFile, { version: 1, algorithm: TOKEN_ALGORITHM, privateKey: material.privateKey });
+    await writeVerifier(this.verifierFile, {
+      version: VERIFIER_VERSION,
+      algorithm: TOKEN_ALGORITHM,
+      publicKey: material.publicKey,
+      status: 'claimed',
+      administratorId: current.administratorId,
+    });
+    const next = {
+      ...identity,
+      version: 2,
+      administratorPublicKey: normalized.spki,
+      publicKeyHash: digest(normalized.spki),
+      reboundAt: new Date().toISOString(),
+    };
+    await writePrivate(this.identityFile, next);
+    return this.administratorRecord();
   }
 
   async issueAccessToken({ administratorId, ttlMs = 15 * 60 * 1000 } = {}) {

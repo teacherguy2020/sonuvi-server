@@ -111,7 +111,16 @@ export class FirstAdministratorEnrollment {
     if (record.status === 'claimed') {
       if (!record.tokenHash || !equal(Buffer.from(record.tokenHash, 'base64url'), digest(text(enrollmentToken)))) throw new Error('server_already_claimed');
       const proof = verifyFirstAdministratorClaimProof({ attemptId, targetIdentity, enrollmentToken, administratorDeviceId, administratorPublicKey, administratorProof });
-      if (record.administratorDeviceId !== proof.administratorDeviceId || record.administratorPublicKeyHash !== proof.administratorPublicKeyHash) throw new Error('server_already_claimed');
+      if (record.administratorDeviceId !== proof.administratorDeviceId || record.administratorPublicKeyHash !== proof.administratorPublicKeyHash || (record.administratorPublicKey && record.administratorPublicKey !== proof.administratorPublicKey)) throw new Error('server_already_claimed');
+      // A bounded same-token resumption proves the original key again, so a
+      // version-1 claimed enrollment can safely retain its non-secret SPKI.
+      if (!record.administratorPublicKey) {
+        await writePrivateJson(this.file, {
+          ...record,
+          version: 2,
+          administratorPublicKey: proof.administratorPublicKey,
+        });
+      }
       return Object.freeze({ status: 'claimed', claimedAt: record.claimedAt, administratorDeviceId: proof.administratorDeviceId, administratorPublicKey: proof.administratorPublicKey, administratorPublicKeyHash: proof.administratorPublicKeyHash });
     }
     if (record.status !== 'pending') throw new Error('enrollment_unavailable');
@@ -120,7 +129,7 @@ export class FirstAdministratorEnrollment {
     const proof = verifyFirstAdministratorClaimProof({ attemptId, targetIdentity, enrollmentToken, administratorDeviceId, administratorPublicKey, administratorProof });
     // tokenHash is a non-secret one-way verifier retained solely for the
     // bounded same-token resumption path above; the raw token is never stored.
-    const claimed = { version: 1, status: 'claimed', attemptId: record.attemptId, targetIdentity: record.targetIdentity, tokenHash: record.tokenHash, claimedAt: nowIso(this.now), administratorDeviceId: proof.administratorDeviceId, administratorPublicKeyHash: proof.administratorPublicKeyHash };
+    const claimed = { version: 2, status: 'claimed', attemptId: record.attemptId, targetIdentity: record.targetIdentity, tokenHash: record.tokenHash, claimedAt: nowIso(this.now), administratorDeviceId: proof.administratorDeviceId, administratorPublicKey: proof.administratorPublicKey, administratorPublicKeyHash: proof.administratorPublicKeyHash };
     await writePrivateJson(this.file, claimed);
     return Object.freeze({ status: 'claimed', claimedAt: claimed.claimedAt, administratorDeviceId: proof.administratorDeviceId, administratorPublicKey: proof.administratorPublicKey, administratorPublicKeyHash: proof.administratorPublicKeyHash });
   }); }
