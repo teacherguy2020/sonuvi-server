@@ -273,7 +273,7 @@ import { registerQueueRoutes } from './src/routes/queue.routes.mjs';
 import { registerTrackRoutes } from './src/routes/track.routes.mjs';
 import { registerArtRoutes, serveTrackArtwork } from './src/routes/art.routes.mjs';
 import { registerMobileRoutes } from './src/routes/mobile.routes.mjs';
-import { getBrowseIndex as getMpdBrowseIndex } from './src/lib/browse-index.mjs';
+import { getBrowseIndex as getMpdBrowseIndex, getBrowseIndexStatus as getMpdBrowseIndexStatus } from './src/lib/browse-index.mjs';
 import { createRuntimeBrowseIndexProvider } from './src/lib/fresh-install-browse-index.mjs';
 import { buildMobileCatalog } from './src/lib/mobile-track-identity.mjs';
 import { createSourceAudioProbe } from './src/lib/source-audio.mjs';
@@ -306,6 +306,8 @@ import { UpnpControlPoint } from './src/lib/upnp-control-point.mjs';
 import { createUpnpPlaybackSessionManager } from './src/lib/upnp-playback-session.mjs';
 import { createUpnpPlaybackQueueManager } from './src/lib/upnp-playback-queue.mjs';
 import { registerAllConfigRoutes } from './src/routes/config.routes.index.mjs';
+import { getLibraryHealthStatus } from './src/routes/config.library-health-read.routes.mjs';
+import { registerNativeAdministratorConfigurationRoutes } from './src/routes/admin-native-configuration.routes.mjs';
 import { registerUpnpRoutes } from './src/routes/upnp.routes.mjs';
 import { registerPodcastSubscriptionRoutes } from './src/routes/podcasts-subscriptions.routes.mjs';
 import { registerPodcastRefreshRoutes } from './src/routes/podcasts-refresh.routes.mjs';
@@ -9187,6 +9189,7 @@ const firstAdministratorAuthority = new AdministratorAuthority({ stateRoot: RUNT
 const runtimeBrowseIndex = createRuntimeBrowseIndexProvider({
   freshInstall: FRESH_INSTALL_MODE,
   getMpdBrowseIndex,
+  getMpdBrowseIndexStatus,
 });
 const getBrowseIndex = runtimeBrowseIndex.getBrowseIndex;
 
@@ -9366,6 +9369,26 @@ registerMobileRoutes(app, {
       return res.status(404).end();
     }
   },
+});
+
+registerNativeAdministratorConfigurationRoutes(app, {
+  administratorAuthority: firstAdministratorAuthority,
+  readConfig: async () => JSON.parse(await fsp.readFile(RUNTIME_CONFIG_PATH, 'utf8')),
+  runtimeProjectionOptions: {
+    environment: process.env,
+    apnsCredentials: {
+      keyId: APNS_KEY_ID,
+      teamId: APNS_TEAM_ID,
+      privateKey: APNS_PRIVATE_KEY,
+      privateKeyPath: APNS_PRIVATE_KEY_PATH,
+      topic: APNS_TOPIC,
+      environment: APNS_ENVIRONMENT,
+    },
+    defaults: { moodeHost: MOODE_SSH_HOST || MPD_HOST || 'moode.local' },
+  },
+  getServerIdentity: () => publicRuntimeReleaseIdentity(RELEASE_IDENTITY),
+  getBrowseIndexStatus: () => runtimeBrowseIndex.getBrowseIndexStatus(MPD_HOST),
+  getLibraryHealthStatus,
 });
 
 registerRatingRoutes(app, {

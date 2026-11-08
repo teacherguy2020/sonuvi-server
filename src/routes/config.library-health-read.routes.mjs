@@ -70,6 +70,32 @@ let libraryHealthCache = null;
 let libraryHealthJob = null;
 let libraryGenresCache = null;
 
+/**
+ * Read-only state for native administration. This never starts an MPD scan or
+ * refresh; it reports only an existing Library Health result and its job.
+ */
+export function getLibraryHealthStatus({ now = () => Date.now() } = {}) {
+  const cachedAt = Number(libraryHealthCache?.cachedAt || 0);
+  const payload = libraryHealthCache?.payload || null;
+  const summary = payload?.summary || {};
+  const timestamp = Number(now());
+  return Object.freeze({
+    available: Boolean(payload),
+    lastSuccessfulAt: payload?.generatedAt || null,
+    cache: payload && Number.isFinite(cachedAt)
+      ? { ageMs: Math.max(0, timestamp - cachedAt), ttlMs: LIB_HEALTH_CACHE_TTL_MS }
+      : null,
+    counts: {
+      albums: Number.isFinite(Number(summary.totalAlbums)) ? Math.max(0, Number(summary.totalAlbums)) : null,
+      tracks: Number.isFinite(Number(summary.totalTracks)) ? Math.max(0, Number(summary.totalTracks)) : null,
+    },
+    refresh: {
+      running: Boolean(libraryHealthJob?.promise),
+      startedAt: libraryHealthJob?.startedAt || null,
+    },
+  });
+}
+
 async function computeLibraryHealthSnapshot({ sampleLimit, scanLimit, getRatingForFile, mpdStickerGetSong }) {
   const started = Date.now();
   const isAudio = (f) => /\.(flac|mp3|m4a|aac|ogg|opus|wav|aiff|alac|dsf|wv|ape)$/i.test(String(f || ''));

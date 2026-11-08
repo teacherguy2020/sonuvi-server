@@ -67,6 +67,22 @@ function validRehearsalBrowseIndex(index) {
   );
 }
 
+function browseIndexStatus(index, { available = true, source = 'memory', refreshing = false } = {}) {
+  const counts = index?.counts && typeof index.counts === 'object' ? index.counts : {};
+  return Object.freeze({
+    available: Boolean(available),
+    source: available ? source : 'unavailable',
+    builtAt: available && String(index?.builtAt || '').trim() ? String(index.builtAt) : null,
+    dbUpdateAt: available && String(index?.dbUpdateAt || '').trim() ? String(index.dbUpdateAt) : null,
+    counts: {
+      artists: Number.isFinite(Number(counts.artists)) ? Math.max(0, Number(counts.artists)) : null,
+      albums: Number.isFinite(Number(counts.albums)) ? Math.max(0, Number(counts.albums)) : null,
+      tracks: Number.isFinite(Number(counts.tracks)) ? Math.max(0, Number(counts.tracks)) : null,
+    },
+    refresh: { running: Boolean(refreshing) },
+  });
+}
+
 async function readRehearsalBrowseIndex({ fsApi, indexPath, rehearsalStateRoot }) {
   const root = String(rehearsalStateRoot || '').trim();
   if (!root || !path.isAbsolute(root)) throw new CapabilityDeniedError('browse-index.fixture');
@@ -295,7 +311,34 @@ export function createBrowseIndexAdapter({
     }
   }
 
-  return Object.freeze({ getBrowseIndex, buildBrowseIndex });
+  // Status reads only memory or the persisted index. It never asks MPD for
+  // freshness and never builds/writes an index, so native administration can
+  // remain observational.
+  async function getBrowseIndexStatus(mpdHost = 'moode.local') {
+    const host = String(mpdHost || 'moode.local');
+    if (capabilities?.rehearsal) {
+      try {
+        return browseIndexStatus(await readRehearsalBrowseIndex({ fsApi, indexPath, rehearsalStateRoot }), {
+          source: 'rehearsal-fixture',
+          refreshing: Boolean(mem.inflight),
+        });
+      } catch {
+        return browseIndexStatus(null, { available: false, refreshing: Boolean(mem.inflight) });
+      }
+    }
+
+    let index = mem.host === host ? mem.index : null;
+    const source = index ? 'memory' : 'persisted';
+    if (!index) {
+      try {
+        const parsed = JSON.parse(await fsApi.readFile(indexPath, 'utf8'));
+        if (parsed && (parsed.schema === 'now-playing.browse-index.v1' || parsed.schema === 'now-playing.browse-index.v2')) index = parsed;
+      } catch {}
+    }
+    return browseIndexStatus(index, { available: Boolean(index), source, refreshing: Boolean(mem.inflight) });
+  }
+
+  return Object.freeze({ getBrowseIndex, buildBrowseIndex, getBrowseIndexStatus });
 }
 
 const defaultBrowseIndexAdapter = createBrowseIndexAdapter();
@@ -306,4 +349,8 @@ export function buildBrowseIndex(mpdHost = 'moode.local') {
 
 export function getBrowseIndex(mpdHost = 'moode.local', options = {}) {
   return defaultBrowseIndexAdapter.getBrowseIndex(mpdHost, options);
+}
+
+export function getBrowseIndexStatus(mpdHost = 'moode.local') {
+  return defaultBrowseIndexAdapter.getBrowseIndexStatus(mpdHost);
 }

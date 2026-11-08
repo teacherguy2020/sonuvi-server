@@ -118,3 +118,28 @@ test('production browse adapter retains MPD freshness and index-build behavior',
   assert.equal(calls[1].args.includes('listall'), true);
   assert.equal(JSON.parse(await fs.readFile(indexPath, 'utf8')).schema, 'now-playing.browse-index.v2');
 });
+
+test('browse index status observes a persisted index without contacting MPD or rebuilding it', async (t) => {
+  const root = await temporaryFixtureRoot(t);
+  const indexPath = path.join(root, 'data', 'library-browse-index.json');
+  await fs.writeFile(indexPath, JSON.stringify(syntheticBrowseIndex()), 'utf8');
+  let processCalls = 0;
+  const adapter = createBrowseIndexAdapter({
+    statePaths: { browseIndexPath: indexPath },
+    capabilities: { rehearsal: false },
+    runExecFile: async () => {
+      processCalls += 1;
+      throw new Error('status must not invoke mpc');
+    },
+  });
+  const status = await adapter.getBrowseIndexStatus('production-mpd.example');
+  assert.deepEqual(status, {
+    available: true,
+    source: 'persisted',
+    builtAt: '2026-10-25T00:00:00.000Z',
+    dbUpdateAt: null,
+    counts: { artists: 1, albums: 1, tracks: 1 },
+    refresh: { running: false },
+  });
+  assert.equal(processCalls, 0);
+});

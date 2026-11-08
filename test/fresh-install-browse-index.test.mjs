@@ -18,19 +18,48 @@ test('fresh-install catalog provider returns a stable empty index without invoki
   assert.equal(provider.freshInstall, true);
   assert.equal(first, second);
   assert.deepEqual(first.counts, { artists: 0, albums: 0, tracks: 0 });
+  assert.deepEqual(await provider.getBrowseIndexStatus(), {
+    available: true,
+    source: 'fresh-install-empty',
+    builtAt: first.builtAt,
+    dbUpdateAt: null,
+    counts: { artists: 0, albums: 0, tracks: 0 },
+    refresh: { running: false },
+  });
   assert.equal(mpdCalls, 0);
 });
 
 test('established Server catalog provider delegates unchanged to MPD', async () => {
   const calls = [];
+  const statusCalls = [];
   const provider = createRuntimeBrowseIndexProvider({
     getMpdBrowseIndex: async (...args) => {
       calls.push(args);
       return { tracks: ['normal-index'] };
     },
+    getMpdBrowseIndexStatus: async (...args) => {
+      statusCalls.push(args);
+      return {
+        available: true,
+        source: 'persisted',
+        builtAt: '2026-11-08T12:00:00.000Z',
+        dbUpdateAt: null,
+        counts: { artists: 1, albums: 2, tracks: 3 },
+        refresh: { running: false },
+      };
+    },
   });
 
   assert.deepEqual(await provider.getBrowseIndex('production-mpd.example', { force: true }), { tracks: ['normal-index'] });
+  assert.deepEqual(await provider.getBrowseIndexStatus('production-mpd.example'), {
+    available: true,
+    source: 'persisted',
+    builtAt: '2026-11-08T12:00:00.000Z',
+    dbUpdateAt: null,
+    counts: { artists: 1, albums: 2, tracks: 3 },
+    refresh: { running: false },
+  });
   assert.deepEqual(calls, [['production-mpd.example', { force: true }]]);
+  assert.deepEqual(statusCalls, [['production-mpd.example']]);
   assert.equal(provider.freshInstall, false);
 });
