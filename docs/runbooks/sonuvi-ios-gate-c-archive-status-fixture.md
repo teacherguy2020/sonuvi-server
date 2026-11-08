@@ -13,6 +13,13 @@ It contains only fixed helpers and public signed release metadata. It mounts
 only a test-only SSH host private key and test-only client **public** key—never
 production data, credentials, volumes, a sudo shell, or Sonuvi service.
 
+Each reset begins with no `/etc/sonuvi/release-trust-anchors.json` and no
+promoted bootstrap tree. The fixture copies the exact verified bootstrap tar
+to the staged account namespace, invokes the reviewed application-owned
+activation capsule as root, and verifies the resulting anchor is a root-owned
+non-symlink `0644` file byte-identical to the verified kit copy before any
+`stage_release` request is accepted.
+
 ## Connection material
 
 | Item | Value |

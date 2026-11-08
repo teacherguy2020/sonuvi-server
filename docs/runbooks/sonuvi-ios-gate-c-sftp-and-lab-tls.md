@@ -90,7 +90,7 @@ It is delivered as exact application-owned stdin, never selected by the user
 or fetched from the target. Its shell command is one of these fixed forms:
 
 ```text
-capsule SHA-256: 5a12aeea3a5ae0dda1fbc8ceb599ee27e0da93055603effff5fd7b559a50f3df
+capsule SHA-256: 42d68708c61c9d451a0e4285be2217c2f8f6ec2ef3518f308f154c5175de7a7a
 ```
 
 ```text
@@ -114,6 +114,14 @@ unexpected/archive-link entries, extracts only to the fixed root-owned
 `/var/lib/sonuvi-bootstrap/bootstrap-kit-v1`, and atomically promotes that
 directory. An existing promoted kit may only be reused if its root-owned marker
 matches the same digest; a different or incomplete one is a recovery error.
+
+After verified atomic promotion, the capsule provisions only the packaged
+`etc/sonuvi/release-trust-anchors.json` at the fixed root path
+`/etc/sonuvi/release-trust-anchors.json`. The source and final entries must be
+regular and non-symlink; the parent must be root-owned `0755`; and the final
+anchor must be root-owned `0644`. A root-owned temporary sibling and atomic
+no-overwrite link prevent replacement of a pre-existing anchor. A conflicting,
+malformed, or symlinked anchor is a recovery error, never bootstrap trust input.
 
 Only after those checks does it execute the already-packaged fixed
 `scripts/sonuvi-debian-node-bootstrap.sh install`. Thus SFTP bytes are not

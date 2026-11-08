@@ -141,9 +141,12 @@ activation_target="$(SONUVI_FIXTURE_PREFLIGHT="$scratch_dir/preflight.json" node
 target_identity="$activation_target"
 grep -q '0:0:700 /var/lib/sonuvi-bootstrap$' "$scratch_dir/inspect.txt" || fail fixture_root_permissions_invalid 65
 grep -q '0:0:700 /var/lib/sonuvi-bootstrap/attempts$' "$scratch_dir/inspect.txt" || fail fixture_attempt_permissions_invalid 65
-grep -q '0:0:644 /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-release-stage.mjs$' "$scratch_dir/inspect.txt" || fail fixture_stage_helper_permissions_invalid 65
-grep -q '0:0:644 /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-bootstrap-status.mjs$' "$scratch_dir/inspect.txt" || fail fixture_status_helper_permissions_invalid 65
-grep -q '0:0:644 /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-first-install-activate.mjs$' "$scratch_dir/inspect.txt" || fail fixture_first_install_helper_permissions_invalid 65
+grep -q '0:0:755 /etc/sonuvi$' "$scratch_dir/inspect.txt" || fail fixture_trust_anchor_directory_permissions_invalid 65
+grep -q '0:0:644 /etc/sonuvi/release-trust-anchors.json$' "$scratch_dir/inspect.txt" || fail fixture_trust_anchor_permissions_invalid 65
+grep -q '0:0:600 /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-release-stage.mjs$' "$scratch_dir/inspect.txt" || fail fixture_stage_helper_permissions_invalid 65
+grep -q '0:0:600 /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-bootstrap-status.mjs$' "$scratch_dir/inspect.txt" || fail fixture_status_helper_permissions_invalid 65
+grep -q '0:0:600 /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-first-install-activate.mjs$' "$scratch_dir/inspect.txt" || fail fixture_first_install_helper_permissions_invalid 65
+docker exec "$container_name" /bin/sh -ec 'test -f /etc/sonuvi/release-trust-anchors.json && test ! -L /etc/sonuvi/release-trust-anchors.json && cmp /etc/sonuvi/release-trust-anchors.json /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/etc/sonuvi/release-trust-anchors.json'
 
 # Ordinary sudo requires an explicit password for this exact operation. The
 # disposable fixture contains no NOPASSWD rule and no cached authorization.

@@ -47,9 +47,15 @@ release manifest SHA-256: 1eeb43aa39dc1c41c2340e822a67ca16ffbc02bf8baa07596ef6d1
 release archive SHA-256: 4cc92d789d45f2cd9fb9f3f2abc66c0dfc524c4e06781f2727f6f8ed4829c0db
 bootstrap kit SHA-256: 75fce9e3f8c96964dab7141b480168d7dced8341f159299a6dfbb03233951622
 release envelope SHA-256: 98a289768933ceb2be53db058ed2dfda35c47a241c2196c1bf63e3b3cf6669a0
-activation capsule SHA-256: 5a12aeea3a5ae0dda1fbc8ceb599ee27e0da93055603effff5fd7b559a50f3df
+activation capsule SHA-256: 42d68708c61c9d451a0e4285be2217c2f8f6ec2ef3518f308f154c5175de7a7a
 signed metadata validity: 2026-11-07T23:01:18.907Z through 2026-12-07T23:01:18.907Z
 ```
+
+The activation capsule is application-owned stdin, separately reviewed and
+pinned by its own SHA-256. It is not an immutable release artifact and is not
+covered by the signed envelope; a capsule-only correction therefore does not
+invalidate, rebuild, or republish this release's archive, bootstrap tar, or
+signed metadata.
 
 The capsule accepts the exact `sonuvi.gate-c-bootstrap-kit.v1` inventory
 documented in the SFTP contract, including the durable status helper and its

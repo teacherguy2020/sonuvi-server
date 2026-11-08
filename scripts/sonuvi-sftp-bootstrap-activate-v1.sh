@@ -68,10 +68,48 @@ required_kib=$(( (expected_bytes * 2 + 16777216 + 1023) / 1024 ))
 
 kit_root="$base_root/bootstrap-kit-v1"
 marker="$kit_root/.sonuvi-bootstrap-kit-v1.sha256"
+
+# The signed kit contains the sole fixed trust-anchor source. This is also
+# safe to call after a prior kit promotion: an old activation capsule may have
+# left a verified kit without its required system anchor. An existing anchor
+# remains a recovery boundary and is never bootstrap input to overwrite.
+provision_trust_anchor() (
+  trust_anchor_source="$kit_root/etc/sonuvi/release-trust-anchors.json"
+  trust_anchor_directory=/etc/sonuvi
+  trust_anchor_path="$trust_anchor_directory/release-trust-anchors.json"
+
+  [ -f "$trust_anchor_source" ] && [ ! -L "$trust_anchor_source" ] || fail bootstrap_kit_entries_invalid 69
+  [ "$(stat -c %u:%g:%a -- "$trust_anchor_source")" = '0:0:600' ] || fail bootstrap_kit_entries_invalid 69
+  if [ -e "$trust_anchor_directory" ]; then
+    [ -d "$trust_anchor_directory" ] && [ ! -L "$trust_anchor_directory" ] || fail root_staging_invalid 69
+  else
+    install -d -o root -g root -m 755 "$trust_anchor_directory" || fail root_staging_create_failed 69
+  fi
+  [ "$(stat -c %u:%g:%a -- "$trust_anchor_directory")" = '0:0:755' ] || fail root_staging_invalid 69
+  [ ! -e "$trust_anchor_path" ] && [ ! -L "$trust_anchor_path" ] || fail bootstrap_kit_recovery_required 68
+
+  # Copy to a root-owned sibling, then link it into its final name. `ln` is
+  # an atomic no-overwrite operation here, so a competing anchor fails closed.
+  trust_anchor_temporary="$(mktemp "$trust_anchor_directory/.release-trust-anchors.XXXXXXXX")" || fail root_staging_create_failed 69
+  cleanup_trust_anchor() {
+    rm -f "$trust_anchor_temporary"
+  }
+  trap cleanup_trust_anchor EXIT HUP INT TERM
+  dd if="$trust_anchor_source" of="$trust_anchor_temporary" bs=65536 iflag=fullblock,nofollow status=none || fail root_staging_create_failed 69
+  chown root:root "$trust_anchor_temporary" || fail root_staging_create_failed 69
+  chmod 644 "$trust_anchor_temporary" || fail root_staging_create_failed 69
+  [ -f "$trust_anchor_temporary" ] && [ ! -L "$trust_anchor_temporary" ] || fail root_staging_invalid 69
+  [ "$(stat -c %u:%g:%a -- "$trust_anchor_temporary")" = '0:0:644' ] || fail root_staging_invalid 69
+  ln -- "$trust_anchor_temporary" "$trust_anchor_path" || fail bootstrap_kit_recovery_required 68
+  [ -f "$trust_anchor_path" ] && [ ! -L "$trust_anchor_path" ] || fail root_staging_invalid 69
+  [ "$(stat -c %u:%g:%a -- "$trust_anchor_path")" = '0:0:644' ] || fail root_staging_invalid 69
+)
+
 if [ -e "$kit_root" ]; then
   [ -d "$kit_root" ] && [ ! -L "$kit_root" ] && [ -f "$marker" ] && [ ! -L "$marker" ] || fail bootstrap_kit_recovery_required 68
   [ "$(cat "$marker")" = "$expected_sha256" ] || fail bootstrap_kit_conflict 68
   [ -f "$kit_root/scripts/sonuvi-debian-node-bootstrap.sh" ] && [ ! -L "$kit_root/scripts/sonuvi-debian-node-bootstrap.sh" ] || fail bootstrap_kit_recovery_required 68
+  provision_trust_anchor
   exec /bin/sh "$kit_root/scripts/sonuvi-debian-node-bootstrap.sh" install
 fi
 
@@ -130,5 +168,7 @@ printf '%s\n' "$expected_sha256" > "$temporary_root/.sonuvi-bootstrap-kit-v1.sha
 chmod 600 "$temporary_root/.sonuvi-bootstrap-kit-v1.sha256"
 mv "$temporary_root" "$kit_root"
 temporary_root=''
+
+provision_trust_anchor
 
 exec /bin/sh "$kit_root/scripts/sonuvi-debian-node-bootstrap.sh" install

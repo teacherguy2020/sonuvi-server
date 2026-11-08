@@ -148,7 +148,7 @@ ensure_network() {
 }
 
 prepare_build_context() {
-  local build_context
+  local build_context verification_root
   local packaged_bootstrap_kit="$bootstrap_kit"
   case "$source_bootstrap" in
     0) ;;
@@ -156,23 +156,18 @@ prepare_build_context() {
     *) fail fixture_source_bootstrap_invalid 64 ;;
   esac
   build_context="$(mktemp -d /tmp/sonuvi-gate-c-archive-status-build.XXXXXX)"
-  install -d -m 0700 "$build_context/app/scripts" "$build_context/app/src/lib"
+  verification_root="$build_context/bootstrap-kit-root"
   cp "$fixture_dir/Dockerfile" "$fixture_dir/sshd_config" "$fixture_dir/dispatcher.sh" "$fixture_dir/seed-status.mjs" "$fixture_dir/start.sh" "$fixture_dir/tcp-relay.mjs" "$fixture_dir/systemctl-fixture.sh" "$build_context/"
+  cp "$repo_root/scripts/sonuvi-sftp-bootstrap-activate-v1.sh" "$build_context/activation-capsule.sh"
   if [ -n "$packaged_bootstrap_kit" ]; then
     regular_file "$packaged_bootstrap_kit"
-    tar --extract --file "$packaged_bootstrap_kit" --directory "$build_context/app"
-    (cd "$repo_root" && SONUVI_FIXTURE_BOOTSTRAP_ROOT="$build_context/app" node --input-type=module --eval "import { verifyGateCBootstrapKit } from './src/lib/sonuvi-gate-c-bootstrap-kit.mjs'; await verifyGateCBootstrapKit({ kitRoot: process.env.SONUVI_FIXTURE_BOOTSTRAP_ROOT });") || fail fixture_bootstrap_kit_invalid 64
+    cp "$packaged_bootstrap_kit" "$build_context/sonuvi-bootstrap-kit-v1.tar"
   else
-    cp "$repo_root/scripts/sonuvi-release-stage.mjs" "$repo_root/scripts/sonuvi-bootstrap-status.mjs" "$repo_root/scripts/sonuvi-first-install-activate.mjs" "$repo_root/scripts/sonuvi-target-preflight.sh" "$build_context/app/scripts/"
-    local file
-    for file in \
-      atomic-file.mjs public-web-root.mjs release-artifact.mjs runtime-capabilities.mjs runtime-config-security.mjs \
-      sonuvi-bootstrap-contract.mjs sonuvi-bootstrap-progress.mjs sonuvi-bootstrap-status.mjs sonuvi-fresh-install.mjs \
-      sonuvi-gate-c-first-install.mjs sonuvi-gate-c-release.mjs sonuvi-gate-c-staging.mjs sonuvi-gate-c-target-preflight.mjs; do
-      cp "$repo_root/src/lib/$file" "$build_context/app/src/lib/$file"
-    done
+    (cd "$repo_root" && SONUVI_FIXTURE_SOURCE_ROOT="$repo_root" SONUVI_FIXTURE_RELEASE_ROOT="$release_root" SONUVI_FIXTURE_OUTPUT_ROOT="$verification_root" SONUVI_FIXTURE_ARCHIVE="$build_context/sonuvi-bootstrap-kit-v1.tar" node --input-type=module --eval "import fs from 'node:fs/promises'; import { archiveGateCBootstrapKit, createGateCBootstrapKit } from './src/lib/sonuvi-gate-c-bootstrap-kit.mjs'; const root = process.env.SONUVI_FIXTURE_RELEASE_ROOT; const [anchors, envelope] = await Promise.all([fs.readFile(root + '/release-trust-anchors.json', 'utf8').then(JSON.parse), fs.readFile(root + '/release-envelope.json', 'utf8').then(JSON.parse)]); const kit = await createGateCBootstrapKit({ sourceRoot: process.env.SONUVI_FIXTURE_SOURCE_ROOT, outputRoot: process.env.SONUVI_FIXTURE_OUTPUT_ROOT, releaseId: envelope.payload.releaseId, keyId: envelope.keyId, trustedAnchors: anchors }); await archiveGateCBootstrapKit({ kitRoot: kit.root, archivePath: process.env.SONUVI_FIXTURE_ARCHIVE });") || fail fixture_source_bootstrap_build_failed 64
   fi
-  cp "$release_root/release-trust-anchors.json" "$build_context/release-trust-anchors.json"
+  install -d -m 0700 "$verification_root"
+  tar --extract --file "$build_context/sonuvi-bootstrap-kit-v1.tar" --directory "$verification_root"
+  (cd "$repo_root" && SONUVI_FIXTURE_BOOTSTRAP_ROOT="$verification_root" node --input-type=module --eval "import { verifyGateCBootstrapKit } from './src/lib/sonuvi-gate-c-bootstrap-kit.mjs'; await verifyGateCBootstrapKit({ kitRoot: process.env.SONUVI_FIXTURE_BOOTSTRAP_ROOT });") || fail fixture_bootstrap_kit_invalid 64
   cp "$release_root/release-envelope.json" "$build_context/fixture-release-envelope.json"
   if ! docker build --platform linux/arm64 --tag "$image_name" "$build_context" >/dev/null; then
     trash "$build_context" >/dev/null 2>&1 || true
@@ -244,6 +239,8 @@ inspect() {
       /var/lib/sonuvi-bootstrap/attempts \
       /var/lib/sonuvi-bootstrap/uploads \
       /var/lib/sonuvi-bootstrap/releases \
+      /etc/sonuvi \
+      /etc/sonuvi/release-trust-anchors.json \
       /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-release-stage.mjs \
       /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-bootstrap-status.mjs \
       /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/scripts/sonuvi-first-install-activate.mjs

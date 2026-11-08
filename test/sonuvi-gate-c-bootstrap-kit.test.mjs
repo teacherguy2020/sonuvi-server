@@ -120,7 +120,7 @@ test('real capsule promotes the actual packaged kit and rejects an unexpected ar
   assert.equal(packagedStat.isFile() && !packagedStat.isSymbolicLink(), true, 'capsule input must be a regular archive');
   const capsule = path.resolve('scripts/sonuvi-sftp-bootstrap-activate-v1.sh');
 
-  async function runCapsule({ archivePath, expectedExit, requiredOutput = '' }) {
+  async function runCapsule({ archivePath, expectedExit, requiredOutput = '', expectTrustAnchor = false, preexistingTrustAnchor = false }) {
     const bytes = (await fs.stat(archivePath)).size;
     const digest = crypto.createHash('sha256').update(await fs.readFile(archivePath)).digest('hex');
     const fixture = await fs.mkdtemp(path.join(root, 'fixture-'));
@@ -134,18 +134,37 @@ test('real capsule promotes the actual packaged kit and rejects an unexpected ar
         'install -d -o sonuvi-test -g sonuvi-test -m 700 /home/sonuvi-test/.local /home/sonuvi-test/.local/share /home/sonuvi-test/.local/share/sonuvi-bootstrap-v1',
         'install -o sonuvi-test -g sonuvi-test -m 600 /fixture/kit.tar /home/sonuvi-test/.local/share/sonuvi-bootstrap-v1/sonuvi-bootstrap-kit-v1.tar',
         'printf fixture-machine-id > /etc/machine-id',
+        preexistingTrustAnchor ? [
+          'install -d -o root -g root -m 755 /etc/sonuvi',
+          'printf existing-anchor > /etc/sonuvi/release-trust-anchors.json',
+          'chmod 644 /etc/sonuvi/release-trust-anchors.json',
+        ].join('\n') : '',
         'set +e',
         `SUDO_USER=sonuvi-test /bin/sh /capsule ${digest} ${bytes} >/tmp/stdout 2>/tmp/stderr`,
         'result=$?',
         'set -e',
         `if [ "$result" -ne ${expectedExit} ]; then cat /tmp/stderr >&2; exit 1; fi`,
         requiredOutput ? `grep -q ${JSON.stringify(requiredOutput)} /tmp/stderr` : 'test -f /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/.sonuvi-bootstrap-kit-v1.sha256',
+        expectTrustAnchor ? [
+          'test -f /etc/sonuvi/release-trust-anchors.json',
+          'test ! -L /etc/sonuvi/release-trust-anchors.json',
+          'test "$(stat -c %u:%g:%a /etc/sonuvi)" = 0:0:755',
+          'test "$(stat -c %u:%g:%a /etc/sonuvi/release-trust-anchors.json)" = 0:0:644',
+          'cmp /etc/sonuvi/release-trust-anchors.json /var/lib/sonuvi-bootstrap/bootstrap-kit-v1/etc/sonuvi/release-trust-anchors.json',
+        ].join('\n') : '',
+        preexistingTrustAnchor ? 'test "$(cat /etc/sonuvi/release-trust-anchors.json)" = existing-anchor' : '',
       ].join('\n'),
     ]);
     return result;
   }
 
-  await runCapsule({ archivePath: archive.archivePath, expectedExit: 82 });
+  await runCapsule({ archivePath: archive.archivePath, expectedExit: 82, expectTrustAnchor: true });
+  await runCapsule({
+    archivePath: archive.archivePath,
+    expectedExit: 68,
+    requiredOutput: 'bootstrap_kit_recovery_required',
+    preexistingTrustAnchor: true,
+  });
 
   const invalidRoot = path.join(root, 'invalid-kit');
   await fs.mkdir(invalidRoot, { recursive: true, mode: 0o700 });
