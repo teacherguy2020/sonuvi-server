@@ -104,6 +104,8 @@ async function releaseFixture(t, { label = 'one' } = {}) {
   const output = path.join(parent, `release-${label}`);
   const built = await buildReleaseArtifact({ sourceWorktree: source, outputRoot: output, dependencyRoot: dependencies });
   assert.deepEqual(built.manifest.requiredServices, ['sonuvi-api.service', 'sonuvi-web.service']);
+  assert.equal(built.manifest.verifier.runtimeContract, 'sonuvi.release-runtime.v2');
+  assert.equal(built.manifest.verifier.requiredRuntimeEntrypoints.includes('scripts/sonuvi-admin-session.mjs'), true);
   assert.match(built.manifest.requirements.configurationFiles.join(' '), /SONUVI_CONFIG_ROOT/);
   assert.equal(await fs.readFile(path.join(output, 'vibe_planner.py'), 'utf8'), 'print("fixture planner")\n');
   assert.match(await fs.readFile(path.join(output, 'ops', 'systemd', 'sonuvi-api.service.in'), 'utf8'), /@SERVICE_ACCOUNT@/);
@@ -195,6 +197,13 @@ test('manifest-backed artifact excludes secrets and detects tampering before sta
   const verified = await verifyReleaseArtifact({ artifactRoot });
   assert.equal(verified.releaseId, built.releaseId);
   assert.equal(await fs.readFile(path.join(artifactRoot, 'public', 'release.json'), 'utf8').then((value) => JSON.parse(value).releaseId), built.releaseId);
+
+  const manifest = JSON.parse(await fs.readFile(path.join(artifactRoot, 'release-manifest.json'), 'utf8'));
+  manifest.verifier.requiredRuntimeEntrypoints = manifest.verifier.requiredRuntimeEntrypoints
+    .filter((entry) => entry !== 'scripts/sonuvi-admin-session.mjs');
+  await fs.chmod(path.join(artifactRoot, 'release-manifest.json'), 0o644);
+  await fs.writeFile(path.join(artifactRoot, 'release-manifest.json'), `${JSON.stringify(manifest)}\n`);
+  await assert.rejects(verifyReleaseArtifact({ artifactRoot }), /runtime contract|runtime entrypoints/);
 
   await fs.writeFile(path.join(artifactRoot, 'public', 'index.html'), '<!doctype html>tampered');
   await assert.rejects(verifyReleaseArtifact({ artifactRoot }), /inventory|identity|public asset/i);

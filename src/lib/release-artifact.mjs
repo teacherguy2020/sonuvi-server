@@ -95,6 +95,11 @@ const RELEASE_STATIC_ENTRYPOINTS = [
   'scripts/sonuvi-target-installer.mjs',
 ];
 
+// The v1 manifest format predates administrator sessions. Keep this list
+// authoritative for newly built artifacts, but do not apply it blindly to a
+// historical artifact whose manifest predates one of these files.
+const RELEASE_RUNTIME_CONTRACT_V2 = 'sonuvi.release-runtime.v2';
+
 function text(value) {
   return String(value ?? '').trim();
 }
@@ -255,10 +260,60 @@ async function resolveStaticArtifactImport(root, importer, specifier) {
 }
 
 /** Verify that the shipped server and startup scripts retain every static relative import. */
-export async function verifyReleaseRuntimeImportClosure({ artifactRoot } = {}) {
+function normalizeRuntimeEntrypoints(value, { label = 'release runtime entrypoints', requireCurrent = false } = {}) {
+  if (!Array.isArray(value) || value.length === 0 || new Set(value).size !== value.length
+    || value.some((entry) => !RELEASE_STATIC_ENTRYPOINTS.includes(entry))) {
+    throw new Error(`${label} are invalid`);
+  }
+  const normalized = [...value].sort();
+  if (requireCurrent && JSON.stringify(normalized) !== JSON.stringify([...RELEASE_STATIC_ENTRYPOINTS].sort())) {
+    throw new Error(`${label} do not match the current runtime contract`);
+  }
+  return normalized;
+}
+
+function runtimeEntrypointsForManifest(manifest, recordedFiles) {
+  const runtimeContract = manifest?.verifier?.runtimeContract;
+  if (runtimeContract !== undefined) {
+    if (runtimeContract !== RELEASE_RUNTIME_CONTRACT_V2) {
+      throw new Error('release runtime contract is unsupported');
+    }
+    return normalizeRuntimeEntrypoints(manifest.verifier.requiredRuntimeEntrypoints, {
+      label: 'release manifest required runtime entrypoints',
+      requireCurrent: true,
+    });
+  }
+
+  // Legacy manifests are authoritative about their own payload structure.
+  // The payload inventory and signed manifest digest still detect removal or
+  // substitution of any recorded file.
+  const recorded = new Set((recordedFiles || [])
+    .filter((entry) => entry?.type === 'file')
+    .map((entry) => entry.path));
+  const historical = RELEASE_STATIC_ENTRYPOINTS.filter((entry) => recorded.has(entry));
+  return normalizeRuntimeEntrypoints(historical, {
+    label: 'historical release runtime entrypoints',
+  });
+}
+
+export async function verifyReleaseRuntimeImportClosure({ artifactRoot, manifest, recordedFiles, requiredEntrypoints } = {}) {
   const root = await ensureDirectory(assertAbsolutePath(artifactRoot, 'release artifact root'), 'release artifact root');
+  let descriptor = manifest;
+  if (!descriptor && requiredEntrypoints === undefined) {
+    try {
+      descriptor = JSON.parse(await fs.readFile(path.join(root, 'release-manifest.json'), 'utf8'));
+    } catch {
+      // Build staging is verified before the generated manifest is written;
+      // callers in that phase pass the current required set explicitly.
+    }
+  }
+  const required = requiredEntrypoints === undefined
+    ? descriptor
+      ? runtimeEntrypointsForManifest(descriptor, recordedFiles || (descriptor.files || []))
+      : [...RELEASE_STATIC_ENTRYPOINTS]
+    : normalizeRuntimeEntrypoints(requiredEntrypoints, { requireCurrent: true });
   const pending = [];
-  for (const relative of RELEASE_STATIC_ENTRYPOINTS) {
+  for (const relative of required) {
     const entry = path.join(root, relative);
     const stat = await lstatOrNull(entry);
     if (!stat?.isFile() || stat.isSymbolicLink()) throw new Error(`release startup entrypoint is missing: ${relative}`);
@@ -737,7 +792,7 @@ export async function buildReleaseArtifact({
         throw new Error(`release source snapshot did not contain required Vibe helper: ${helper}`);
       }
     }
-    await verifyReleaseRuntimeImportClosure({ artifactRoot: stage });
+    await verifyReleaseRuntimeImportClosure({ artifactRoot: stage, requiredEntrypoints: RELEASE_STATIC_ENTRYPOINTS });
     await copyTree(dependencies.nodeModules, path.join(stage, 'node_modules'));
     // npm command shims are build-time conveniences. Runtime loads package
     // imports directly; omitting .bin avoids shipping mutable CLI symlinks.
@@ -833,6 +888,8 @@ export async function buildReleaseArtifact({
       verifier: {
         externalArtifact: 'node scripts/verify-release.mjs --artifact-root <release>',
         targetRuntime: 'node scripts/verify-release-runtime.mjs --release-root <release>',
+        runtimeContract: RELEASE_RUNTIME_CONTRACT_V2,
+        requiredRuntimeEntrypoints: [...RELEASE_STATIC_ENTRYPOINTS],
       },
     };
     assertNoDevelopmentPaths(manifest, [snapshot.provenance.root, output, dependencyRoot]);
@@ -876,11 +933,11 @@ export async function verifyReleaseArtifact({ artifactRoot, expectedTarget = TAR
   if (canonicalJson(target) !== canonicalJson({ os: manifest.target.os, architecture: manifest.target.architecture })) {
     throw new Error('release target does not match the verifier target');
   }
-  await verifyReleaseRuntimeImportClosure({ artifactRoot: root });
   const payloadFiles = await collectFileInventory(root, { exclude: ['release-manifest.json'] });
   if (!sameInventory(manifest.files, payloadFiles) || manifest.payloadFilesHash !== inventoryHash(payloadFiles)) {
     throw new Error('release artifact file inventory does not match its manifest');
   }
+  await verifyReleaseRuntimeImportClosure({ artifactRoot: root, manifest, recordedFiles: payloadFiles });
   const identityFiles = await collectFileInventory(root, { exclude: ['public/release.json', 'release-manifest.json'] });
   if (manifest.identity?.payloadContentHash !== inventoryHash(identityFiles)) {
     throw new Error('release artifact identity payload has been modified');
