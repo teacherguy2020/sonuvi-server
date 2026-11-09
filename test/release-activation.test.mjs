@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { execFile as execFileCallback } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -8,6 +9,7 @@ import { promisify } from 'node:util';
 
 import {
   buildReleaseArtifact,
+  canonicalJson,
   makeTreeWritableForCleanup,
   stageReleaseArtifact,
   writeTargetDependencyMetadata,
@@ -137,6 +139,107 @@ function healthyAdapter(calls, { fail = '' } = {}) {
 async function currentRelease(layoutRoot) {
   return path.basename(await fs.realpath(path.join(layoutRoot, 'current')));
 }
+
+async function installedFixture(t) {
+  const fixture = await createFixture(t);
+  const stateRoot = path.join(fixture.root, 'persistent-state');
+  await fs.rename(path.join(fixture.layoutRoot, 'shared'), stateRoot);
+  const preserved = {
+    'protected/administrator.json': '{"version":1,"publicKeyHash":"fixture-old-key"}',
+    'protected/controller.json': 'fixture-controller-record',
+    'data/server-identity.json': 'fixture-server-identity',
+    'config/now-playing.config.json': '{"ports":{"api":3101,"ui":8101}}',
+    'data/library-browse-index.json': '{"schema":"now-playing.browse-index.v2"}',
+    'config/administrator-verifier.json': 'fixture-existing-verifier',
+    'checkpoints/release-activation-state.json': JSON.stringify({ phase: 'committed', candidateReleaseId: fixture.first.releaseId }),
+  };
+  for (const [name, value] of Object.entries(preserved)) await write(stateRoot, name, value);
+  const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519');
+  const payload = {
+    contract: 'sonuvi.gate-c-release-metadata.v1', releaseId: fixture.second.releaseId,
+    manifestSha256: crypto.createHash('sha256').update(await fs.readFile(path.join(fixture.second.releaseRoot, 'release-manifest.json'))).digest('hex'),
+    target: { os: 'linux', architecture: 'arm64' },
+    artifact: { bytes: 1, format: 'sonuvi.release-tar.v1', sha256: 'a'.repeat(64) },
+    bootstrap: { version: 1, sha256: 'b'.repeat(64) },
+    issuedAt: new Date(Date.now() - 1000).toISOString(), expiresAt: new Date(Date.now() + 60000).toISOString(),
+  };
+  const options = {
+    layoutRoot: fixture.layoutRoot, stateRoot, ownerUID: process.getuid(),
+    releaseId: fixture.second.releaseId, expectedPreviousReleaseId: fixture.first.releaseId,
+    envelope: { contract: 'sonuvi.gate-c-release-envelope.v1', keyId: 'fixture', payload, signature: crypto.sign(null, Buffer.from(canonicalJson(payload)), privateKey).toString('base64url') },
+    trustedAnchors: { fixture: publicKey.export({ type: 'spki', format: 'pem' }) },
+  };
+  const calls = [];
+  const adapter = {
+    async prepare() { calls.push('quiesce'); return { quiesced: true }; },
+    async restart() { calls.push('restart'); },
+    async verify({ expectedReleaseId }) { return { releaseId: expectedReleaseId }; },
+    async health({ expectedReleaseId }) { return { ok: true, releaseId: expectedReleaseId }; },
+    async rollback() { calls.push('rollback'); },
+  };
+  const assertPreserved = async () => {
+    for (const [name, value] of Object.entries(preserved)) assert.equal(await fs.readFile(path.join(stateRoot, name), 'utf8'), value, name);
+    await assert.rejects(fs.lstat(path.join(fixture.layoutRoot, 'shared')), { code: 'ENOENT' });
+  };
+  return { ...fixture, options, adapter, calls, assertPreserved };
+}
+
+test('installed upgrade requires signed metadata, exact previous identity, and preserves separate persistent state', async (t) => {
+  const f = await installedFixture(t);
+  for (const overrides of [{ trustedAnchors: {} }, { expectedPreviousReleaseId: 'sonuvi-' + 'f'.repeat(64) }, { envelope: { ...f.options.envelope, signature: 'A'.repeat(86) } }]) {
+    await assert.rejects(activateReleaseTransaction({ ...f.options, ...overrides, adapter: f.adapter }));
+    assert.deepEqual(f.calls, []);
+    assert.equal(await currentRelease(f.layoutRoot), f.first.releaseId);
+  }
+  const result = await activateReleaseTransaction({ ...f.options, adapter: f.adapter });
+  assert.equal(result.state.phase, 'committed');
+  assert.equal(await currentRelease(f.layoutRoot), f.second.releaseId);
+  assert.deepEqual(f.calls, ['quiesce', 'restart']);
+  await f.assertPreserved();
+});
+
+test('installed upgrade rejects unconfirmed quiescence and unbound health, restoring the old release without re-enrollment', async (t) => {
+  const f = await installedFixture(t);
+  await assert.rejects(activateReleaseTransaction({ ...f.options, adapter: { ...f.adapter, prepare: async () => undefined } }), /quiescent/);
+  assert.equal(await currentRelease(f.layoutRoot), f.first.releaseId);
+  await assert.rejects(activateReleaseTransaction({ ...f.options, adapter: {
+    ...f.adapter,
+    health: async ({ expectedReleaseId }) => expectedReleaseId === f.second.releaseId ? true : { ok: true, releaseId: expectedReleaseId },
+  } }), /health check failed/);
+  assert.equal(await currentRelease(f.layoutRoot), f.first.releaseId);
+  assert.equal((await readReleaseActivationState(f.options)).phase, 'rolled-back');
+  await f.assertPreserved();
+});
+
+test('installed interrupted rollback retains its lock on failure and recovers previous services without touching authority', async (t) => {
+  const f = await installedFixture(t);
+  await assert.rejects(activateReleaseTransaction({ ...f.options, adapter: {
+    ...f.adapter, restart: async () => { throw new Error('fixture startup failure'); },
+    rollback: async () => { throw new Error('fixture rollback failure'); },
+  } }), /rollback failed/);
+  assert.equal((await readReleaseActivationState(f.options)).phase, 'manual-recovery-required');
+  await assert.rejects(activateReleaseTransaction({ ...f.options, adapter: f.adapter }), /activation lock/);
+  const recovered = await recoverInterruptedActivation({ ...f.options, adapter: f.adapter });
+  assert.equal(recovered.recovered, true);
+  assert.equal(await currentRelease(f.layoutRoot), f.first.releaseId);
+  await f.assertPreserved();
+});
+
+test('installed upgrade refuses signed manifest mismatch and unsafe roots before acquiring a lock', async (t) => {
+  const f = await installedFixture(t);
+  const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519');
+  const payload = { ...f.options.envelope.payload, manifestSha256: 'f'.repeat(64) };
+  const envelope = { ...f.options.envelope, payload, signature: crypto.sign(null, Buffer.from(canonicalJson(payload)), privateKey).toString('base64url') };
+  await assert.rejects(activateReleaseTransaction({ ...f.options, envelope, trustedAnchors: { fixture: publicKey.export({ format: 'pem', type: 'spki' }) }, adapter: f.adapter }), /manifest mismatch/);
+  const alias = path.join(f.root, 'state-alias');
+  await fs.symlink(f.options.stateRoot, alias);
+  await assert.rejects(activateReleaseTransaction({ ...f.options, stateRoot: alias, adapter: f.adapter }), /not trusted/);
+  await fs.chmod(f.options.stateRoot, 0o777);
+  await assert.rejects(activateReleaseTransaction({ ...f.options, adapter: f.adapter }), /not trusted/);
+  assert.deepEqual(f.calls, []);
+  await assert.rejects(fs.lstat(path.join(f.options.stateRoot, 'checkpoints/release-activation.lock')), { code: 'ENOENT' });
+  await f.assertPreserved();
+});
 
 test('paired API/web activation commits a single release identity only after both fixture services verify and pass health', async (t) => {
   const fixture = await createFixture(t);
