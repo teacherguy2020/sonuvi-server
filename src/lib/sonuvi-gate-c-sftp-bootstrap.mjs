@@ -7,8 +7,15 @@ export const GATE_C_SFTP_BOOTSTRAP_PARTIAL_NAME = 'sonuvi-bootstrap-kit-v1.tar.p
 export const GATE_C_SFTP_BOOTSTRAP_FINAL_NAME = 'sonuvi-bootstrap-kit-v1.tar';
 export const GATE_C_SFTP_BOOTSTRAP_ACTIVATOR = 'sonuvi_sftp_bootstrap_activate_v1';
 export const GATE_C_SFTP_BOOTSTRAP_ACTIVATOR_SHA256 = '42d68708c61c9d451a0e4285be2217c2f8f6ec2ef3518f308f154c5175de7a7a';
+export const GATE_C_SFTP_UPGRADE_BOOTSTRAP_CONTRACT = 'sonuvi.gate-c-sftp-bootstrap.v2';
+export const GATE_C_SFTP_UPGRADE_STAGING_RELATIVE_DIRECTORY = '.local/share/sonuvi-bootstrap-v2';
+export const GATE_C_SFTP_UPGRADE_BOOTSTRAP_PARTIAL_NAME = 'sonuvi-bootstrap-kit-v2.tar.partial';
+export const GATE_C_SFTP_UPGRADE_BOOTSTRAP_FINAL_NAME = 'sonuvi-bootstrap-kit-v2.tar';
+export const GATE_C_SFTP_UPGRADE_BOOTSTRAP_ACTIVATOR = 'sonuvi_sftp_bootstrap_activate_v2';
+export const GATE_C_SFTP_UPGRADE_BOOTSTRAP_ACTIVATOR_SHA256 = '9dddae0ec849cd583b14ca50852113847e5e6e30b4ebef35929cbb6fc2606bb1';
 
 const STAGING_SEGMENTS = Object.freeze(GATE_C_SFTP_STAGING_RELATIVE_DIRECTORY.split('/'));
+const UPGRADE_STAGING_SEGMENTS = Object.freeze(GATE_C_SFTP_UPGRADE_STAGING_RELATIVE_DIRECTORY.split('/'));
 
 function text(value) {
   return String(value ?? '').trim();
@@ -48,8 +55,25 @@ export function normalizeGateCSftpHomeDirectory(value) {
   return home;
 }
 
-function joined(home, name = '') {
-  return name ? path.posix.join(home, ...STAGING_SEGMENTS, name) : path.posix.join(home, ...STAGING_SEGMENTS);
+function joined(home, segments, name = '') {
+  return name ? path.posix.join(home, ...segments, name) : path.posix.join(home, ...segments);
+}
+
+function normalizeTransfer(input, { contract, segments, partialName, finalName, label }) {
+  sameKeys(input, ['bytes', 'contract', 'homeDirectory', 'sha256'], label);
+  if (input.contract !== contract) throw new Error(`${label} contract is unsupported`);
+  const homeDirectory = normalizeGateCSftpHomeDirectory(input.homeDirectory);
+  const bytes = byteCount(input.bytes);
+  const digest = sha256(input.sha256, 'bootstrap kit digest');
+  return Object.freeze({
+    contract,
+    homeDirectory,
+    directory: joined(homeDirectory, segments),
+    partialPath: joined(homeDirectory, segments, partialName),
+    finalPath: joined(homeDirectory, segments, finalName),
+    bytes,
+    sha256: digest,
+  });
 }
 
 /**
@@ -57,19 +81,22 @@ function joined(home, name = '') {
  * SFTP. All recovery restarts from zero: there is no offset/resume protocol.
  */
 export function normalizeGateCSftpBootstrapTransfer(input = {}) {
-  sameKeys(input, ['bytes', 'contract', 'homeDirectory', 'sha256'], 'SFTP bootstrap transfer');
-  if (input.contract !== GATE_C_SFTP_BOOTSTRAP_CONTRACT) throw new Error('SFTP bootstrap contract is unsupported');
-  const homeDirectory = normalizeGateCSftpHomeDirectory(input.homeDirectory);
-  const bytes = byteCount(input.bytes);
-  const digest = sha256(input.sha256, 'bootstrap kit digest');
-  return Object.freeze({
+  return normalizeTransfer(input, {
     contract: GATE_C_SFTP_BOOTSTRAP_CONTRACT,
-    homeDirectory,
-    directory: joined(homeDirectory),
-    partialPath: joined(homeDirectory, GATE_C_SFTP_BOOTSTRAP_PARTIAL_NAME),
-    finalPath: joined(homeDirectory, GATE_C_SFTP_BOOTSTRAP_FINAL_NAME),
-    bytes,
-    sha256: digest,
+    segments: STAGING_SEGMENTS,
+    partialName: GATE_C_SFTP_BOOTSTRAP_PARTIAL_NAME,
+    finalName: GATE_C_SFTP_BOOTSTRAP_FINAL_NAME,
+    label: 'SFTP bootstrap transfer',
+  });
+}
+
+export function normalizeGateCSftpUpgradeBootstrapTransfer(input = {}) {
+  return normalizeTransfer(input, {
+    contract: GATE_C_SFTP_UPGRADE_BOOTSTRAP_CONTRACT,
+    segments: UPGRADE_STAGING_SEGMENTS,
+    partialName: GATE_C_SFTP_UPGRADE_BOOTSTRAP_PARTIAL_NAME,
+    finalName: GATE_C_SFTP_UPGRADE_BOOTSTRAP_FINAL_NAME,
+    label: 'SFTP upgrade bootstrap transfer',
   });
 }
 
@@ -84,9 +111,13 @@ function uid(value) {
 }
 
 function directories(plan) {
+  const segments = plan?.contract === GATE_C_SFTP_BOOTSTRAP_CONTRACT ? STAGING_SEGMENTS
+    : plan?.contract === GATE_C_SFTP_UPGRADE_BOOTSTRAP_CONTRACT ? UPGRADE_STAGING_SEGMENTS
+      : null;
+  if (!segments) throw new Error('SFTP bootstrap plan is unsupported');
   const values = [];
   let current = plan.homeDirectory;
-  for (const segment of STAGING_SEGMENTS) {
+  for (const segment of segments) {
     current = path.posix.join(current, segment);
     values.push(current);
   }
@@ -98,16 +129,36 @@ function directories(plan) {
  * ATTRS into this small model and rejects a missing type, owner, or mode.
  */
 export function assertGateCSftpBootstrapEntry({ plan, expectedUID, path: candidate, kind, mode: permission, uid: ownerUID, bytes = null } = {}) {
-  const normalized = normalizeGateCSftpBootstrapTransfer({
+  const normalized = normalizeTransfer({
+    contract: plan?.contract,
+    homeDirectory: plan?.homeDirectory,
+    bytes: plan?.bytes,
+    sha256: plan?.sha256,
+  }, {
+    contract: GATE_C_SFTP_BOOTSTRAP_CONTRACT,
+    segments: STAGING_SEGMENTS,
+    partialName: GATE_C_SFTP_BOOTSTRAP_PARTIAL_NAME,
+    finalName: GATE_C_SFTP_BOOTSTRAP_FINAL_NAME,
+    label: 'SFTP bootstrap transfer',
+  });
+  return assertSftpEntry({ plan: normalized, expectedUID, path: candidate, kind, mode: permission, uid: ownerUID, bytes });
+}
+
+export function assertGateCSftpUpgradeBootstrapEntry({ plan, expectedUID, path: candidate, kind, mode: permission, uid: ownerUID, bytes = null } = {}) {
+  const normalized = normalizeGateCSftpUpgradeBootstrapTransfer({
     contract: plan?.contract,
     homeDirectory: plan?.homeDirectory,
     bytes: plan?.bytes,
     sha256: plan?.sha256,
   });
+  return assertSftpEntry({ plan: normalized, expectedUID, path: candidate, kind, mode: permission, uid: ownerUID, bytes });
+}
+
+function assertSftpEntry({ plan, expectedUID, path: candidate, kind, mode: permission, uid: ownerUID, bytes = null }) {
   const file = text(candidate);
-  const isDirectory = directories(normalized).includes(file);
-  const isFinal = file === normalized.finalPath;
-  const isPartial = file === normalized.partialPath;
+  const isDirectory = directories(plan).includes(file);
+  const isFinal = file === plan.finalPath;
+  const isPartial = file === plan.partialPath;
   if (!isDirectory && !isFinal && !isPartial) throw new Error('SFTP path is not allowlisted');
   if (text(kind) === 'symlink') throw new Error('SFTP symlinks are not permitted');
   const expectedOwner = uid(expectedUID);
@@ -118,19 +169,37 @@ export function assertGateCSftpBootstrapEntry({ plan, expectedUID, path: candida
     return Object.freeze({ path: file, kind: 'directory', mode: 0o700, uid: observedOwner, bytes: null });
   }
   if (text(kind) !== 'regular' || mode(permission, 'SFTP file mode') !== 0o600) throw new Error('SFTP bootstrap file is invalid');
-  if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > normalized.bytes) throw new Error('SFTP bootstrap file size is invalid');
-  if (isFinal && bytes !== normalized.bytes) throw new Error('SFTP bootstrap final size does not match expected bytes');
+  if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > plan.bytes) throw new Error('SFTP bootstrap file size is invalid');
+  if (isFinal && bytes !== plan.bytes) throw new Error('SFTP bootstrap final size does not match expected bytes');
   return Object.freeze({ path: file, kind: 'regular', mode: 0o600, uid: observedOwner, bytes });
 }
 
 /**
- * This is the sole privileged command template. The two interpolated values
- * have already passed strict digest/size validation; no remote path, package,
- * URL, service, or shell fragment is caller-controlled.
+ * The fixed v1 privileged command template. The two interpolated values have
+ * already passed strict digest/size validation; no remote path, package, URL,
+ * service, or shell fragment is caller-controlled.
  */
 export function gateCSftpBootstrapActivationCommand({ sha256: digest, bytes } = {}, { requiresPassword = false } = {}) {
   const transfer = normalizeGateCSftpBootstrapTransfer({
     contract: GATE_C_SFTP_BOOTSTRAP_CONTRACT,
+    homeDirectory: '/home/bootstrap-contract-only',
+    sha256: digest,
+    bytes,
+  });
+  const sudo = requiresPassword ? "/usr/bin/sudo -S -k -p ''" : '/usr/bin/sudo -n';
+  return `${sudo} /bin/sh -s -- ${transfer.sha256} ${transfer.bytes}`;
+}
+
+/**
+ * Existing-install bootstrap activation uses a separately pinned v2 capsule
+ * and a disjoint SFTP directory. The remote command remains the established
+ * fixed shell/stdin form; only the validated archive digest and byte count are
+ * arguments. The client must verify the capsule bytes against
+ * GATE_C_SFTP_UPGRADE_BOOTSTRAP_ACTIVATOR_SHA256 before sending them.
+ */
+export function gateCSftpUpgradeBootstrapActivationCommand({ sha256: digest, bytes } = {}, { requiresPassword = false } = {}) {
+  const transfer = normalizeGateCSftpUpgradeBootstrapTransfer({
+    contract: GATE_C_SFTP_UPGRADE_BOOTSTRAP_CONTRACT,
     homeDirectory: '/home/bootstrap-contract-only',
     sha256: digest,
     bytes,

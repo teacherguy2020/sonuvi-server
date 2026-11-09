@@ -22,6 +22,8 @@ import {
 } from '../src/lib/release-activation.mjs';
 
 const execFile = promisify(execFileCallback);
+const upgradeAttemptId = 'boot_installed_upgrade_fixture_20261109';
+const upgradeTargetIdentity = `sonuvi-target-v1-${'d'.repeat(64)}`;
 
 async function run(binary, args, cwd) {
   await execFile(binary, args, { cwd, maxBuffer: 8 * 1024 * 1024 });
@@ -166,6 +168,7 @@ async function installedFixture(t) {
   const options = {
     layoutRoot: fixture.layoutRoot, stateRoot, ownerUID: process.getuid(),
     releaseId: fixture.second.releaseId, expectedPreviousReleaseId: fixture.first.releaseId,
+    attemptId: upgradeAttemptId, targetIdentity: upgradeTargetIdentity,
     envelope: { contract: 'sonuvi.gate-c-release-envelope.v1', keyId: 'fixture', payload, signature: crypto.sign(null, Buffer.from(canonicalJson(payload)), privateKey).toString('base64url') },
     trustedAnchors: { fixture: publicKey.export({ type: 'spki', format: 'pem' }) },
   };
@@ -193,9 +196,20 @@ test('installed upgrade requires signed metadata, exact previous identity, and p
   }
   const result = await activateReleaseTransaction({ ...f.options, adapter: f.adapter });
   assert.equal(result.state.phase, 'committed');
+  assert.equal(result.state.attemptId, upgradeAttemptId);
+  assert.equal(result.state.targetIdentity, upgradeTargetIdentity);
   assert.equal(await currentRelease(f.layoutRoot), f.second.releaseId);
   assert.deepEqual(f.calls, ['quiesce', 'restart']);
   await f.assertPreserved();
+
+  const staleLock = path.join(f.options.stateRoot, 'checkpoints/release-activation.lock');
+  await fs.writeFile(staleLock, '{"transactionId":"fixture-terminal-lock"}\n', { mode: 0o600 });
+  await assert.rejects(recoverInterruptedActivation({
+    ...f.options,
+    targetIdentity: `sonuvi-target-v1-${'e'.repeat(64)}`,
+    adapter: f.adapter,
+  }), /target identity mismatch/);
+  assert.equal(await fs.stat(staleLock).then(() => true), true, 'wrong target cannot clear a terminal recovery lock');
 });
 
 test('installed upgrade rejects unconfirmed quiescence and unbound health, restoring the old release without re-enrollment', async (t) => {
@@ -219,7 +233,14 @@ test('installed interrupted rollback retains its lock on failure and recovers pr
   } }), /rollback failed/);
   assert.equal((await readReleaseActivationState(f.options)).phase, 'manual-recovery-required');
   await assert.rejects(activateReleaseTransaction({ ...f.options, adapter: f.adapter }), /activation lock/);
-  const recovered = await recoverInterruptedActivation({ ...f.options, adapter: f.adapter });
+  await assert.rejects(recoverInterruptedActivation({
+    ...f.options,
+    targetIdentity: `sonuvi-target-v1-${'e'.repeat(64)}`,
+    adapter: f.adapter,
+  }), /target identity mismatch/);
+  assert.equal((await readReleaseActivationState(f.options)).phase, 'manual-recovery-required');
+  assert.equal(await currentRelease(f.layoutRoot), f.first.releaseId);
+  const recovered = await recoverInterruptedActivation({ ...f.options, targetIdentity: upgradeTargetIdentity, adapter: f.adapter });
   assert.equal(recovered.recovered, true);
   assert.equal(await currentRelease(f.layoutRoot), f.first.releaseId);
   await f.assertPreserved();

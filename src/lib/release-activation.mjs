@@ -64,6 +64,18 @@ function releaseIdText(value) {
   return releaseId;
 }
 
+function upgradeAttemptId(value) {
+  const attemptId = String(value || '').trim();
+  if (!/^boot_[A-Za-z0-9_-]{16,128}$/.test(attemptId)) throw new Error('installed upgrade attempt ID is invalid');
+  return attemptId;
+}
+
+function upgradeTargetIdentity(value) {
+  const targetIdentity = String(value || '').trim();
+  if (!/^sonuvi-target-v1-[a-f0-9]{64}$/.test(targetIdentity)) throw new Error('installed upgrade target identity is invalid');
+  return targetIdentity;
+}
+
 async function exists(filePath) {
   try {
     await fs.lstat(filePath);
@@ -225,13 +237,14 @@ async function assertCatalogCompatibility(layout, manifest) {
   }
 }
 
-function initialState({ transactionId, candidate, previous }) {
+function initialState({ transactionId, candidate, previous, attemptId = null, targetIdentity = null }) {
   return {
     contract: ACTIVATION_STATE_CONTRACT,
     transactionId,
     phase: 'preparing',
     candidateReleaseId: candidate.releaseId,
     previousReleaseId: previous?.releaseId || null,
+    ...(attemptId ? { attemptId, targetIdentity } : {}),
     startedAt: new Date().toISOString(),
     completedAt: null,
     rollback: null,
@@ -250,9 +263,11 @@ async function record(paths, state) {
  * cannot atomically replace two already-running processes, so no public
  * traffic is reopened until API and web identities and health agree.
  */
-export async function activateReleaseTransaction({ layoutRoot, stateRoot, ownerUID = 0, releaseId, expectedPreviousReleaseId, envelope, trustedAnchors, adapter } = {}) {
+export async function activateReleaseTransaction({ layoutRoot, stateRoot, ownerUID = 0, releaseId, expectedPreviousReleaseId, envelope, trustedAnchors, attemptId, targetIdentity, adapter } = {}) {
   const services = assertAdapter(adapter);
   const layout = await activationLayout({ layoutRoot, stateRoot, ownerUID });
+  const upgradeAttempt = layout.installed ? upgradeAttemptId(attemptId) : null;
+  const upgradeTarget = layout.installed ? upgradeTargetIdentity(targetIdentity) : null;
   const paths = statePaths(layout);
   const candidateId = releaseIdText(releaseId);
   const candidateRoot = path.join(layout.releases, candidateId);
@@ -273,10 +288,10 @@ export async function activateReleaseTransaction({ layoutRoot, stateRoot, ownerU
   await assertCatalogCompatibility(layout, candidate.manifest);
 
   const transactionId = crypto.randomUUID();
-  const state = initialState({ transactionId, candidate, previous });
+  const state = initialState({ transactionId, candidate, previous, attemptId: upgradeAttempt, targetIdentity: upgradeTarget });
   await writeLock(paths.lock, state);
   await writeState(paths, state);
-  const context = Object.freeze({ layout, candidate, previous, transactionId });
+  const context = Object.freeze({ layout, candidate, previous, transactionId, attemptId: upgradeAttempt, targetIdentity: upgradeTarget });
   let switched = false;
   try {
     await closeTrafficGate(paths);
@@ -367,13 +382,18 @@ export async function activateReleaseTransaction({ layoutRoot, stateRoot, ownerU
   }
 }
 
-export async function recoverInterruptedActivation({ layoutRoot, stateRoot, ownerUID = 0, adapter } = {}) {
+export async function recoverInterruptedActivation({ layoutRoot, stateRoot, ownerUID = 0, targetIdentity, adapter } = {}) {
   const services = assertAdapter(adapter);
   const layout = await activationLayout({ layoutRoot, stateRoot, ownerUID });
   const paths = statePaths(layout);
   const state = await readState(paths);
   if (!state) return Object.freeze({ recovered: false, reason: 'no-activation-state' });
   if (state.contract !== ACTIVATION_STATE_CONTRACT) throw new Error('activation state contract is invalid');
+  if (layout.installed) {
+    const expectedTarget = upgradeTargetIdentity(targetIdentity);
+    upgradeAttemptId(state.attemptId);
+    if (state.targetIdentity !== expectedTarget) throw new Error('interrupted activation target identity mismatch');
+  }
   if (['committed', 'rolled-back', 'recovered'].includes(state.phase)) {
     await clearLock(paths.lock);
     return Object.freeze({ recovered: false, reason: `terminal-${state.phase}`, state });
@@ -406,7 +426,14 @@ export async function recoverInterruptedActivation({ layoutRoot, stateRoot, owne
     artifactValid: false,
   }));
   await switchCurrentPointer(layout, previousRoot);
-  const context = Object.freeze({ layout, previous, candidate, transactionId: state.transactionId, interrupted: true });
+  const context = Object.freeze({
+    layout,
+    previous,
+    candidate,
+    transactionId: state.transactionId,
+    ...(layout.installed ? { attemptId: state.attemptId, targetIdentity: state.targetIdentity } : {}),
+    interrupted: true,
+  });
   await services.rollback(context);
   const rollbackServices = await verifyServices(services, context, previous.releaseId);
   const rollbackHealth = await checkServiceHealth(services, context, previous.releaseId);

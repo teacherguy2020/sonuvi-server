@@ -20,7 +20,7 @@ async function sha256(file) {
   return crypto.createHash('sha256').update(await fs.readFile(file)).digest('hex');
 }
 
-async function fixture(t, { expiresAt = new Date(Date.now() + 60_000).toISOString() } = {}) {
+async function fixture(t, { expiresAt = new Date(Date.now() + 60_000).toISOString(), bootstrapVersion = 1 } = {}) {
   const parent = await fs.mkdtemp(path.join(os.tmpdir(), 'sonuvi-gate-c-lab-distribution-'));
   const root = path.join(parent, releaseId);
   await fs.mkdir(root);
@@ -28,7 +28,7 @@ async function fixture(t, { expiresAt = new Date(Date.now() + 60_000).toISOStrin
   const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519');
   const publicPem = publicKey.export({ type: 'spki', format: 'pem' });
   const archiveName = `${releaseId}-linux-arm64.tar`;
-  const bootstrapName = 'sonuvi-bootstrap-kit-v1.tar';
+  const bootstrapName = `sonuvi-bootstrap-kit-v${bootstrapVersion}.tar`;
   await fs.writeFile(path.join(root, archiveName), 'arm64 release bytes');
   await fs.writeFile(path.join(root, bootstrapName), 'bootstrap bytes');
   const payload = {
@@ -37,7 +37,7 @@ async function fixture(t, { expiresAt = new Date(Date.now() + 60_000).toISOStrin
     manifestSha256: 'b'.repeat(64),
     target: { os: 'linux', architecture: 'arm64' },
     artifact: { format: 'sonuvi.release-tar.v1', sha256: await sha256(path.join(root, archiveName)), bytes: (await fs.stat(path.join(root, archiveName))).size },
-    bootstrap: { version: 1, sha256: await sha256(path.join(root, bootstrapName)) },
+    bootstrap: { version: bootstrapVersion, sha256: await sha256(path.join(root, bootstrapName)) },
     issuedAt: new Date(Date.now() - 60_000).toISOString(),
     expiresAt,
   };
@@ -68,6 +68,25 @@ test('lab distribution exposes only fixed immutable release artifacts and refuse
   assert.equal(resolveGateCLabDistributionRequest({ method: 'GET', url: `${prefix}../../etc/passwd` }, distribution).status, 404);
   assert.equal(resolveGateCLabDistributionRequest({ method: 'GET', url: `${prefix}release-envelope.json?redirect=https://elsewhere` }, distribution).status, 404);
   await assert.rejects(loadGateCLabDistribution({ releaseRoot: '' }), /release root must be absolute/);
+});
+
+test('same immutable distribution endpoint serves only the bootstrap version bound by its signed envelope', async (t) => {
+  const root = await fixture(t, { bootstrapVersion: 2 });
+  const distribution = await loadGateCLabDistribution({ releaseRoot: root });
+  const prefix = `/v1/gate-c/releases/${releaseId}/`;
+  assert.equal(resolveGateCLabDistributionRequest({ method: 'GET', url: `${prefix}sonuvi-bootstrap-kit-v2.tar` }, distribution).status, 200);
+  assert.equal(resolveGateCLabDistributionRequest({ method: 'GET', url: `${prefix}sonuvi-bootstrap-kit-v1.tar` }, distribution).status, 404);
+
+  const handoffPath = path.join(root, 'ios-integration-handoff.json');
+  const handoff = JSON.parse(await fs.readFile(handoffPath, 'utf8'));
+  handoff.bootstrap.archive = 'sonuvi-bootstrap-kit-v1.tar';
+  await fs.writeFile(handoffPath, `${JSON.stringify(handoff)}\n`);
+  const checksumsPath = path.join(root, 'CHECKSUMS.sha256');
+  const checksums = (await fs.readFile(checksumsPath, 'utf8')).trimEnd().split('\n');
+  const handoffDigest = await sha256(handoffPath);
+  await fs.writeFile(checksumsPath, `${checksums.map((line) => line.endsWith('  ios-integration-handoff.json')
+    ? `${handoffDigest}  ios-integration-handoff.json` : line).join('\n')}\n`);
+  await assert.rejects(loadGateCLabDistribution({ releaseRoot: root }), /handoff does not match/);
 });
 
 test('lab distribution trusted-LAN guard accepts only 10.0.0.0/16 IPv4 peers', () => {

@@ -123,7 +123,9 @@ export async function loadGateCLabDistribution({ releaseRoot } = {}) {
   if (path.basename(root) !== metadata.releaseId) throw new Error('lab distribution release root identity mismatch');
 
   const releaseArchiveName = `${metadata.releaseId}-linux-arm64.tar`;
-  const bootstrapName = 'sonuvi-bootstrap-kit-v1.tar';
+  // Preserve the v1 immutable first-install kit while exposing the separately
+  // signed v2 host-upgrade kit through the same fixed, read-only endpoint.
+  const bootstrapName = `sonuvi-bootstrap-kit-v${metadata.bootstrap.version}.tar`;
   const publicKeyName = `${keyId}-public.pem`;
   const handoffName = 'ios-integration-handoff.json';
   const checksumName = 'CHECKSUMS.sha256';

@@ -65,7 +65,9 @@ export function normalizeGateCReleaseMetadata(input = {}) {
     throw new Error('release metadata target is unsupported');
   }
   if (input.artifact.format !== GATE_C_RELEASE_TRANSFER_FORMAT) throw new Error('release transfer format is unsupported');
-  if (!Number.isInteger(input.bootstrap.version) || input.bootstrap.version !== 1) {
+  // Version 2 adds the fixed, separately invoked in-place upgrade adapter;
+  // version 1 remains the supported first-install bootstrap kit.
+  if (!Number.isInteger(input.bootstrap.version) || ![1, 2].includes(input.bootstrap.version)) {
     throw new Error('release bootstrap version is unsupported');
   }
   return Object.freeze({
@@ -78,7 +80,7 @@ export function normalizeGateCReleaseMetadata(input = {}) {
       sha256: sha256(input.artifact.sha256, 'release artifact digest'),
       bytes: byteCount(input.artifact.bytes),
     }),
-    bootstrap: Object.freeze({ version: 1, sha256: sha256(input.bootstrap.sha256, 'release bootstrap digest') }),
+    bootstrap: Object.freeze({ version: input.bootstrap.version, sha256: sha256(input.bootstrap.sha256, 'release bootstrap digest') }),
     issuedAt,
     expiresAt,
   });

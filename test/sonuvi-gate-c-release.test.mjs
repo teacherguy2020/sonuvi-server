@@ -43,6 +43,13 @@ test('signed Gate C metadata permits only an immutable linux/arm64 tar release',
   assert.equal(verified.metadata.target.architecture, 'arm64');
 });
 
+test('signed Gate C metadata supports the versioned in-place-upgrade bootstrap without accepting unknown versions', () => {
+  const { envelope, anchors } = signedEnvelope({ mutate: (value) => ({ ...value, bootstrap: { ...value.bootstrap, version: 2 } }) });
+  assert.equal(verifySignedGateCReleaseMetadata({ envelope, trustedAnchors: anchors, now: Date.parse('2026-11-06T00:00:00.000Z') }).metadata.bootstrap.version, 2);
+  const unsupported = { ...envelope, payload: { ...envelope.payload, bootstrap: { ...envelope.payload.bootstrap, version: 3 } } };
+  assert.throws(() => verifySignedGateCReleaseMetadata({ envelope: unsupported, trustedAnchors: anchors }), /bootstrap version/);
+});
+
 test('release metadata fails closed for unknown anchors, tampering, URLs, and expiry', () => {
   const { envelope, anchors } = signedEnvelope();
   assert.throws(() => verifySignedGateCReleaseMetadata({ envelope, trustedAnchors: {} }), /trust anchor/);
