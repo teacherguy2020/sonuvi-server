@@ -28,6 +28,7 @@ import {
   projectRuntimeAdminConfig,
   projectRuntimePublicConfig,
   sanitizeRuntimeConfigUpdate,
+  validateRuntimeConfigShape,
 } from '../lib/runtime-config-projection.mjs';
 import { exchangeLastfmToken, lastfmAuthorizationUrl, requestLastfmToken } from '../../scripts/lastfm-authorize.mjs';
 
@@ -91,17 +92,6 @@ function runtimeProjectionOptions() {
   };
 }
 
-function validateConfigShape(cfg) {
-  const errors = [];
-  if (!cfg || typeof cfg !== 'object') errors.push('config must be an object');
-  if (!cfg.ports || typeof cfg.ports.api !== 'number' || typeof cfg.ports.ui !== 'number') {
-    errors.push('ports.api and ports.ui must be numbers');
-  }
-  if (cfg.alexa?.enabled && !String(cfg.alexa?.publicDomain || '').trim()) {
-    errors.push('alexa.publicDomain is required when alexa.enabled=true');
-  }
-  return errors;
-}
 
 function sshArgsFor(user, host, extra = []) {
   return [
@@ -952,7 +942,7 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
         };
       }
 
-      const errs = validateConfigShape(next);
+      const errs = validateRuntimeConfigShape(next);
       if (errs.length) return res.status(400).json({ ok: false, error: errs.join('; ') });
       if (immutableRuntime()) assertImmutableRuntimeConfig(next, { context: 'immutable runtime configuration update' });
 

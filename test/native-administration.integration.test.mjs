@@ -30,7 +30,11 @@ function sign(pair, message) {
 
 function createApp() {
   const routes = new Map();
-  return { routes, get(route, handler) { routes.set(`GET ${route}`, handler); } };
+  return {
+    routes,
+    get(route, handler) { routes.set(`GET ${route}`, handler); },
+    patch(route, handler) { routes.set(`PATCH ${route}`, handler); },
+  };
 }
 
 function response() {

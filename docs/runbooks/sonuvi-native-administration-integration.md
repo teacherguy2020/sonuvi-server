@@ -1,8 +1,9 @@
 # Sonuvi Native Administration Integration Contract
 
 This checkpoint combines the administrator-session foundation and the native
-read-only configuration API.  It is source-level only: it does not publish a
-release, alter a Server installation, or change the iOS client.
+configuration API.  Its write surface is limited to the explicitly reviewed
+MPD/moOde and media-path fields; it is source-level only and does not publish
+a release, alter a Server installation, or change the iOS client.
 
 ## Required transport and authority
 
@@ -21,24 +22,29 @@ from paired controller sessions and the legacy web Track Key.
    expiry, and replay nonce.  It returns
    `sonuvi.administrator-session.v1` with a 15-minute ES256 bearer token.
 4. The client supplies that token only as `Authorization: Bearer <token>` to
-   loopback `GET` requests.  Do not log it or persist it in iOS storage.
+   the loopback native administrator reads and the single reviewed PATCH
+   request.  Do not log it or persist it in iOS storage.
 
 Ordinary controller tokens, SSH access alone, a claimed device ID, and the
 legacy Track Key are not administrator authority.  The native endpoints return
 `401 { "ok": false, "code": "administrator_authorization_required" }` for
 all of them, including expired administrator tokens.
 
-## Read-only endpoints
+## Native endpoints
 
 | Endpoint | Contract | Result |
 | --- | --- | --- |
 | `GET /v1/admin/configuration` | `sonuvi.admin.configuration.v1` | Sanitized runtime configuration, immutable Server identity/version, environment editability, and capabilities. |
 | `GET /v1/admin/library/status` | `sonuvi.admin.library-status.v1` | Persisted/in-memory index and library-health status only; no scan or refresh is started. |
 | `GET /v1/admin/dlna` | `sonuvi.admin.dlna.v1` | `status: "unavailable"`, `installed: false`, `reason: "not_installed_in_gate_c"`. |
+| `PATCH /v1/admin/configuration` | `sonuvi.admin.configuration-update.v1` | Allowlisted MPD/moOde and media-path updates only; reuses the existing sanitizer, validation, and atomic persistence path. |
 
 All configuration fields are the existing runtime projection.  No second
-configuration store, web-endpoint invocation, mutation, host operation, raw
+configuration store, web-endpoint invocation, host operation, raw
 configuration file, secret, private key, or unrestricted path is exposed.
+Environment-managed fields and unknown/secret fields are rejected; a
+successful write returns the sanitized post-write projection and never
+restarts services automatically.
 Provider failures are fixed codes: `administrator_configuration_unavailable`
 or `administrator_library_status_unavailable` (both HTTP 503).
 

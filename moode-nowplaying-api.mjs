@@ -253,6 +253,7 @@ import {
   RUNTIME_STATE_PATHS
 } from './src/config.mjs';
 import { log } from './src/lib/log.mjs';
+import { writeJsonAtomically } from './src/lib/atomic-file.mjs';
 import { handleMobileJsonError } from './src/lib/mobile-http.mjs';
 import { execFileStrict } from './src/lib/exec.mjs';
 import { createRuntimeCapabilities, rehearsalReadOnlyMiddleware } from './src/lib/runtime-capabilities.mjs';
@@ -9374,6 +9375,7 @@ registerMobileRoutes(app, {
 registerNativeAdministratorConfigurationRoutes(app, {
   administratorAuthority: firstAdministratorAuthority,
   readConfig: async () => JSON.parse(await fsp.readFile(RUNTIME_CONFIG_PATH, 'utf8')),
+  writeConfig: async (value) => writeJsonAtomically(RUNTIME_CONFIG_PATH, value),
   runtimeProjectionOptions: {
     environment: process.env,
     apnsCredentials: {

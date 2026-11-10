@@ -21,7 +21,11 @@ const sentinels = Object.freeze({
 
 function createApp() {
   const routes = new Map();
-  return { routes, get(route, handler) { routes.set(`GET ${route}`, handler); } };
+  return {
+    routes,
+    get(route, handler) { routes.set(`GET ${route}`, handler); },
+    patch(route, handler) { routes.set(`PATCH ${route}`, handler); },
+  };
 }
 
 function response() {
@@ -120,11 +124,17 @@ async function invoke(app, route, req = request()) {
   return res;
 }
 
-function administratorRequest(token) {
-  return request({ headers: { authorization: `Bearer ${token}` } });
+async function invokePatch(app, route, req = request()) {
+  const res = response();
+  await app.routes.get(`PATCH ${route}`)(req, res);
+  return res;
 }
 
-test('administrator configuration is a sanitized projection with explicit read-only editability', async (t) => {
+function administratorRequest(token, overrides = {}) {
+  return request({ headers: { authorization: `Bearer ${token}` }, ...overrides });
+}
+
+test('administrator configuration is a sanitized projection with explicit editability', async (t) => {
   const { app, administratorToken } = await fixture(t);
   const res = await invoke(app, '/v1/admin/configuration', administratorRequest(administratorToken));
   assert.equal(res.statusCode, 200);
@@ -144,6 +154,77 @@ test('administrator configuration is a sanitized projection with explicit read-o
   const serialized = JSON.stringify(res.body);
   for (const secret of Object.values(sentinels)) assert.equal(serialized.includes(secret), false);
   assert.equal(serialized.includes('native-admin-pushover-user-secret'), false);
+});
+
+test('administrator configuration mutation reuses the sanitized atomic write surface', async (t) => {
+  let current = sampleConfig();
+  const { app, administratorToken } = await fixture(t, {
+    readConfig: async () => current,
+    writeConfig: async (next) => { current = structuredClone(next); },
+  });
+  const res = await invokePatch(app, '/v1/admin/configuration', administratorRequest(administratorToken, {
+    body: {
+      configuration: {
+        mpd: { port: 6601 },
+        paths: { musicLibraryRoot: '/srv/music-vm' },
+      },
+    },
+  }));
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.contract, 'sonuvi.admin.configuration-update.v1');
+  assert.equal(res.body.changed, true);
+  assert.equal(res.body.restartRequired, true);
+  assert.equal(current.mpd.port, 6601);
+  assert.equal(current.paths.musicLibraryRoot, '/srv/music-vm');
+  const serialized = JSON.stringify(res.body);
+  for (const secret of Object.values(sentinels)) assert.equal(serialized.includes(secret), false);
+});
+
+test('administrator mutation rejects unsupported fields, secrets, and environment-managed values', async (t) => {
+  const { app, administratorToken } = await fixture(t, {
+    writeConfig: async () => {},
+    runtimeProjectionOptions: {
+      environment: { MPD_HOST: 'environment-mpd.local', TRACK_KEY: sentinels.trackKey },
+    },
+  });
+  const unsupported = await invokePatch(app, '/v1/admin/configuration', administratorRequest(administratorToken, {
+    body: { configuration: { features: { radio: false } } },
+  }));
+  assert.equal(unsupported.statusCode, 400);
+  assert.deepEqual(unsupported.body, { ok: false, code: 'administrator_configuration_field_not_editable' });
+  const secret = await invokePatch(app, '/v1/admin/configuration', administratorRequest(administratorToken, {
+    body: { configuration: { lastfm: { apiKey: 'do-not-echo' } } },
+  }));
+  assert.equal(secret.statusCode, 400);
+  assert.deepEqual(secret.body, { ok: false, code: 'administrator_configuration_field_not_editable' });
+  const managed = await invokePatch(app, '/v1/admin/configuration', administratorRequest(administratorToken, {
+    body: { configuration: { mpd: { host: 'not-allowed' } } },
+  }));
+  assert.equal(managed.statusCode, 409);
+  assert.deepEqual(managed.body, { ok: false, code: 'administrator_configuration_field_managed' });
+});
+
+test('administrator mutation rejects malformed envelopes and field values without writing', async (t) => {
+  let writes = 0;
+  const { app, administratorToken } = await fixture(t, {
+    writeConfig: async () => { writes += 1; },
+  });
+  for (const body of [
+    { configuration: { mpd: { port: 0 } } },
+    { configuration: { mpd: { port: '6601' } } },
+    { configuration: { mpd: { host: 42 } } },
+    { configuration: {} },
+  ]) {
+    const res = await invokePatch(app, '/v1/admin/configuration', administratorRequest(administratorToken, { body }));
+    assert.equal(res.statusCode, 400);
+    assert.equal(res.body.code, 'administrator_configuration_update_invalid');
+  }
+  const extra = await invokePatch(app, '/v1/admin/configuration', administratorRequest(administratorToken, {
+    body: { configuration: { mpd: { port: 6601 } }, secret: 'must-not-be-accepted' },
+  }));
+  assert.equal(extra.statusCode, 400);
+  assert.equal(extra.body.code, 'administrator_configuration_field_not_editable');
+  assert.equal(writes, 0);
 });
 
 test('administrator library and DLNA endpoints return bounded current status', async (t) => {
@@ -170,7 +251,7 @@ test('administrator library and DLNA endpoints return bounded current status', a
 });
 
 test('native administrator routes reject ordinary controller credentials and the legacy Track Key', async (t) => {
-  const { app } = await fixture(t);
+  const { app } = await fixture(t, { writeConfig: async () => {} });
   const controllerToken = createMobileSessionToken({ secret: 'ordinary-controller-secret', deviceId: 'controller-device-0123456789' });
   const requests = [
     request(),
@@ -183,6 +264,14 @@ test('native administrator routes reject ordinary controller credentials and the
       assert.equal(res.statusCode, 401);
       assert.deepEqual(res.body, { ok: false, code: 'administrator_authorization_required' });
     }
+  }
+  for (const candidate of requests) {
+    const rejected = await invokePatch(app, '/v1/admin/configuration', {
+      ...candidate,
+      body: { configuration: { mpd: { port: 6601 } } },
+    });
+    assert.equal(rejected.statusCode, 401);
+    assert.deepEqual(rejected.body, { ok: false, code: 'administrator_authorization_required' });
   }
 });
 

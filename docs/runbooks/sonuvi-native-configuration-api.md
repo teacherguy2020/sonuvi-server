@@ -1,6 +1,6 @@
-# Native configuration API — read-only increment
+# Native configuration API — typed administrator projection and edits
 
-This contract supplements the [native administrator session contract](sonuvi-native-administrator-session.md). It adds no configuration mutation, scan, refresh, host command, DLNA server, or direct-LAN administration path.
+This contract supplements the [native administrator session contract](sonuvi-native-administrator-session.md). It adds one narrowly allowlisted configuration mutation; it adds no scan, refresh, host command, DLNA server, or direct-LAN administration path.
 
 ## Transport and authorization
 
@@ -38,12 +38,12 @@ Returns the existing sanitized runtime-administrator projection, not another con
     "deployment": { "immutable": true, "environmentManaged": ["mpdHost"] }
   },
   "editability": {
-    "configuration": "read-only",
-    "mutationsAvailable": false,
+    "configuration": "administrator-editable",
+    "mutationsAvailable": true,
     "environmentManaged": [{ "id": "mpdHost", "editable": false, "source": "environment" }]
   },
   "capabilities": {
-    "configuration": { "read": true, "write": false },
+    "configuration": { "read": true, "write": true },
     "library": { "status": true, "scan": false, "refresh": false },
     "dlna": { "status": true, "installed": false }
   }
@@ -51,6 +51,36 @@ Returns the existing sanitized runtime-administrator projection, not another con
 ```
 
 If the existing runtime configuration cannot be read or projected, returns HTTP `503` with `administrator_configuration_unavailable`.
+
+## `PATCH /v1/admin/configuration`
+
+This is the only native configuration write. It requires the same short-lived
+administrator bearer and accepts either the direct allowlisted object or the
+canonical envelope:
+
+```json
+{
+  "configuration": {
+    "mpd": { "host": "moode.local", "port": 6600 },
+    "moode": { "sshHost": "moode.local", "sshUser": "moode", "baseUrl": "http://moode.local" },
+    "paths": {
+      "musicLibraryRoot": "/srv/music",
+      "moodeUsbMount": "/media/usb",
+      "piMountBase": "/mnt/pi",
+      "podcastRoot": "/srv/podcasts"
+    }
+  }
+}
+```
+
+Only those fields are representable. Unknown sections, secret-bearing fields,
+malformed values, and fields listed in `environmentManaged` are rejected before
+the write. The route calls the existing `sanitizeRuntimeConfigUpdate`,
+`mergeRuntimeConfig`, runtime-shape validation, immutable-runtime checks, and
+atomic JSON writer; it does not create a second configuration store. A
+successful response uses `sonuvi.admin.configuration-update.v1`, includes the
+sanitized post-write projection, and sets `restartRequired: true` when a
+service restart may be needed. The route never restarts services itself.
 
 ## `GET /v1/admin/library/status`
 
@@ -95,6 +125,11 @@ Gate C does not package the native DLNA MediaServer. This endpoint reports that 
 | --- | --- | --- |
 | 401 | `administrator_authorization_required` | Missing, expired, controller, Track-Key, or invalid bearer. |
 | 404 | `administrator_api_unavailable` | No configured administrator authority/configuration reader. |
+| 404 | `administrator_configuration_mutation_unavailable` | The deployment exposes the read projection but not the native write callback. |
+| 400 | `administrator_configuration_field_not_editable` | Unknown or secret-bearing native field. |
+| 400 | `administrator_configuration_update_invalid` | Malformed value or failed runtime validation. |
+| 409 | `administrator_configuration_field_managed` | The selected field is controlled by the deployment environment. |
+| 503 | `administrator_configuration_update_failed` | The bounded atomic write failed. |
 | 503 | `administrator_configuration_unavailable` | Runtime configuration could not be safely projected. |
 | 503 | `administrator_library_status_unavailable` | A status provider could not produce its bounded response. |
 

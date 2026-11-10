@@ -272,6 +272,23 @@ function updateRecords(value, fields) {
 }
 
 /**
+ * Shared shape validation for both the established web configuration route
+ * and the native administrator route. This validates the persisted runtime
+ * document without accepting arbitrary fields or credentials.
+ */
+export function validateRuntimeConfigShape(cfg) {
+  const errors = [];
+  if (!cfg || typeof cfg !== 'object') errors.push('config must be an object');
+  if (!cfg?.ports || typeof cfg.ports.api !== 'number' || typeof cfg.ports.ui !== 'number') {
+    errors.push('ports.api and ports.ui must be numbers');
+  }
+  if (cfg?.alexa?.enabled && !String(cfg.alexa?.publicDomain || '').trim()) {
+    errors.push('alexa.publicDomain is required when alexa.enabled=true');
+  }
+  return errors;
+}
+
+/**
  * Permit only the editable configuration surface. Unknown incoming fields are
  * dropped before merge, preventing a browser POST from becoming a generic
  * write primitive. Credentials are not a mutable configuration surface and
