@@ -45,7 +45,9 @@ const layoutRoot = '/opt/sonuvi';
 const stateRoot = '/var/lib/sonuvi';
 const unitRoot = '/etc/systemd/system';
 const healthFailurePath = '/run/sonuvi-bootstrap-replacement-fail-health';
-const healthPausePath = '/run/sonuvi-bootstrap-replacement-pause-health';
+const healthInterruptionPath = '/run/sonuvi-bootstrap-replacement-interrupt-after-services-verified';
+const healthInterruptionReachedPath = '/run/sonuvi-bootstrap-replacement-interrupt-health-reached';
+const healthInterruptionAcknowledgedPath = '/run/sonuvi-bootstrap-replacement-interrupt-health-acknowledged';
 const fixtureMarker = '/run/sonuvi-bootstrap-replacement-fixture-owned';
 const interposerSource = '/sonuvi/test/fixtures/systemd-upgrade/renameat2-interrupt.c';
 const interposerLibrary = '/tmp/sonuvi-bootstrap-replacement-interrupt.so';
@@ -67,6 +69,7 @@ ensureSystemUser('sonuvi', ['--system', '--home-dir', '/nonexistent', '--shell',
 ensureSystemUser('sonuvi-test', ['--create-home', '--home-dir', HOME, '--shell', '/bin/sh', 'sonuvi-test']);
 const userId = Number(spawnSync('/usr/bin/id', ['-u', 'sonuvi-test'], { encoding: 'utf8' }).stdout.trim());
 const userGroupId = Number(spawnSync('/usr/bin/id', ['-g', 'sonuvi-test'], { encoding: 'utf8' }).stdout.trim());
+const serviceUserId = Number(spawnSync('/usr/bin/id', ['-u', 'sonuvi'], { encoding: 'utf8' }).stdout.trim());
 const groupId = Number(spawnSync('/usr/bin/id', ['-g', 'sonuvi'], { encoding: 'utf8' }).stdout.trim());
 const envelope = JSON.parse(await fs.readFile(ENVELOPE_PATH, 'utf8'));
 const historicalEnvelope = JSON.parse(await fs.readFile(OLD_ENVELOPE_PATH, 'utf8'));
@@ -175,9 +178,34 @@ async function promotedKitHelperPath(script) {
 // fixed command: flock -n <admission lock> node <promoted helper>.
 async function runPromotedKitHelper(script, input, { requireResponse = true } = {}) {
   const helper = await promotedKitHelperPath(script);
-  const result = run('/usr/bin/flock', ['-n', path.join(BOOTSTRAP_ROOT, 'bootstrap-admission.lock'), '/usr/bin/node', helper], {
-    input,
-    env: capsuleEnvironment(),
+  const result = await new Promise((resolve, reject) => {
+    const child = spawn('/usr/bin/flock', ['-n', path.join(BOOTSTRAP_ROOT, 'bootstrap-admission.lock'), '/usr/bin/node', helper], {
+      env: capsuleEnvironment(),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    let stdinError = null;
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.once('error', reject);
+    child.stdin.once('error', (error) => {
+      // A fixed helper can reject malformed framing before flock finishes
+      // writing fixture input. That expected pipe closure must not hide its
+      // typed response, but every other stdin failure remains a test error.
+      if (error?.code !== 'EPIPE') stdinError = error;
+    });
+    child.once('close', (status, signal) => {
+      if (stdinError) reject(stdinError);
+      else resolve({ status, signal, stdout, stderr });
+    });
+    try {
+      child.stdin.end(input);
+    } catch (error) {
+      if (error?.code !== 'EPIPE') reject(error);
+    }
   });
   return { ...result, response: typedJsonResponse(result, `promoted ${script}`, { required: requireResponse }) };
 }
@@ -526,11 +554,18 @@ async function verifySshAuthorization() {
 }
 
 async function writeHealthControls() {
-  for (const [file, value] of [[healthFailurePath, 'none\n'], [healthPausePath, 'none\n']]) {
+  for (const [file, value] of [
+    [healthFailurePath, 'none\n'],
+    [healthInterruptionPath, 'none\n'],
+    [healthInterruptionAcknowledgedPath, 'none\n'],
+  ]) {
     await fs.writeFile(file, value, { mode: 0o644 });
     await fs.chown(file, 0, 0);
     await fs.chmod(file, 0o644);
   }
+  await fs.writeFile(healthInterruptionReachedPath, 'none\n', { mode: 0o600 });
+  await fs.chown(healthInterruptionReachedPath, serviceUserId, groupId);
+  await fs.chmod(healthInterruptionReachedPath, 0o600);
 }
 
 async function writeProbe() {
@@ -540,10 +575,25 @@ import http from 'node:http';
 const kind = process.argv[2];
 const releaseId = process.env.SONUVI_RELEASE_ID;
 const failingRelease = fs.readFileSync('${healthFailurePath}', 'utf8').trim();
-const pausedRelease = fs.readFileSync('${healthPausePath}', 'utf8').trim();
+const interruptAfterServicesVerified = fs.readFileSync('${healthInterruptionPath}', 'utf8').trim();
 const api = kind === 'api';
-const server = http.createServer((_request, response) => {
-  if (pausedRelease === releaseId) return;
+const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+const server = http.createServer(async (_request, response) => {
+  // Fixture-only interruption handshake. It is reached only after the fixed
+  // adapter's real systemd identity verification, then releases a valid
+  // simulated health response after the fixture freezes the promoted helper.
+  if (!api && interruptAfterServicesVerified === releaseId) {
+    fs.writeFileSync('${healthInterruptionReachedPath}', releaseId + '\\n', { mode: 0o600 });
+    for (let attempt = 0; attempt < 500; attempt += 1) {
+      if (fs.readFileSync('${healthInterruptionAcknowledgedPath}', 'utf8').trim() === releaseId) break;
+      await delay(10);
+    }
+    if (fs.readFileSync('${healthInterruptionAcknowledgedPath}', 'utf8').trim() !== releaseId) {
+      response.statusCode = 503;
+      response.end('fixture interruption acknowledgement timed out\\n');
+      return;
+    }
+  }
   response.setHeader('content-type', 'application/json');
   response.end(JSON.stringify(api
     ? { contract: 'sonuvi.health.v1', ok: failingRelease !== releaseId, release: { mode: 'immutable-release', releaseId } }
@@ -809,8 +859,8 @@ async function readUpgradeState() {
 }
 
 async function interruptPromotedActivation(attemptId) {
-  await fs.writeFile(healthPausePath, `${NEW_SERVER_RELEASE_ID}\n`, { mode: 0o644 });
-  await fs.chmod(healthPausePath, 0o644);
+  await fs.writeFile(healthInterruptionPath, `${NEW_SERVER_RELEASE_ID}\n`, { mode: 0o644 });
+  await fs.chmod(healthInterruptionPath, 0o644);
   const helper = await promotedKitHelperPath('sonuvi-existing-install-upgrade.mjs');
   const request = existingInstallRequest(attemptId);
   const child = spawn('/usr/bin/setsid', ['/usr/bin/flock', '-n', path.join(BOOTSTRAP_ROOT, 'bootstrap-admission.lock'), '/usr/bin/node', helper], {
@@ -819,20 +869,34 @@ async function interruptPromotedActivation(attemptId) {
   });
   child.stdin.end(Buffer.from(JSON.stringify(request), 'utf8'));
   let state = null;
-  for (let attempt = 0; attempt < 200; attempt += 1) {
-    try {
-      state = await readUpgradeState();
-      if (state.phase === 'services-verified') break;
-    } catch {}
-    if (child.exitCode !== null) throw new Error('promoted activation exited before the simulated health probe could be interrupted');
-    await new Promise((resolve) => setTimeout(resolve, 10));
+  try {
+    for (let attempt = 0; attempt < 500; attempt += 1) {
+      const reached = await fs.readFile(healthInterruptionReachedPath, 'utf8').catch((error) => error?.code === 'ENOENT' ? '' : Promise.reject(error));
+      if (reached.trim() === NEW_SERVER_RELEASE_ID) break;
+      if (child.exitCode !== null) throw new Error('promoted activation exited before the fixture-only health interruption point');
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal((await fs.readFile(healthInterruptionReachedPath, 'utf8')).trim(), NEW_SERVER_RELEASE_ID, 'fixture-only health interruption point was not reached');
+    process.kill(-child.pid, 'SIGSTOP');
+    await fs.writeFile(healthInterruptionAcknowledgedPath, `${NEW_SERVER_RELEASE_ID}\n`, { mode: 0o644 });
+    await fs.chmod(healthInterruptionAcknowledgedPath, 0o644);
+    state = await readUpgradeState();
+    assert.equal(state?.phase, 'services-verified', 'promoted helper reached the fixture-only health interruption after real systemd restart and service verification');
+    await assertSystemdServiceIdentity(NEW_SERVER_RELEASE_ID);
+    assert.equal(child.exitCode, null, 'fixture-only health interruption completed the promoted helper');
+    process.kill(-child.pid, 'SIGKILL');
+    await new Promise((resolve) => child.once('close', resolve));
+    return state;
+  } finally {
+    if (child.exitCode === null) {
+      process.kill(-child.pid, 'SIGKILL');
+      await new Promise((resolve) => child.once('close', resolve));
+    }
+    await fs.writeFile(healthInterruptionPath, 'none\n', { mode: 0o644 });
+    await fs.chmod(healthInterruptionPath, 0o644);
+    await fs.writeFile(healthInterruptionAcknowledgedPath, 'none\n', { mode: 0o644 });
+    await fs.chmod(healthInterruptionAcknowledgedPath, 0o644);
   }
-  assert.equal(state?.phase, 'services-verified', 'promoted helper reached the simulated health probe after real systemd restart');
-  process.kill(-child.pid, 'SIGKILL');
-  await new Promise((resolve) => child.once('close', resolve));
-  await fs.writeFile(healthPausePath, 'none\n', { mode: 0o644 });
-  await fs.chmod(healthPausePath, 0o644);
-  return state;
 }
 
 function parseJournal(operationId) {
