@@ -978,7 +978,8 @@ async function readInitialJournalRecovery(operationId) {
   return validateInitialJournalRecovery(value, operationId);
 }
 
-async function assertInitialJournalRecoveryEvidence(operationId) {
+async function assertInitialJournalRecoveryEvidence(operationId, active) {
+  if (!active || !validDigest(active.marker) || !validRelease(active.manifest?.releaseId)) fail('replacement_recovery_required');
   const operationRoot = path.join(REPLACEMENTS, operationId);
   const transaction = await fs.lstat(operationRoot).catch((error) => error?.code === 'ENOENT' ? null : fail('replacement_recovery_required'));
   if (transaction) fail('replacement_recovery_required');
@@ -987,6 +988,7 @@ async function assertInitialJournalRecoveryEvidence(operationId) {
   const recovery = await readInitialJournalRecovery(operationId);
   if (!intent || !initial || initial.journal || !recovery || recovery.targetIdentity !== intent.value.targetIdentity
     || recovery.activeBootstrapKitSHA256 !== intent.value.previousBootstrapKitSHA256
+    || recovery.activeBootstrapKitSHA256 !== active.marker || recovery.activeBootstrapReleaseId !== active.manifest.releaseId
     || recovery.initialJournalIntentBytes !== intent.size || recovery.initialJournalIntentSHA256 !== intent.sha256
     || recovery.temporaryJournalBytes !== initial.size || recovery.temporaryJournalKind !== initial.kind
     || recovery.temporaryJournalSHA256 !== initial.sha256
@@ -1080,8 +1082,7 @@ async function readJournal(operationId) {
   const initial = await readInitialTemporary(operationId, intent);
   if (recovery) {
     if (directory || stat) fail('replacement_recovery_required');
-    const evidence = await assertInitialJournalRecoveryEvidence(operationId);
-    return { operationRoot, journal: null, initialRecovery: evidence.recovery };
+    return { operationRoot, journal: null, initialRecovery: recovery };
   }
   if (!directory && !stat) {
     if (!initial) {
@@ -1165,7 +1166,8 @@ async function unresolvedOperations({ allowInitialOperationId = null, active = n
   for (const operationId of operationIds) {
     const current = await readJournal(operationId);
     if (current.initialRecovery) {
-      records.push(terminalInitialJournalRecord(current.initialRecovery));
+      const evidence = await assertInitialJournalRecoveryEvidence(operationId, active);
+      records.push(terminalInitialJournalRecord(evidence.recovery));
       continue;
     }
     if (current.initialTemporary) {
@@ -1432,7 +1434,7 @@ async function recoverReplacement(opId, targetIdentity) {
     phase('trust_anchor');
     const { anchorBytes } = await anchorContext();
     const active = await assertRootTree(ACTIVE, null, anchorBytes);
-    const evidence = await assertInitialJournalRecoveryEvidence(opId);
+    const evidence = await assertInitialJournalRecoveryEvidence(opId, active);
     if (evidence.recovery.targetIdentity !== targetIdentity) fail('replacement_target_mismatch');
     phase('recovery_scan');
     await unresolvedOperations({ active });
@@ -1453,7 +1455,7 @@ async function recoverReplacement(opId, targetIdentity) {
     phase('recovery_scan');
     await unresolvedOperations({ allowInitialOperationId: opId, active });
     const recovery = await writeInitialJournalRecovery(opId, targetIdentity, active, current.initialTemporary);
-    const evidence = await assertInitialJournalRecoveryEvidence(opId);
+    const evidence = await assertInitialJournalRecoveryEvidence(opId, active);
     await unresolvedOperations({ active });
     if (evidence.recovery.targetIdentity !== targetIdentity || evidence.recovery.temporaryJournalSHA256 !== recovery.temporaryJournalSHA256) {
       fail('replacement_recovery_required');

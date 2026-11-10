@@ -777,6 +777,193 @@ test('actual historical v2 kit is replaced by the actual corrected signed kit an
   assert.equal(conflict.response.code, 'replacement_operation_conflict');
 });
 
+test('fixed recovery records retained pre-promotion evidence after actual initial-journal interruptions and only then reopens admission', async () => {
+  const safelyPrefixTruncated = (request) => {
+    const complete = Buffer.from(`${JSON.stringify(initialJournal(request))}\n`, 'utf8');
+    return complete.subarray(0, complete.length - 2);
+  };
+  const cases = [
+    {
+      label: 'after durable intent and before temporary file synchronization',
+      contents: () => Buffer.alloc(0),
+      intentDurability: { syncFile: true },
+      temporaryDurability: {},
+    },
+    {
+      label: 'after temporary file synchronization and before directory synchronization',
+      contents: safelyPrefixTruncated,
+      intentDurability: { syncFile: true },
+      temporaryDurability: { syncFile: true },
+    },
+    {
+      label: 'after file and directory synchronization',
+      contents: safelyPrefixTruncated,
+      intentDurability: { syncFile: true, syncRoot: true },
+      temporaryDurability: { syncFile: true, syncRoot: true },
+    },
+  ];
+
+  for (const [index, scenario] of cases.entries()) {
+    await resetBootstrapFixture();
+    const request = replacementRequest(`bkr_11000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`);
+    const intent = await writeInitialJournalIntent(request, scenario.intentDurability);
+    const contents = scenario.contents(request);
+    const temporary = await writeInitialJournalTemporary(request.operationId, contents, scenario.temporaryDurability);
+    const intentBefore = await fs.readFile(intent.path);
+    const temporaryBefore = await fs.readFile(temporary);
+
+    await assertAdmissionBlockedForEveryOperation();
+    const recovered = runCapsule('recover_bootstrap_kit_replacement', request);
+    assert.equal(recovered.status, 0, `${scenario.label}: ${recovered.stderr}`);
+    assert.equal(recovered.response.contract, 'sonuvi.gate-c-bootstrap-kit-replacement.v1');
+    assert.equal(recovered.response.state, 'aborted_before_promotion');
+    assert.equal(await activeKitDigest(), OLD_KIT_SHA256, `${scenario.label} changed the active kit`);
+    assert.equal((await verifyKitAt(ACTIVE_KIT, OLD_KIT_SHA256)).releaseId, OLD_KIT_RELEASE_ID);
+
+    const receiptPath = path.join(REPLACEMENTS, `.initial-journal-recovery-${request.operationId}.json`);
+    const receiptBefore = await fs.readFile(receiptPath);
+    const receipt = JSON.parse(receiptBefore.toString('utf8'));
+    assert.equal(receipt.state, 'aborted_before_promotion');
+    assert.equal(receipt.targetIdentity, request.targetIdentity);
+    assert.equal(receipt.activeBootstrapKitSHA256, OLD_KIT_SHA256);
+    assert.equal(receipt.activeBootstrapReleaseId, OLD_KIT_RELEASE_ID);
+    assert.equal(receipt.initialJournalIntentSHA256, crypto.createHash('sha256').update(intentBefore).digest('hex'));
+    assert.equal(receipt.temporaryJournalSHA256, crypto.createHash('sha256').update(temporaryBefore).digest('hex'));
+    assert.deepEqual(await fs.readFile(intent.path), intentBefore, `${scenario.label} deleted initial intent evidence`);
+    assert.deepEqual(await fs.readFile(temporary), temporaryBefore, `${scenario.label} changed incomplete journal evidence`);
+
+    await assertAdmissionOpenedForEveryOperation();
+    const repeated = runCapsule('recover_bootstrap_kit_replacement', request);
+    assert.equal(repeated.status, 0, `${scenario.label}: ${repeated.stderr}`);
+    assert.equal(repeated.response.state, 'aborted_before_promotion');
+    assert.deepEqual(await fs.readFile(intent.path), intentBefore, `${scenario.label} changed retained intent on retry`);
+    assert.deepEqual(await fs.readFile(temporary), temporaryBefore, `${scenario.label} changed retained temporary on retry`);
+    assert.deepEqual(await fs.readFile(receiptPath), receiptBefore, `${scenario.label} changed retained recovery receipt on retry`);
+  }
+});
+
+test('fixed recovery fails closed without advancing initial-journal evidence for ambiguous or unverified states', async () => {
+  const safelyPrefixTruncated = (request) => {
+    const complete = Buffer.from(`${JSON.stringify(initialJournal(request))}\n`, 'utf8');
+    return complete.subarray(0, complete.length - 2);
+  };
+  const evidencePaths = (operationId) => ({
+    intent: path.join(REPLACEMENTS, `.initial-journal-intent-${operationId}.json`),
+    temporary: path.join(REPLACEMENTS, `.journal-${operationId}.tmp`),
+    recovery: path.join(REPLACEMENTS, `.initial-journal-recovery-${operationId}.json`),
+    journal: path.join(REPLACEMENTS, operationId, 'journal.json'),
+  });
+  async function optionalBytes(candidate) {
+    try { return await fs.readFile(candidate); } catch (error) {
+      if (error?.code === 'ENOENT') return null;
+      throw error;
+    }
+  }
+  async function snapshotEvidence(operationId) {
+    const paths = evidencePaths(operationId);
+    return {
+      activeMarker: await fs.readFile(path.join(ACTIVE_KIT, '.sonuvi-bootstrap-kit-v2.sha256')),
+      intent: await optionalBytes(paths.intent),
+      temporary: await optionalBytes(paths.temporary),
+      recovery: await optionalBytes(paths.recovery),
+      journal: await optionalBytes(paths.journal),
+    };
+  }
+  async function assertEvidenceUnchanged(operationId, before, label) {
+    const after = await snapshotEvidence(operationId);
+    assert.deepEqual(after, before, `${label} advanced or deleted recovery evidence`);
+  }
+  async function writePromotedJournalAmbiguity(request) {
+    const operationRoot = path.join(REPLACEMENTS, request.operationId);
+    await fs.mkdir(operationRoot, { mode: 0o700 });
+    await fs.chown(operationRoot, 0, 0);
+    await fs.chmod(operationRoot, 0o700);
+    const journalPath = path.join(operationRoot, 'journal.json');
+    await fs.writeFile(journalPath, `${JSON.stringify(initialJournal(request))}\n`, { mode: 0o600 });
+    await fs.chown(journalPath, 0, 0);
+    await fs.chmod(journalPath, 0o600);
+  }
+  async function corruptActiveFile() {
+    const file = path.join(ACTIVE_KIT, 'scripts/sonuvi-bootstrap-status.mjs');
+    const contents = Buffer.from(await fs.readFile(file));
+    contents[0] ^= 1;
+    await fs.writeFile(file, contents, { mode: 0o600 });
+    await fs.chown(file, 0, 0);
+    await fs.chmod(file, 0o600);
+  }
+  async function replaceActiveFileWithSymlink() {
+    const file = path.join(ACTIVE_KIT, 'scripts/sonuvi-bootstrap-status.mjs');
+    const retained = `${file}.retained`;
+    await fs.rename(file, retained);
+    await fs.symlink(retained, file);
+  }
+  async function expectInitialRecoveryFailure(index, scenario) {
+    await resetBootstrapFixture();
+    const request = replacementRequest(`bkr_12000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`);
+    const intentRequest = scenario.omitIntent ? null : (scenario.intentRequest?.(request) || request);
+    if (intentRequest) await writeInitialJournalIntent(intentRequest, { syncFile: true, syncRoot: true });
+    await writeInitialJournalTemporary(request.operationId, scenario.contents?.(request) || safelyPrefixTruncated(request), { syncFile: true, syncRoot: true });
+    await scenario.mutate?.(request);
+    const before = await snapshotEvidence(request.operationId);
+
+    await assertAdmissionBlockedForEveryOperation();
+    expectCapsuleFailure('recover_bootstrap_kit_replacement', request, scenario.code || 'replacement_recovery_required');
+    await assertEvidenceUnchanged(request.operationId, before, scenario.label);
+    await assertAdmissionBlockedForEveryOperation();
+  }
+
+  const scenarios = [
+    {
+      label: 'arbitrary malformed partial journal',
+      contents: () => Buffer.from('{not-json\n', 'utf8'),
+    },
+    {
+      label: 'missing matching initial intent',
+      omitIntent: true,
+    },
+    {
+      label: 'mismatched durable initial intent',
+      intentRequest: (request) => replacementRequest(request.operationId, { previousBootstrapKitSHA256: 'f'.repeat(64) }),
+    },
+    {
+      label: 'transaction directory with promoted journal beside initial evidence',
+      mutate: writePromotedJournalAmbiguity,
+    },
+    {
+      label: 'active kit payload corruption with retained marker',
+      code: 'replacement_kit_inventory_invalid',
+      mutate: corruptActiveFile,
+    },
+    {
+      label: 'active kit symlink substitution',
+      code: 'replacement_kit_inventory_invalid',
+      mutate: replaceActiveFileWithSymlink,
+    },
+  ];
+  for (const [index, scenario] of scenarios.entries()) await expectInitialRecoveryFailure(index, scenario);
+
+  await resetBootstrapFixture();
+  const identityRequest = replacementRequest('bkr_12000000-0000-4000-8000-000000000007');
+  const identityIntent = await writeInitialJournalIntent(identityRequest, { syncFile: true, syncRoot: true });
+  const identityTemporary = await writeInitialJournalTemporary(identityRequest.operationId, safelyPrefixTruncated(identityRequest), { syncFile: true, syncRoot: true });
+  await assertAdmissionBlockedForEveryOperation();
+  const recovered = runCapsule('recover_bootstrap_kit_replacement', identityRequest);
+  assert.equal(recovered.status, 0, recovered.stderr);
+  assert.equal(recovered.response.state, 'aborted_before_promotion');
+  const evidenceBeforeIdentityMismatch = await snapshotEvidence(identityRequest.operationId);
+  const manifestPath = path.join(ACTIVE_KIT, 'bootstrap-kit-manifest.json');
+  const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
+  manifest.releaseId = `sonuvi-${'f'.repeat(64)}`;
+  await fs.writeFile(manifestPath, `${JSON.stringify(manifest)}\n`, { mode: 0o600 });
+  await fs.chown(manifestPath, 0, 0);
+  await fs.chmod(manifestPath, 0o600);
+
+  expectCapsuleFailure('recover_bootstrap_kit_replacement', identityRequest, 'replacement_recovery_required');
+  await assertEvidenceUnchanged(identityRequest.operationId, evidenceBeforeIdentityMismatch, 'active release identity mismatch');
+  assert.deepEqual(await fs.readFile(identityIntent.path), evidenceBeforeIdentityMismatch.intent);
+  assert.deepEqual(await fs.readFile(identityTemporary), evidenceBeforeIdentityMismatch.temporary);
+  await assertAdmissionBlockedForEveryOperation();
+});
 test('invalid signature, target, release, ownership, mode, symlink, digest, and previous-kit bindings fail closed', async () => {
   await resetBootstrapFixture();
   const base = replacementRequest('bkr_20000000-0000-4000-8000-000000000001');

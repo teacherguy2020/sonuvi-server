@@ -14,6 +14,7 @@ import {
   GATE_C_BOOTSTRAP_REPLACEMENT_OPERATIONS,
 } from '../src/lib/sonuvi-gate-c-bootstrap-replacement-contract.mjs';
 
+import { GATE_C_UPGRADE_BOOTSTRAP_KIT_FILES } from '../src/lib/sonuvi-gate-c-upgrade-bootstrap-kit.mjs';
 const OLD_KIT = 'a'.repeat(64);
 const NEW_KIT = 'b'.repeat(64);
 const TARGET = `sonuvi-target-v1-${'c'.repeat(64)}`;
@@ -24,9 +25,47 @@ const uid = process.getuid?.();
 const gid = process.getgid?.();
 const flockAvailable = spawnSync('/usr/bin/flock', ['--version'], { encoding: 'utf8' }).status === 0;
 
-async function writeKit(root, digest) {
+function kitReleaseId(digest) {
+  if (digest === OLD_KIT) return OLD_RELEASE;
+  if (digest === NEW_KIT) return NEW_RELEASE;
+  return `sonuvi-${digest}`;
+}
+
+async function writeKit(root, digest, releaseId = kitReleaseId(digest)) {
   await fs.mkdir(root, { recursive: true, mode: 0o700 });
   await fs.chmod(root, 0o700);
+  const directories = new Set();
+  for (const relative of GATE_C_UPGRADE_BOOTSTRAP_KIT_FILES) {
+    let directory = path.posix.dirname(relative);
+    while (directory && directory !== '.') {
+      directories.add(directory);
+      directory = path.posix.dirname(directory);
+    }
+  }
+  for (const directory of [...directories].sort()) {
+    const target = path.join(root, directory);
+    await fs.mkdir(target, { recursive: true, mode: 0o700 });
+    await fs.chmod(target, 0o700);
+  }
+  const files = [];
+  for (const relative of GATE_C_UPGRADE_BOOTSTRAP_KIT_FILES) {
+    const contents = Buffer.from(`fixture active-kit file ${relative}\n`, 'utf8');
+    const target = path.join(root, relative);
+    await fs.writeFile(target, contents, { mode: 0o600 });
+    await fs.chmod(target, 0o600);
+    files.push({ path: relative, bytes: contents.length, sha256: crypto.createHash('sha256').update(contents).digest('hex') });
+  }
+  const manifest = {
+    contract: 'sonuvi.gate-c-bootstrap-kit.v2',
+    version: 2,
+    releaseId,
+    keyId: 'fixture-upgrade-key',
+    target: { os: 'linux', architecture: 'arm64' },
+    files,
+  };
+  const manifestPath = path.join(root, 'bootstrap-kit-manifest.json');
+  await fs.writeFile(manifestPath, `${JSON.stringify(manifest)}\n`, { mode: 0o600 });
+  await fs.chmod(manifestPath, 0o600);
   const marker = path.join(root, '.sonuvi-bootstrap-kit-v2.sha256');
   await fs.writeFile(marker, `${digest}\n`, { mode: 0o600 });
   await fs.chmod(marker, 0o600);
@@ -304,6 +343,28 @@ test('actual locked admission entrypoint resumes only after retained empty or tr
   }
 });
 
+test('admission guard binds retained recovery evidence to the complete active kit release identity', {
+  skip: !flockAvailable || !Number.isSafeInteger(uid) || !Number.isSafeInteger(gid),
+}, async (t) => {
+  const fixture = await createFixture(t);
+  const operationId = 'bkr_00000000-0000-4000-8000-000000000551';
+  const contents = incompleteInitialJournal(operationId, { partial: true });
+  const intent = await writeInitialJournalIntent(fixture, operationId);
+  const temporary = await writeInitialTemporary(fixture, operationId, contents);
+  const { file: receipt } = await writeInitialRecoveryReceipt(fixture, operationId, contents, intent);
+  const receiptBefore = await fs.readFile(receipt);
+
+  await assertAdmittedForEveryOperation(fixture);
+  const manifestPath = path.join(fixture.active, 'bootstrap-kit-manifest.json');
+  const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
+  manifest.releaseId = NEW_RELEASE;
+  await fs.writeFile(manifestPath, `${JSON.stringify(manifest)}\n`, { mode: 0o600 });
+  await fs.chmod(manifestPath, 0o600);
+
+  await assertBlockedForEveryOperation(fixture);
+  assert.deepEqual(await fs.readFile(temporary), contents, 'release mismatch changed incomplete journal evidence');
+  assert.deepEqual(await fs.readFile(receipt), receiptBefore, 'release mismatch changed retained recovery receipt');
+});
 test('admission guard fails closed for forged, substituted, or ambiguous initial-journal evidence', {
   skip: !flockAvailable || !Number.isSafeInteger(uid) || !Number.isSafeInteger(gid),
 }, async (t) => {
@@ -322,6 +383,17 @@ test('admission guard fails closed for forged, substituted, or ambiguous initial
       label: 'active kit changed after recovery evidence',
       contents: (operationId) => incompleteInitialJournal(operationId, { partial: true }),
       mutate: async (fixture) => { await resetActive(fixture, NEW_KIT); },
+    },
+    {
+      label: 'active kit payload corruption with retained marker',
+      contents: (operationId) => incompleteInitialJournal(operationId, { partial: true }),
+      mutate: async (fixture) => {
+        const candidate = path.join(fixture.active, 'scripts/sonuvi-bootstrap-status.mjs');
+        const bytes = Buffer.from(await fs.readFile(candidate));
+        bytes[0] ^= 1;
+        await fs.writeFile(candidate, bytes, { mode: 0o600 });
+        await fs.chmod(candidate, 0o600);
+      },
     },
     {
       label: 'transaction directory exists beside incomplete evidence',
