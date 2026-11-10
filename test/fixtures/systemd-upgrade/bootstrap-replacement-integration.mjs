@@ -575,13 +575,13 @@ import http from 'node:http';
 const kind = process.argv[2];
 const releaseId = process.env.SONUVI_RELEASE_ID;
 const failingRelease = fs.readFileSync('${healthFailurePath}', 'utf8').trim();
-const interruptAfterServicesVerified = fs.readFileSync('${healthInterruptionPath}', 'utf8').trim();
 const api = kind === 'api';
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const server = http.createServer(async (_request, response) => {
   // Fixture-only interruption handshake. It is reached only after the fixed
   // adapter's real systemd identity verification, then releases a valid
   // simulated health response after the fixture freezes the promoted helper.
+  const interruptAfterServicesVerified = fs.readFileSync('${healthInterruptionPath}', 'utf8').trim();
   if (!api && interruptAfterServicesVerified === releaseId) {
     fs.writeFileSync('${healthInterruptionReachedPath}', releaseId + '\\n', { mode: 0o600 });
     for (let attempt = 0; attempt < 500; attempt += 1) {
