@@ -897,12 +897,14 @@ async function exchangeDirectories(left, right) {
   }
 }
 
-async function assertMarker(directory, digest) {
+async function assertMarker(directory, digest, { expectedReleaseId } = {}) {
   const marker = path.join(directory, '.sonuvi-bootstrap-kit-v2.sha256');
   await requireEntry(marker, { kind: 'file', mode: 0o600 });
   if ((await fs.readFile(marker, 'utf8')).trim() !== digest) fail('replacement_recovery_required');
   const anchors = await fs.readFile(TRUST_FILE);
-  await assertRootTree(directory, digest, anchors);
+  const verified = await assertRootTree(directory, digest, anchors);
+  if (expectedReleaseId && verified.manifest.releaseId !== expectedReleaseId) fail('replacement_recovery_required');
+  return verified;
 }
 
 async function replaceKit(request) {
@@ -927,7 +929,11 @@ async function replaceKit(request) {
       await assertMarker(path.join(operationRoot, 'previous'), existing.previousBootstrapKitSHA256);
       return responseBase('already_replaced', existing);
     }
-    if (existing.state === 'rolled_back') return responseBase('already_rolled_back', existing);
+    if (existing.state === 'rolled_back') {
+      await anchorContext();
+      await assertMarker(ACTIVE, existing.previousBootstrapKitSHA256);
+      return responseBase('already_rolled_back', existing);
+    }
     if (existing.state === 'aborted_before_promotion') {
       const { anchorBytes } = await anchorContext();
       await assertMarker(ACTIVE, existing.previousBootstrapKitSHA256);
@@ -1054,6 +1060,8 @@ async function recoverReplacement(opId, targetIdentity) {
   }
   if (journal.state === 'rollback_prepared') {
     if (activeMarker === journal.replacementKitSHA256 && previousMarker === journal.previousBootstrapKitSHA256) {
+      await assertMarker(ACTIVE, journal.replacementKitSHA256, { expectedReleaseId: journal.replacementReleaseId });
+      await assertMarker(previous, journal.previousBootstrapKitSHA256);
       journal = await transition(operationRoot, journal, 'committed');
       return responseBase('already_replaced', journal);
     }

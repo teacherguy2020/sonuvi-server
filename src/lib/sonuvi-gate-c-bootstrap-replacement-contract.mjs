@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 export const GATE_C_BOOTSTRAP_KIT_REPLACEMENT_CONTRACT = 'sonuvi.gate-c-bootstrap-kit-replacement.v1';
 export const GATE_C_BOOTSTRAP_ADMISSION_LOCK_PATH = '/var/lib/sonuvi-bootstrap/bootstrap-admission.lock';
 export const GATE_C_BOOTSTRAP_REPLACEMENT_JOURNAL_ROOT = '/var/lib/sonuvi-bootstrap/bootstrap-kit-replacements';
-export const GATE_C_BOOTSTRAP_REPLACEMENT_CAPSULE_SHA256 = '6535738585f8f14c4f0c8b43ee927c6a7195041c881ced9b5470693140bad88d';
+export const GATE_C_BOOTSTRAP_REPLACEMENT_CAPSULE_SHA256 = '30ced067ecc63bdf7d32c8968d108296fdc6ff10bbc54da1fa37cf2ee364f8e2';
 
 export const GATE_C_BOOTSTRAP_ADMISSION_HELPERS = Object.freeze({
   stageRelease: '/var/lib/sonuvi-bootstrap/bootstrap-kit-v2/scripts/sonuvi-release-stage.mjs',

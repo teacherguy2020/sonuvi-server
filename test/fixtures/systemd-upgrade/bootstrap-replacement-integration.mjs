@@ -781,6 +781,118 @@ test('bootstrap rollback uses only the preserved verified directory exchange', a
   assert.equal(repeated.response.state, 'already_rolled_back');
 });
 
+test('idempotent rollback recovery verifies complete kit trees before reporting success', async () => {
+  const kitFile = 'scripts/sonuvi-bootstrap-status.mjs';
+
+  async function rollbackPrepared(operationId) {
+    await resetBootstrapFixture();
+    const request = replacementRequest(operationId);
+    const replaced = runCapsule('replace_bootstrap_kit', request);
+    assert.equal(replaced.status, 0, replaced.stderr);
+    assert.equal(replaced.response.state, 'replaced');
+    await interruptCapsuleAtExchange(operationId, 'before', 'rollback_bootstrap_kit');
+    const operationRoot = path.join(REPLACEMENTS, operationId);
+    assert.equal((await parseJournal(operationId)).state, 'rollback_prepared');
+    return { operationRoot, previous: path.join(operationRoot, 'previous'), request };
+  }
+
+  async function rolledBack(operationId) {
+    await resetBootstrapFixture();
+    const request = replacementRequest(operationId);
+    const replaced = runCapsule('replace_bootstrap_kit', request);
+    assert.equal(replaced.status, 0, replaced.stderr);
+    const rollback = runCapsule('rollback_bootstrap_kit', request);
+    assert.equal(rollback.status, 0, rollback.stderr);
+    assert.equal(rollback.response.state, 'rolled_back');
+    return { operationRoot: path.join(REPLACEMENTS, operationId), request };
+  }
+
+  async function assertJournalUnchanged(operationId, before, expectedState, label) {
+    const journal = await fs.readFile(path.join(REPLACEMENTS, operationId, 'journal.json'));
+    assert.deepEqual(journal, before, label + ' rewrote recovery evidence');
+    assert.equal(JSON.parse(journal.toString('utf8')).state, expectedState, label + ' advanced the recovery journal');
+  }
+
+  async function corruptKitFile(root) {
+    const target = path.join(root, kitFile);
+    const bytes = Buffer.from(await fs.readFile(target));
+    assert.notEqual(bytes.length, 0, 'fixture kit file has content');
+    bytes[0] ^= 1;
+    await fs.writeFile(target, bytes, { mode: 0o600 });
+    await fs.chown(target, 0, 0);
+    await fs.chmod(target, 0o600);
+  }
+
+  async function expectPreparedFailure(operationId, label, code, mutate) {
+    const fixture = await rollbackPrepared(operationId);
+    const before = await fs.readFile(path.join(fixture.operationRoot, 'journal.json'));
+    await mutate(fixture);
+    const result = runCapsule('recover_bootstrap_kit_replacement', fixture.request);
+    assert.notEqual(result.status, 0, label + ' unexpectedly reported recovery success');
+    assert.equal(result.response.ok, false, label + ' returned an untyped recovery response');
+    assert.equal(result.response.code, code, label + ' returned the wrong typed failure');
+    await assertJournalUnchanged(operationId, before, 'rollback_prepared', label);
+  }
+
+  const validPrepared = await rollbackPrepared('bkr_71000000-0000-4000-8000-000000000001');
+  const reconciled = runCapsule('recover_bootstrap_kit_replacement', validPrepared.request);
+  assert.equal(reconciled.status, 0, reconciled.stderr);
+  assert.equal(reconciled.response.state, 'already_replaced');
+  await verifyKitAt(ACTIVE_KIT, NEW_KIT_SHA256);
+  await verifyKitAt(validPrepared.previous, OLD_KIT_SHA256);
+  assert.equal((await parseJournal(validPrepared.request.operationId)).state, 'committed');
+
+  await expectPreparedFailure('bkr_71000000-0000-4000-8000-000000000002', 'matching markers with corrupted active contents', 'replacement_kit_inventory_invalid', async () => {
+    await corruptKitFile(ACTIVE_KIT);
+    assert.equal(await activeKitDigest(), NEW_KIT_SHA256, 'corruption must retain the matching marker');
+  });
+
+  await expectPreparedFailure('bkr_71000000-0000-4000-8000-000000000003', 'missing preserved kit', 'bootstrap_root_invalid', async ({ previous }) => {
+    await fs.rm(previous, { recursive: true, force: true });
+  });
+
+  await expectPreparedFailure('bkr_71000000-0000-4000-8000-000000000004', 'preserved kit ownership change', 'replacement_kit_inventory_invalid', async ({ previous }) => {
+    await fs.chown(path.join(previous, kitFile), userId, userGroupId);
+  });
+
+  await expectPreparedFailure('bkr_71000000-0000-4000-8000-000000000005', 'preserved kit permission change', 'replacement_kit_inventory_invalid', async ({ previous }) => {
+    await fs.chmod(path.join(previous, kitFile), 0o644);
+  });
+
+  await expectPreparedFailure('bkr_71000000-0000-4000-8000-000000000006', 'preserved kit symlink substitution', 'replacement_kit_inventory_invalid', async ({ previous }) => {
+    const target = path.join(previous, kitFile);
+    const evidence = target + '.evidence';
+    await fs.rename(target, evidence);
+    await fs.symlink(evidence, target);
+    assert.equal((await fs.lstat(target)).isSymbolicLink(), true);
+  });
+
+  await expectPreparedFailure('bkr_71000000-0000-4000-8000-000000000007', 'replacement release identity mismatch', 'replacement_recovery_required', async () => {
+    const manifestPath = path.join(ACTIVE_KIT, 'bootstrap-kit-manifest.json');
+    const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
+    manifest.releaseId = 'sonuvi-' + 'f'.repeat(64);
+    await fs.writeFile(manifestPath, JSON.stringify(manifest), { mode: 0o600 });
+    await fs.chown(manifestPath, 0, 0);
+    await fs.chmod(manifestPath, 0o600);
+  });
+
+  const validRolledBack = await rolledBack('bkr_71000000-0000-4000-8000-000000000008');
+  const repeated = runCapsule('replace_bootstrap_kit', validRolledBack.request);
+  assert.equal(repeated.status, 0, repeated.stderr);
+  assert.equal(repeated.response.state, 'already_rolled_back');
+  await verifyKitAt(ACTIVE_KIT, OLD_KIT_SHA256);
+
+  const corruptedRolledBack = await rolledBack('bkr_71000000-0000-4000-8000-000000000009');
+  const terminalEvidence = await fs.readFile(path.join(corruptedRolledBack.operationRoot, 'journal.json'));
+  await corruptKitFile(ACTIVE_KIT);
+  assert.equal(await activeKitDigest(), OLD_KIT_SHA256, 'terminal corruption must retain the matching marker');
+  const terminalRetry = runCapsule('replace_bootstrap_kit', corruptedRolledBack.request);
+  assert.notEqual(terminalRetry.status, 0, 'corrupted rolled-back active kit unexpectedly reported idempotent success');
+  assert.equal(terminalRetry.response.ok, false);
+  assert.equal(terminalRetry.response.code, 'replacement_kit_inventory_invalid');
+  await assertJournalUnchanged(corruptedRolledBack.request.operationId, terminalEvidence, 'rolled_back', 'terminal active-kit corruption');
+});
+
 test('interrupted bootstrap rollback before exchange preserves the replacement until fixed recovery reconciles it', async () => {
   await resetBootstrapFixture();
   const request = replacementRequest('bkr_70000000-0000-4000-8000-000000000000');
