@@ -1,14 +1,20 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
 import {
+  GATE_C_BOOTSTRAP_ADMISSION_CONTRACT,
+  GATE_C_BOOTSTRAP_ADMISSION_FAILURE_CODES,
   GATE_C_BOOTSTRAP_ADMISSION_LOCK_PATH,
   GATE_C_BOOTSTRAP_ADMISSION_HELPERS,
+  GATE_C_BOOTSTRAP_ADMISSION_OPERATIONS,
   GATE_C_BOOTSTRAP_KIT_REPLACEMENT_CONTRACT,
   GATE_C_BOOTSTRAP_REPLACEMENT_OPERATIONS,
   bootstrapReplacementOperationId,
   gateCBootstrapAdmissionCommand,
+  gateCBootstrapAdmissionGuardProgram,
   gateCBootstrapKitReplacementCommand,
+  normalizeGateCBootstrapAdmissionResponse,
   normalizeGateCBootstrapKitReplacementRequest,
   normalizeGateCBootstrapKitReplacementResponse,
 } from '../src/lib/sonuvi-gate-c-bootstrap-replacement-contract.mjs';
@@ -50,14 +56,40 @@ test('replacement command is fixed, password-authorized by default, and does not
   assert.equal(GATE_C_BOOTSTRAP_ADMISSION_LOCK_PATH, '/var/lib/sonuvi-bootstrap/bootstrap-admission.lock');
 });
 
-test('updated release staging and activation commands acquire the common lock before loading fixed helpers', () => {
+test('updated release staging and activation commands run a fixed recovery guard under the common lock before any replaceable helper', () => {
   for (const [operation, helper] of Object.entries(GATE_C_BOOTSTRAP_ADMISSION_HELPERS)) {
-    assert.equal(
-      gateCBootstrapAdmissionCommand(operation),
-      `/usr/bin/sudo -S -k -p '' -- /usr/bin/flock -n ${GATE_C_BOOTSTRAP_ADMISSION_LOCK_PATH} /usr/bin/node ${helper}`,
-    );
+    const command = gateCBootstrapAdmissionCommand(operation);
+    assert.ok(command.startsWith(
+      `/usr/bin/sudo -S -k -p '' -- /usr/bin/flock -n ${GATE_C_BOOTSTRAP_ADMISSION_LOCK_PATH} /usr/bin/node --input-type=module --eval '`,
+    ));
+    assert.equal(command.endsWith(` ${GATE_C_BOOTSTRAP_ADMISSION_OPERATIONS[operation]}`), true);
+    assert.equal(command.includes(helper), false, 'the helper path is not loaded by the command shell');
+    const shell = spawnSync('/bin/sh', ['-n', '-c', command], { encoding: 'utf8' });
+    assert.equal(shell.status, 0, shell.stderr);
+    assert.equal(gateCBootstrapAdmissionCommand(operation, { requiresPassword: false }).startsWith('/usr/bin/sudo -n -- /usr/bin/flock -n '), true);
   }
+  const source = gateCBootstrapAdmissionGuardProgram();
+  assert.match(source, /await assertAdmitted\(\);[\s\S]*executeHelper/);
+  assert.match(source, /bootstrap_recovery_required/);
+  assert.equal(source.includes('/var/lib/sonuvi/checkpoints/release-activation.lock'), false, 'the Server release journal remains independent');
   assert.throws(() => gateCBootstrapAdmissionCommand('first_install_or_arbitrary_command'), /unsupported/);
+});
+
+test('bootstrap admission rejection uses one bounded, operation-bound recovery diagnostic', () => {
+  assert.deepEqual(GATE_C_BOOTSTRAP_ADMISSION_FAILURE_CODES, [
+    'bootstrap_admission_helper_unavailable',
+    'bootstrap_admission_invalid',
+    'bootstrap_recovery_required',
+  ]);
+  const response = {
+    contract: GATE_C_BOOTSTRAP_ADMISSION_CONTRACT,
+    operation: GATE_C_BOOTSTRAP_ADMISSION_OPERATIONS.stageRelease,
+    ok: false,
+    code: 'bootstrap_recovery_required',
+  };
+  assert.deepEqual(normalizeGateCBootstrapAdmissionResponse(response, { operation: 'stageRelease' }), response);
+  assert.throws(() => normalizeGateCBootstrapAdmissionResponse({ ...response, detail: '/private/path' }, { operation: 'stageRelease' }), /invalid/);
+  assert.throws(() => normalizeGateCBootstrapAdmissionResponse(response, { operation: 'recoverExisting' }), /binding/);
 });
 
 test('replacement response distinguishes no-recovery from bound transaction outcomes', () => {

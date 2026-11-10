@@ -781,6 +781,20 @@ test('bootstrap rollback uses only the preserved verified directory exchange', a
   assert.equal(repeated.response.state, 'already_rolled_back');
 });
 
+test('interrupted bootstrap rollback before exchange preserves the replacement until fixed recovery reconciles it', async () => {
+  await resetBootstrapFixture();
+  const request = replacementRequest('bkr_70000000-0000-4000-8000-000000000000');
+  assert.equal(runCapsule('replace_bootstrap_kit', request).response.state, 'replaced');
+  await interruptCapsuleAtExchange(request.operationId, 'before', 'rollback_bootstrap_kit');
+  assert.equal(await activeKitDigest(), NEW_KIT_SHA256);
+
+  const recovered = runCapsule('recover_bootstrap_kit_replacement', request);
+  assert.equal(recovered.status, 0, recovered.stderr);
+  assert.equal(recovered.response.state, 'already_replaced');
+  assert.equal(await activeKitDigest(), NEW_KIT_SHA256);
+  assert.equal((await parseJournal(request.operationId)).state, 'committed');
+});
+
 test('interrupted bootstrap rollback retains the replacement while a Server release transaction is unresolved', async () => {
   await resetBootstrapFixture();
   const request = replacementRequest('bkr_70000000-0000-4000-8000-000000000001');
