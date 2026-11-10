@@ -48,6 +48,11 @@ const healthFailurePath = '/run/sonuvi-bootstrap-replacement-fail-health';
 const healthInterruptionPath = '/run/sonuvi-bootstrap-replacement-interrupt-after-services-verified';
 const healthInterruptionReachedPath = '/run/sonuvi-bootstrap-replacement-interrupt-health-reached';
 const healthInterruptionAcknowledgedPath = '/run/sonuvi-bootstrap-replacement-interrupt-health-acknowledged';
+// The fixed promoted helper must finish candidate promotion, real systemd
+// restart, and service identity verification before the fixture-only simulated
+// web health gate can be reached.
+const PROMOTED_ACTIVATION_INTERRUPTION_TIMEOUT_MS = 30_000;
+const PROMOTED_ACTIVATION_INTERRUPTION_POLL_INTERVAL_MS = 10;
 const fixtureMarker = '/run/sonuvi-bootstrap-replacement-fixture-owned';
 const interposerSource = '/sonuvi/test/fixtures/systemd-upgrade/renameat2-interrupt.c';
 const interposerLibrary = '/tmp/sonuvi-bootstrap-replacement-interrupt.so';
@@ -869,14 +874,21 @@ async function interruptPromotedActivation(attemptId) {
   });
   child.stdin.end(Buffer.from(JSON.stringify(request), 'utf8'));
   let state = null;
+  let interruptionMarker = '';
+  const interruptionDeadline = Date.now() + PROMOTED_ACTIVATION_INTERRUPTION_TIMEOUT_MS;
   try {
-    for (let attempt = 0; attempt < 500; attempt += 1) {
-      const reached = await fs.readFile(healthInterruptionReachedPath, 'utf8').catch((error) => error?.code === 'ENOENT' ? '' : Promise.reject(error));
-      if (reached.trim() === NEW_SERVER_RELEASE_ID) break;
+    while (Date.now() < interruptionDeadline) {
+      interruptionMarker = await fs.readFile(healthInterruptionReachedPath, 'utf8').catch((error) => error?.code === 'ENOENT' ? '' : Promise.reject(error));
+      if (interruptionMarker.trim() === NEW_SERVER_RELEASE_ID) break;
       if (child.exitCode !== null) throw new Error('promoted activation exited before the fixture-only health interruption point');
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, PROMOTED_ACTIVATION_INTERRUPTION_POLL_INTERVAL_MS));
     }
-    assert.equal((await fs.readFile(healthInterruptionReachedPath, 'utf8')).trim(), NEW_SERVER_RELEASE_ID, 'fixture-only health interruption point was not reached');
+    if (interruptionMarker.trim() !== NEW_SERVER_RELEASE_ID) {
+      throw new Error(
+        `timed out after ${PROMOTED_ACTIVATION_INTERRUPTION_TIMEOUT_MS}ms waiting for promoted activation to reach the fixture-only simulated web health interruption point; ` +
+        `last marker=${JSON.stringify(interruptionMarker.trim())}; helper exit=${child.exitCode === null ? 'still running' : child.exitCode}; signal=${child.signalCode ?? 'none'}`,
+      );
+    }
     process.kill(-child.pid, 'SIGSTOP');
     await fs.writeFile(healthInterruptionAcknowledgedPath, `${NEW_SERVER_RELEASE_ID}\n`, { mode: 0o644 });
     await fs.chmod(healthInterruptionAcknowledgedPath, 0o644);
