@@ -863,15 +863,53 @@ async function readUpgradeState() {
   return JSON.parse(await fs.readFile(upgradeStatePath, 'utf8'));
 }
 
+function waitForChildClose(child) {
+  return new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('close', (status, signal) => resolve({ status, signal }));
+  });
+}
+
+function pauseDetachedFlockProcessTree(child) {
+  assert.equal(child.exitCode === null && child.signalCode === null, true, 'promoted activation exited before the fixture-only health interruption could be paused');
+  try {
+    process.kill(-child.pid, 'SIGSTOP');
+  } catch (error) {
+    if (error?.code === 'ESRCH') {
+      throw new Error(`promoted activation process group exited before fixture-only pause; helper exit=${child.exitCode === null ? 'still running' : child.exitCode}; signal=${child.signalCode ?? 'none'}`);
+    }
+    throw error;
+  }
+}
+
+async function killAndAwaitDetachedFlockProcessTree(child, closed) {
+  // A signal-terminated ChildProcess keeps exitCode at null and records its
+  // terminal signal separately. ESRCH here is therefore only tolerated after
+  // the detached flock group has already disappeared; close still confirms it.
+  if (child.exitCode === null && child.signalCode === null) {
+    try {
+      process.kill(-child.pid, 'SIGKILL');
+    } catch (error) {
+      if (error?.code !== 'ESRCH') throw error;
+    }
+  }
+  await closed;
+}
+
 async function interruptPromotedActivation(attemptId) {
   await fs.writeFile(healthInterruptionPath, `${NEW_SERVER_RELEASE_ID}\n`, { mode: 0o644 });
   await fs.chmod(healthInterruptionPath, 0o644);
   const helper = await promotedKitHelperPath('sonuvi-existing-install-upgrade.mjs');
   const request = existingInstallRequest(attemptId);
-  const child = spawn('/usr/bin/setsid', ['/usr/bin/flock', '-n', path.join(BOOTSTRAP_ROOT, 'bootstrap-admission.lock'), '/usr/bin/node', helper], {
+  // detached makes the direct fixed flock command its session and process-group
+  // leader. flock may fork Node, but the complete documented helper tree stays
+  // in the known group addressed by -child.pid.
+  const child = spawn('/usr/bin/flock', ['-n', path.join(BOOTSTRAP_ROOT, 'bootstrap-admission.lock'), '/usr/bin/node', helper], {
     env: capsuleEnvironment(),
     stdio: ['pipe', 'ignore', 'pipe'],
+    detached: true,
   });
+  const childClosed = waitForChildClose(child);
   child.stdin.end(Buffer.from(JSON.stringify(request), 'utf8'));
   let state = null;
   let interruptionMarker = '';
@@ -880,7 +918,9 @@ async function interruptPromotedActivation(attemptId) {
     while (Date.now() < interruptionDeadline) {
       interruptionMarker = await fs.readFile(healthInterruptionReachedPath, 'utf8').catch((error) => error?.code === 'ENOENT' ? '' : Promise.reject(error));
       if (interruptionMarker.trim() === NEW_SERVER_RELEASE_ID) break;
-      if (child.exitCode !== null) throw new Error('promoted activation exited before the fixture-only health interruption point');
+      if (child.exitCode !== null || child.signalCode !== null) {
+        throw new Error(`promoted activation exited before the fixture-only health interruption point; helper exit=${child.exitCode === null ? 'still running' : child.exitCode}; signal=${child.signalCode ?? 'none'}`);
+      }
       await new Promise((resolve) => setTimeout(resolve, PROMOTED_ACTIVATION_INTERRUPTION_POLL_INTERVAL_MS));
     }
     if (interruptionMarker.trim() !== NEW_SERVER_RELEASE_ID) {
@@ -889,21 +929,17 @@ async function interruptPromotedActivation(attemptId) {
         `last marker=${JSON.stringify(interruptionMarker.trim())}; helper exit=${child.exitCode === null ? 'still running' : child.exitCode}; signal=${child.signalCode ?? 'none'}`,
       );
     }
-    process.kill(-child.pid, 'SIGSTOP');
+    pauseDetachedFlockProcessTree(child);
     await fs.writeFile(healthInterruptionAcknowledgedPath, `${NEW_SERVER_RELEASE_ID}\n`, { mode: 0o644 });
     await fs.chmod(healthInterruptionAcknowledgedPath, 0o644);
     state = await readUpgradeState();
     assert.equal(state?.phase, 'services-verified', 'promoted helper reached the fixture-only health interruption after real systemd restart and service verification');
     await assertSystemdServiceIdentity(NEW_SERVER_RELEASE_ID);
-    assert.equal(child.exitCode, null, 'fixture-only health interruption completed the promoted helper');
-    process.kill(-child.pid, 'SIGKILL');
-    await new Promise((resolve) => child.once('close', resolve));
+    assert.equal(child.exitCode === null && child.signalCode === null, true, 'fixture-only health interruption completed the promoted helper');
+    await killAndAwaitDetachedFlockProcessTree(child, childClosed);
     return state;
   } finally {
-    if (child.exitCode === null) {
-      process.kill(-child.pid, 'SIGKILL');
-      await new Promise((resolve) => child.once('close', resolve));
-    }
+    await killAndAwaitDetachedFlockProcessTree(child, childClosed);
     await fs.writeFile(healthInterruptionPath, 'none\n', { mode: 0o644 });
     await fs.chmod(healthInterruptionPath, 0o644);
     await fs.writeFile(healthInterruptionAcknowledgedPath, 'none\n', { mode: 0o644 });
