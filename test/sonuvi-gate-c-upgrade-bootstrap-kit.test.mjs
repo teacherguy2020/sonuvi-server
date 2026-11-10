@@ -43,9 +43,31 @@ test('version-2 bootstrap package adds only the fixed installed-upgrade entrypoi
   assert.equal((await verifyGateCUpgradeBootstrapKit({ kitRoot: created.root })).releaseId, releaseId);
 
   const capsule = await fs.readFile(path.resolve('scripts/sonuvi-sftp-bootstrap-activate-v2.sh'), 'utf8');
-  const expectedTree = capsule.match(/expected_tree='([\s\S]*?)'/)?.[1];
-  assert.ok(expectedTree, 'v2 activation capsule has an explicit extracted-tree allowlist');
-  assert.deepEqual(expectedTree.split('\n'), GATE_C_UPGRADE_BOOTSTRAP_KIT_EXTRACTED_TREE);
+  const inventory = capsule.match(/const FILES = Object\.freeze\(\[([\s\S]*?)\]\);/)?.[1];
+  assert.ok(inventory, 'v2 activation capsule has a fixed signed-kit inventory');
+  const capsuleFiles = [...inventory.matchAll(/'([^']+)'/g)].map((entry) => entry[1]);
+  assert.deepEqual(capsuleFiles, GATE_C_UPGRADE_BOOTSTRAP_KIT_FILES);
+  const capsuleDirectories = new Set();
+  for (const file of capsuleFiles) {
+    let parent = path.posix.dirname(file);
+    while (parent && parent !== '.') {
+      capsuleDirectories.add(parent);
+      parent = path.posix.dirname(parent);
+    }
+  }
+  const capsuleTree = [
+    '.',
+    './bootstrap-kit-manifest.json',
+    ...capsuleFiles.map((file) => `./${file}`),
+    ...[...capsuleDirectories].map((directory) => `./${directory}`),
+  ].sort();
+  assert.deepEqual(GATE_C_UPGRADE_BOOTSTRAP_KIT_EXTRACTED_TREE, capsuleTree);
+  assert.equal(GATE_C_UPGRADE_BOOTSTRAP_KIT_EXTRACTED_TREE.includes('./src/lib/release-activation.mjs'), true);
+  const capsuleDigest = crypto.createHash('sha256').update(capsule).digest('hex');
+  const sftpContract = await import('../src/lib/sonuvi-gate-c-sftp-bootstrap.mjs');
+  const replacementContract = await import('../src/lib/sonuvi-gate-c-bootstrap-replacement-contract.mjs');
+  assert.equal(sftpContract.GATE_C_SFTP_UPGRADE_BOOTSTRAP_ACTIVATOR_SHA256, capsuleDigest);
+  assert.equal(replacementContract.GATE_C_BOOTSTRAP_REPLACEMENT_CAPSULE_SHA256, capsuleDigest);
 
   await fs.writeFile(path.join(created.root, 'unexpected-file'), 'must be rejected');
   await assert.rejects(verifyGateCUpgradeBootstrapKit({ kitRoot: created.root }), /unexpected|inventory|digest/);

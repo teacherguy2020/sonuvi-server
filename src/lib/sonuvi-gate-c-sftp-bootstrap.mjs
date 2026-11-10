@@ -1,5 +1,7 @@
 import path from 'node:path';
 
+import { gateCBootstrapKitReplacementCommand } from './sonuvi-gate-c-bootstrap-replacement-contract.mjs';
+
 export const GATE_C_SFTP_BOOTSTRAP_CONTRACT = 'sonuvi.gate-c-sftp-bootstrap.v1';
 export const GATE_C_SFTP_BOOTSTRAP_MAX_BYTES = 16 * 1024 * 1024;
 export const GATE_C_SFTP_STAGING_RELATIVE_DIRECTORY = '.local/share/sonuvi-bootstrap-v1';
@@ -9,10 +11,11 @@ export const GATE_C_SFTP_BOOTSTRAP_ACTIVATOR = 'sonuvi_sftp_bootstrap_activate_v
 export const GATE_C_SFTP_BOOTSTRAP_ACTIVATOR_SHA256 = '42d68708c61c9d451a0e4285be2217c2f8f6ec2ef3518f308f154c5175de7a7a';
 export const GATE_C_SFTP_UPGRADE_BOOTSTRAP_CONTRACT = 'sonuvi.gate-c-sftp-bootstrap.v2';
 export const GATE_C_SFTP_UPGRADE_STAGING_RELATIVE_DIRECTORY = '.local/share/sonuvi-bootstrap-v2';
-export const GATE_C_SFTP_UPGRADE_BOOTSTRAP_PARTIAL_NAME = 'sonuvi-bootstrap-kit-v2.tar.partial';
-export const GATE_C_SFTP_UPGRADE_BOOTSTRAP_FINAL_NAME = 'sonuvi-bootstrap-kit-v2.tar';
-export const GATE_C_SFTP_UPGRADE_BOOTSTRAP_ACTIVATOR = 'sonuvi_sftp_bootstrap_activate_v2';
-export const GATE_C_SFTP_UPGRADE_BOOTSTRAP_ACTIVATOR_SHA256 = '9dddae0ec849cd583b14ca50852113847e5e6e30b4ebef35929cbb6fc2606bb1';
+export const GATE_C_SFTP_UPGRADE_BOOTSTRAP_FILE_PREFIX = 'sonuvi-bootstrap-kit-v2-';
+export const GATE_C_SFTP_UPGRADE_BOOTSTRAP_PARTIAL_SUFFIX = '.tar.partial';
+export const GATE_C_SFTP_UPGRADE_BOOTSTRAP_FINAL_SUFFIX = '.tar';
+export const GATE_C_SFTP_UPGRADE_BOOTSTRAP_ACTIVATOR = 'sonuvi_bootstrap_kit_replacement_v1';
+export const GATE_C_SFTP_UPGRADE_BOOTSTRAP_ACTIVATOR_SHA256 = '6535738585f8f14c4f0c8b43ee927c6a7195041c881ced9b5470693140bad88d';
 
 const STAGING_SEGMENTS = Object.freeze(GATE_C_SFTP_STAGING_RELATIVE_DIRECTORY.split('/'));
 const UPGRADE_STAGING_SEGMENTS = Object.freeze(GATE_C_SFTP_UPGRADE_STAGING_RELATIVE_DIRECTORY.split('/'));
@@ -65,12 +68,14 @@ function normalizeTransfer(input, { contract, segments, partialName, finalName, 
   const homeDirectory = normalizeGateCSftpHomeDirectory(input.homeDirectory);
   const bytes = byteCount(input.bytes);
   const digest = sha256(input.sha256, 'bootstrap kit digest');
+  const resolvedPartialName = typeof partialName === 'function' ? partialName(digest) : partialName;
+  const resolvedFinalName = typeof finalName === 'function' ? finalName(digest) : finalName;
   return Object.freeze({
     contract,
     homeDirectory,
     directory: joined(homeDirectory, segments),
-    partialPath: joined(homeDirectory, segments, partialName),
-    finalPath: joined(homeDirectory, segments, finalName),
+    partialPath: joined(homeDirectory, segments, resolvedPartialName),
+    finalPath: joined(homeDirectory, segments, resolvedFinalName),
     bytes,
     sha256: digest,
   });
@@ -94,8 +99,8 @@ export function normalizeGateCSftpUpgradeBootstrapTransfer(input = {}) {
   return normalizeTransfer(input, {
     contract: GATE_C_SFTP_UPGRADE_BOOTSTRAP_CONTRACT,
     segments: UPGRADE_STAGING_SEGMENTS,
-    partialName: GATE_C_SFTP_UPGRADE_BOOTSTRAP_PARTIAL_NAME,
-    finalName: GATE_C_SFTP_UPGRADE_BOOTSTRAP_FINAL_NAME,
+    partialName: (digest) => `${GATE_C_SFTP_UPGRADE_BOOTSTRAP_FILE_PREFIX}${digest}${GATE_C_SFTP_UPGRADE_BOOTSTRAP_PARTIAL_SUFFIX}`,
+    finalName: (digest) => `${GATE_C_SFTP_UPGRADE_BOOTSTRAP_FILE_PREFIX}${digest}${GATE_C_SFTP_UPGRADE_BOOTSTRAP_FINAL_SUFFIX}`,
     label: 'SFTP upgrade bootstrap transfer',
   });
 }
@@ -191,19 +196,10 @@ export function gateCSftpBootstrapActivationCommand({ sha256: digest, bytes } = 
 }
 
 /**
- * Existing-install bootstrap activation uses a separately pinned v2 capsule
- * and a disjoint SFTP directory. The remote command remains the established
- * fixed shell/stdin form; only the validated archive digest and byte count are
- * arguments. The client must verify the capsule bytes against
- * GATE_C_SFTP_UPGRADE_BOOTSTRAP_ACTIVATOR_SHA256 before sending them.
+ * Existing-install bootstrap replacement uses the fixed application-owned
+ * v2 capsule and the signed, target/release-bound operation request. The
+ * capsule bytes must match the reviewed digest before send.
  */
-export function gateCSftpUpgradeBootstrapActivationCommand({ sha256: digest, bytes } = {}, { requiresPassword = false } = {}) {
-  const transfer = normalizeGateCSftpUpgradeBootstrapTransfer({
-    contract: GATE_C_SFTP_UPGRADE_BOOTSTRAP_CONTRACT,
-    homeDirectory: '/home/bootstrap-contract-only',
-    sha256: digest,
-    bytes,
-  });
-  const sudo = requiresPassword ? "/usr/bin/sudo -S -k -p ''" : '/usr/bin/sudo -n';
-  return `${sudo} /bin/sh -s -- ${transfer.sha256} ${transfer.bytes}`;
+export function gateCSftpUpgradeBootstrapActivationCommand(request, { requiresPassword = true } = {}) {
+  return gateCBootstrapKitReplacementCommand(request, { requiresPassword });
 }

@@ -85,30 +85,42 @@ or server-side URL fetch is introduced.
    The root-side transaction independently checks the actual `current` pointer
    against the submitted previous ID. Verify the v2 signed release envelope
    and require `bootstrap.version: 2`.
-2. Transfer the exact signed bootstrap archive over SFTP to
-   `~/.local/share/sonuvi-bootstrap-v2/sonuvi-bootstrap-kit-v2.tar`, using the
-   existing no-resume temporary/final-file rules and the envelope's digest.
-3. Invoke the fixed v2 capsule with only its validated digest and byte count:
-   `/usr/bin/sudo -S -k -p '' /bin/sh -s -- <sha256> <bytes>`.
-   The capsule source is `scripts/sonuvi-sftp-bootstrap-activate-v2.sh`; it
-   accepts no remote path or command. It requires an existing Gate C install,
-   an existing root-owned system trust anchor, and byte-identical v2-kit trust
-   material. It never provisions/changes the trust anchor or changes services.
-4. Stage the immutable archive via
-   `/usr/bin/sudo -S -k -p '' -- /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v2/scripts/sonuvi-release-stage.mjs`.
+2. Transfer the exact signed v2 bootstrap archive over SFTP to
+   `~/.local/share/sonuvi-bootstrap-v2/sonuvi-bootstrap-kit-v2-<verified-lowercase-SHA256>.tar`,
+   using the existing no-resume temporary/final-file rules. Never overwrite a
+   different digest. See the
+   [bootstrap replacement contract](sonuvi-v2-bootstrap-kit-replacement.md).
+3. Invoke the fixed replacement capsule with the operation ID, verified target
+   identity, observed current Server release ID, current kit digest, approved
+   replacement release ID, verified new kit digest/size, and base64url signed
+   envelope. The capsule source is
+   `scripts/sonuvi-sftp-bootstrap-activate-v2.sh`; it accepts no remote path,
+   helper path, or arbitrary command. It independently verifies the signed
+   envelope and exact candidate kit against the installed root trust anchor,
+   then atomically exchanges the root kit while preserving the previous one.
+   The first transition from a historical helper requires a verified exclusive
+   maintenance window. It does not change the Server release or trust anchor.
+4. Stage the immutable archive via the fixed `sonuvi-release-stage.mjs`
+   helper while holding
+   `/var/lib/sonuvi-bootstrap/bootstrap-admission.lock` before Node loads that
+   mutable privileged helper path:
+   `/usr/bin/sudo -S -k -p '' -- /usr/bin/flock -n /var/lib/sonuvi-bootstrap/bootstrap-admission.lock /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v2/scripts/sonuvi-release-stage.mjs`.
    Preserve the existing stage framing: first sudo-password stdin line, then
    the fixed JSON header and signed archive stream. The helper validates the
    envelope, attempt/target binding, archive length/digest and release
    manifest before marking the attempt `release_staged`.
-5. Invoke upgrade activation with the same interactive sudo stdin framing and
-   one bounded JSON request on the helper's remaining stdin:
-   `/usr/bin/sudo -S -k -p '' -- /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v2/scripts/sonuvi-existing-install-upgrade.mjs`.
+5. Invoke upgrade activation with the same admission lock and interactive sudo stdin framing:
+   `/usr/bin/sudo -S -k -p '' -- /usr/bin/flock -n /var/lib/sonuvi-bootstrap/bootstrap-admission.lock /usr/bin/node /var/lib/sonuvi-bootstrap/bootstrap-kit-v2/scripts/sonuvi-existing-install-upgrade.mjs`.
+   The lock is acquired before `/usr/bin/node` opens the replaceable helper.
+   The request still uses the same interactive sudo stdin framing and
+   one bounded JSON request on the helper's remaining stdin. The JSON body is
+   not appended to or interpolated into the command line.
    The request is exactly
    `{"operation":"activate_existing_install","attemptId":"<bound attempt>","targetIdentity":"<verified target>","expectedPreviousReleaseId":"<observed current>","envelope":<verified envelope>}`.
    The helper accepts no paths, service names, commands, URLs, or arbitrary
    release IDs. It independently re-verifies the envelope and current release.
 6. For interrupted activation only, after reconnecting and verifying the same
-   target identity, invoke the same fixed Node helper with
+   target identity, invoke the same fixed Node helper under the admission lock with
    `{"operation":"recover_interrupted_upgrade","targetIdentity":"<verified target>"}`.
    It uses the durable upgrade journal and saved unit/checkpoint backup; it
    does not rerun candidate activation.

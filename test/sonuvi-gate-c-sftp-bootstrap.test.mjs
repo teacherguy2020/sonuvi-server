@@ -19,6 +19,17 @@ import {
 } from '../src/lib/sonuvi-gate-c-sftp-bootstrap.mjs';
 
 const sha256 = 'a'.repeat(64);
+const replacementRequest = Object.freeze({
+  operation: 'replace_bootstrap_kit',
+  operationId: 'bkr_11111111-1111-4111-8111-111111111111',
+  targetIdentity: `sonuvi-target-v1-${'b'.repeat(64)}`,
+  expectedServerReleaseId: `sonuvi-${'c'.repeat(64)}`,
+  expectedPreviousBootstrapKitSHA256: 'd'.repeat(64),
+  replacementReleaseId: `sonuvi-${'e'.repeat(64)}`,
+  replacementKitSHA256: sha256,
+  replacementKitBytes: 238_592,
+  envelope: { contract: 'sonuvi.gate-c-release-envelope.v1', keyId: 'fixture-key', payload: {}, signature: 'signature' },
+});
 
 function plan() {
   return normalizeGateCSftpBootstrapTransfer({
@@ -90,8 +101,16 @@ test('Gate C SFTP bootstrap activation capsule has a pinned source identity', as
 test('Gate C upgrade SFTP contract uses only its disjoint fixed v2 staging paths', () => {
   const value = upgradePlan();
   assert.equal(value.directory, '/home/sonuvi-test/.local/share/sonuvi-bootstrap-v2');
-  assert.equal(value.partialPath, '/home/sonuvi-test/.local/share/sonuvi-bootstrap-v2/sonuvi-bootstrap-kit-v2.tar.partial');
-  assert.equal(value.finalPath, '/home/sonuvi-test/.local/share/sonuvi-bootstrap-v2/sonuvi-bootstrap-kit-v2.tar');
+  assert.equal(value.partialPath, `/home/sonuvi-test/.local/share/sonuvi-bootstrap-v2/sonuvi-bootstrap-kit-v2-${sha256}.tar.partial`);
+  assert.equal(value.finalPath, `/home/sonuvi-test/.local/share/sonuvi-bootstrap-v2/sonuvi-bootstrap-kit-v2-${sha256}.tar`);
+  const different = normalizeGateCSftpUpgradeBootstrapTransfer({
+    contract: GATE_C_SFTP_UPGRADE_BOOTSTRAP_CONTRACT,
+    homeDirectory: value.homeDirectory,
+    bytes: value.bytes,
+    sha256: 'f'.repeat(64),
+  });
+  assert.notEqual(different.finalPath, value.finalPath);
+  assert.notEqual(different.partialPath, value.partialPath);
   assert.throws(() => assertGateCSftpUpgradeBootstrapEntry({
     plan: value, expectedUID: 1000, path: plan().finalPath, kind: 'regular', mode: 0o600, uid: 1000, bytes: value.bytes,
   }), /allowlisted/);
@@ -122,16 +141,18 @@ test('Gate C upgrade SFTP validates exact owner, type, permissions, and transfer
   }), /final size/);
 });
 
-test('Gate C upgrade capsule command remains fixed and separately pinned', async () => {
+test('Gate C upgrade capsule command binds target, releases, kit digest, signed envelope, and operation identity', async () => {
   assert.equal(
-    gateCSftpUpgradeBootstrapActivationCommand({ sha256, bytes: 131_072 }),
-    `/usr/bin/sudo -n /bin/sh -s -- ${sha256} 131072`,
+    gateCSftpUpgradeBootstrapActivationCommand(replacementRequest),
+    `/usr/bin/sudo -S -k -p '' -- /bin/sh -s -- ${replacementRequest.operation} ${replacementRequest.operationId} ${replacementRequest.targetIdentity} ${replacementRequest.expectedServerReleaseId} ${replacementRequest.expectedPreviousBootstrapKitSHA256} ${replacementRequest.replacementReleaseId} ${sha256} 238592 ${Buffer.from(JSON.stringify(replacementRequest.envelope)).toString('base64url')}`,
   );
   assert.equal(
-    gateCSftpUpgradeBootstrapActivationCommand({ sha256, bytes: 131_072 }, { requiresPassword: true }),
-    `/usr/bin/sudo -S -k -p '' /bin/sh -s -- ${sha256} 131072`,
+    gateCSftpUpgradeBootstrapActivationCommand(replacementRequest, { requiresPassword: false }),
+    `/usr/bin/sudo -n -- /bin/sh -s -- ${replacementRequest.operation} ${replacementRequest.operationId} ${replacementRequest.targetIdentity} ${replacementRequest.expectedServerReleaseId} ${replacementRequest.expectedPreviousBootstrapKitSHA256} ${replacementRequest.replacementReleaseId} ${sha256} 238592 ${Buffer.from(JSON.stringify(replacementRequest.envelope)).toString('base64url')}`,
   );
-  assert.throws(() => gateCSftpUpgradeBootstrapActivationCommand({ sha256: 'x;id', bytes: 1 }), /digest/);
+  assert.throws(() => gateCSftpUpgradeBootstrapActivationCommand({ ...replacementRequest, replacementKitSHA256: 'x;id' }), /digest/);
+  assert.throws(() => gateCSftpUpgradeBootstrapActivationCommand({ ...replacementRequest, targetIdentity: 'bad-target' }), /target identity/);
+  assert.throws(() => gateCSftpUpgradeBootstrapActivationCommand({ ...replacementRequest, operationId: 'x;id' }), /operation ID/);
   const source = await fs.readFile(path.resolve('scripts/sonuvi-sftp-bootstrap-activate-v2.sh'));
   assert.equal(crypto.createHash('sha256').update(source).digest('hex'), GATE_C_SFTP_UPGRADE_BOOTSTRAP_ACTIVATOR_SHA256);
 });
