@@ -92,6 +92,19 @@ test('bootstrap admission rejection uses one bounded, operation-bound recovery d
   assert.throws(() => normalizeGateCBootstrapAdmissionResponse(response, { operation: 'recoverExisting' }), /binding/);
 });
 
+test('fixed inspection binds the prior kit identity to the target and expected installed Server without a helper', () => {
+  const expected = { operation: 'inspect_bootstrap_kit', operationId: request.operationId,
+    targetIdentity: request.targetIdentity, expectedServerReleaseId: request.expectedServerReleaseId };
+  assert.equal(gateCBootstrapKitReplacementCommand(expected),
+    `/usr/bin/sudo -S -k -p '' -- /bin/sh -s -- inspect_bootstrap_kit ${expected.operationId} ${expected.targetIdentity} ${expected.expectedServerReleaseId}`);
+  const response = { ...expected, contract: GATE_C_BOOTSTRAP_KIT_REPLACEMENT_CONTRACT, ok: true, state: 'inspected',
+    activeBootstrapKitSHA256: request.expectedPreviousBootstrapKitSHA256, activeBootstrapReleaseId: request.replacementReleaseId };
+  assert.deepEqual(normalizeGateCBootstrapKitReplacementResponse(response, expected), response);
+  assert.throws(() => normalizeGateCBootstrapKitReplacementResponse({ ...response, expectedServerReleaseId: request.replacementReleaseId }, expected), /binding/);
+  assert.throws(() => normalizeGateCBootstrapKitReplacementResponse({ ...response, activeBootstrapKitSHA256: '../unsafe' }, expected), /digest/);
+  assert.throws(() => normalizeGateCBootstrapKitReplacementResponse({ ...response, arbitrary: true }, expected), /inspection/);
+});
+
 test('replacement response distinguishes no-recovery from bound transaction outcomes', () => {
   const noRecovery = {
     contract: GATE_C_BOOTSTRAP_KIT_REPLACEMENT_CONTRACT,

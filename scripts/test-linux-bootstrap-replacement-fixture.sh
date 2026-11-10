@@ -76,4 +76,8 @@ while [ "$attempt" -lt 30 ]; do
 done
 [ "$ready" -eq 1 ] || { echo 'Disposable Debian systemd fixture did not become ready.' >&2; exit 70; }
 
-docker exec --workdir /sonuvi "$name" node test/fixtures/systemd-upgrade/bootstrap-replacement-integration.mjs
+recovery_repetitions=${SONUVI_BOOTSTRAP_RECOVERY_REPETITIONS:-1}
+case "$recovery_repetitions" in 1|2|3|4|5) ;; *) echo 'Recovery repetitions must be 1 through 5.' >&2; exit 64 ;; esac
+trace_recovery=${SONUVI_BOOTSTRAP_TRACE_RECOVERY:-0}
+case "$trace_recovery" in 0|1) ;; *) echo 'Recovery tracing must be 0 or 1.' >&2; exit 64 ;; esac
+docker exec --env "SONUVI_BOOTSTRAP_RECOVERY_REPETITIONS=$recovery_repetitions" --env "SONUVI_BOOTSTRAP_TRACE_RECOVERY=$trace_recovery" --workdir /sonuvi "$name" node test/fixtures/systemd-upgrade/bootstrap-replacement-integration.mjs

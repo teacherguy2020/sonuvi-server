@@ -13,7 +13,7 @@ request_target_identity="${3:-}"
 fail() {
   code="$1"
   case "$operation" in
-    replace_bootstrap_kit|recover_bootstrap_kit_replacement|rollback_bootstrap_kit) response_operation="$operation" ;;
+    inspect_bootstrap_kit|replace_bootstrap_kit|recover_bootstrap_kit_replacement|rollback_bootstrap_kit) response_operation="$operation" ;;
     *) response_operation=invalid ;;
   esac
   response_operation_id='bkr_00000000-0000-4000-8000-000000000000'
@@ -41,6 +41,7 @@ fail() {
 }
 
 case "$operation" in
+  inspect_bootstrap_kit) [ "$#" -eq 4 ] || fail invalid_arguments 64 ;;
   replace_bootstrap_kit) [ "$#" -eq 9 ] || fail invalid_arguments 64 ;;
   recover_bootstrap_kit_replacement) [ "$#" -eq 3 ] || fail invalid_arguments 64 ;;
   rollback_bootstrap_kit) [ "$#" -eq 5 ] || fail invalid_arguments 64 ;;
@@ -74,7 +75,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 const CONTRACT = 'sonuvi.gate-c-bootstrap-kit-replacement.v1';
-const OPERATIONS = new Set(['replace_bootstrap_kit', 'recover_bootstrap_kit_replacement', 'rollback_bootstrap_kit']);
+const OPERATIONS = new Set(['inspect_bootstrap_kit', 'replace_bootstrap_kit', 'recover_bootstrap_kit_replacement', 'rollback_bootstrap_kit']);
 const FAILURE_CODES = new Set([
   'atomic_exchange_unavailable', 'bootstrap_admission_lock_invalid', 'bootstrap_admission_lock_unavailable', 'bootstrap_replacement_failed', 'bootstrap_root_invalid', 'bootstrap_root_permissions_invalid', 'current_release_mismatch', 'exclusive_maintenance_required', 'invalid_arguments',
   'operation_busy', 'previous_bootstrap_mismatch', 'replacement_copy_failed', 'replacement_envelope_invalid', 'replacement_kit_archive_invalid',
@@ -1018,7 +1019,7 @@ async function writeInitialJournalRecovery(operationId, targetIdentity, active, 
     temporaryJournalSHA256: initial.sha256,
     temporaryJournalKind: initial.kind,
     state: 'aborted_before_promotion',
-    recoveredAt: new Date().toISOString(),
+    recoveredAt: new Date(Math.max(Date.now(), Date.parse(intent.value.createdAt))).toISOString(),
   };
   const temporary = path.join(REPLACEMENTS, `${INITIAL_JOURNAL_RECOVERY_PREFIX}${operationId}-${crypto.randomUUID()}.tmp`);
   const handle = await fs.open(temporary, 'wx', 0o600).catch(() => fail('replacement_recovery_required'));
@@ -1071,7 +1072,7 @@ async function promoteInitialJournal(operationRoot, directory, initial, intent) 
   return initial.journal;
 }
 
-async function readJournal(operationId) {
+async function readJournal(operationId, { reconcileInitial = true } = {}) {
   const operationRoot = path.join(REPLACEMENTS, operationId);
   const directory = await fs.lstat(operationRoot).catch((error) => error?.code === 'ENOENT' ? null : fail('replacement_recovery_required'));
   if (directory && (!directory.isDirectory() || directory.isSymbolicLink() || !ownerIsRoot(directory) || modeOf(directory) !== 0o700)) fail('replacement_recovery_required');
@@ -1090,11 +1091,13 @@ async function readJournal(operationId) {
       return { operationRoot, journal: null };
     }
     if (!initial.journal) return { operationRoot, journal: null, initialTemporary: initial };
+    if (!reconcileInitial) fail('replacement_recovery_required');
     return { operationRoot, journal: await promoteInitialJournal(operationRoot, directory, initial, intent) };
   }
   if (!directory) fail('replacement_recovery_required');
   if (!stat) {
     if (!initial?.journal) fail('replacement_recovery_required');
+    if (!reconcileInitial) fail('replacement_recovery_required');
     return { operationRoot, journal: await promoteInitialJournal(operationRoot, directory, initial, intent) };
   }
   if (initial || !stat.isFile() || stat.isSymbolicLink() || !ownerIsRoot(stat) || modeOf(stat) !== 0o600 || stat.nlink !== 1) {
@@ -1103,36 +1106,44 @@ async function readJournal(operationId) {
   let value;
   try { value = JSON.parse(await fs.readFile(journalPath, 'utf8')); } catch { fail('replacement_recovery_required'); }
   const journal = validateJournal(value, operationId);
-  if (intent) await discardInitialJournalIntent(intent, journal);
+  if (intent) {
+    if (!reconcileInitial) fail('replacement_recovery_required');
+    await discardInitialJournalIntent(intent, journal);
+  }
   return { operationRoot, journal };
 }
 
-function terminalJournalRecord(journal) {
-  if (!['aborted_before_promotion', 'committed', 'rolled_back'].includes(journal.state)
-    || Date.parse(journal.updatedAt) < Date.parse(journal.createdAt)) fail('replacement_recovery_required');
+// BEGIN FIXED HISTORY VALIDATOR (byte-parity tested with the client guard)
+function validateBootstrapHistory(records, active, pendingOperationId = null) {
+  const reject = () => { throw new Error('replacement_recovery_required'); };
+  const sameKit = (left, right) => left && right && left.marker === right.marker
+    && left.manifest.releaseId === right.manifest.releaseId;
+  const ordered = [...records].sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt));
+  const ids = new Set();
+  let previous = null;
+  for (const record of ordered) {
+    const start = Date.parse(record.createdAt);
+    const end = Date.parse(record.updatedAt);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end < start || !record.before || !record.after
+      || ids.has(record.operationId)) reject();
+    ids.add(record.operationId);
+    if (previous && (start <= Date.parse(previous.updatedAt)
+      || record.targetIdentity !== previous.targetIdentity || !sameKit(previous.after, record.before))) reject();
+    if (record.pending && (record.operationId !== pendingOperationId || record !== ordered.at(-1))) reject();
+    previous = record;
+  }
+  if (previous && !sameKit(previous.after, active)) reject();
   return {
-    at: journal.updatedAt,
-    expectedActive: journal.state === 'committed' ? journal.replacementKitSHA256 : journal.previousBootstrapKitSHA256,
+    records: ordered,
+    latest: previous,
+    // Allocate the next generation under the common lock, including a clock
+    // rollback or two operations within one clock tick. Never rewrite history.
+    nextCreatedAt: new Date(Math.max(Date.now(), previous ? Date.parse(previous.updatedAt) + 1 : 0)).toISOString(),
   };
 }
+// END FIXED HISTORY VALIDATOR
 
-function terminalInitialJournalRecord(recovery) {
-  return {
-    at: recovery.recoveredAt,
-    expectedActive: recovery.activeBootstrapKitSHA256,
-    expectedActiveRelease: recovery.activeBootstrapReleaseId,
-  };
-}
-
-function assertTerminalHistory(records, active) {
-  if (!active || records.length === 0) return;
-  records.sort((left, right) => Date.parse(right.at) - Date.parse(left.at));
-  if (records.length > 1 && Date.parse(records[0].at) === Date.parse(records[1].at)) fail('replacement_recovery_required');
-  if (records[0].expectedActive !== active.marker) fail('replacement_recovery_required');
-  if (records[0].expectedActiveRelease && records[0].expectedActiveRelease !== active.manifest.releaseId) fail('replacement_recovery_required');
-}
-
-async function unresolvedOperations({ allowInitialOperationId = null, active = null } = {}) {
+async function unresolvedOperations({ allowInitialOperationId = null, allowOperationId = allowInitialOperationId, active = null } = {}) {
   if (allowInitialOperationId !== null && !validId(allowInitialOperationId)) fail('replacement_recovery_required');
   const entries = await fs.readdir(REPLACEMENTS, { withFileTypes: true }).catch((error) => error?.code === 'ENOENT' ? [] : fail('replacement_recovery_required'));
   if (entries.length > 128) fail('replacement_recovery_required');
@@ -1163,22 +1174,69 @@ async function unresolvedOperations({ allowInitialOperationId = null, active = n
     fail('replacement_recovery_required');
   }
   const records = [];
+  const currents = [];
+  const kits = new Map([[active.marker, active]]);
+  const { anchorBytes } = await anchorContext();
+  const addKit = (kit) => {
+    if (kits.has(kit.marker) && kits.get(kit.marker).manifest.releaseId !== kit.manifest.releaseId) fail('replacement_recovery_required');
+    kits.set(kit.marker, kit);
+  };
   for (const operationId of operationIds) {
-    const current = await readJournal(operationId);
+    const current = await readJournal(operationId, { reconcileInitial: false });
+    currents.push({ operationId, ...current });
+    const journal = current.journal;
+    if (!journal) continue;
+    const terminal = ['aborted_before_promotion', 'committed', 'rolled_back'].includes(journal.state);
+    if (!terminal && operationId !== allowOperationId) fail('replacement_recovery_required');
+    const previous = path.join(current.operationRoot, 'previous');
+    if (journal.state === 'committed' || journal.state === 'rolled_back') {
+      const expected = journal.state === 'committed' ? journal.previousBootstrapKitSHA256 : journal.replacementKitSHA256;
+      addKit(await assertRootTree(previous, expected, anchorBytes));
+    } else if (journal.state === 'aborted_before_promotion') {
+      if (await fs.lstat(previous).catch((error) => error?.code === 'ENOENT' ? null : fail('replacement_recovery_required'))) fail('replacement_recovery_required');
+    } else {
+      // An exchange can move its original kit to candidate or previous.
+      // Authenticate complete trees, never markers or candidate validator code.
+      for (const directory of [previous, path.join(current.operationRoot, 'candidate')]) {
+        const stat = await fs.lstat(directory).catch((error) => error?.code === 'ENOENT' ? null : fail('replacement_recovery_required'));
+        if (!stat) continue;
+        if (!stat.isDirectory() || stat.isSymbolicLink() || !ownerIsRoot(stat) || modeOf(stat) !== 0o700) fail('replacement_recovery_required');
+        const marker = await fs.readFile(path.join(directory, '.sonuvi-bootstrap-kit-v2.sha256'), 'utf8').then((value) => value.trim()).catch(() => null);
+        if (marker === journal.previousBootstrapKitSHA256 || directory === previous) {
+          addKit(await assertRootTree(directory, marker, anchorBytes));
+        }
+      }
+    }
+  }
+  for (const current of currents) {
+    const { operationId } = current;
     if (current.initialRecovery) {
-      const evidence = await assertInitialJournalRecoveryEvidence(operationId, active);
-      records.push(terminalInitialJournalRecord(evidence.recovery));
+      const original = kits.get(current.initialRecovery.activeBootstrapKitSHA256);
+      const evidence = await assertInitialJournalRecoveryEvidence(operationId, original);
+      records.push({ ...evidence.recovery, createdAt: evidence.intent.value.createdAt,
+        updatedAt: evidence.recovery.recoveredAt, before: original, after: original });
       continue;
     }
     if (current.initialTemporary) {
-      if (operationId !== allowInitialOperationId) fail('replacement_recovery_required');
-      if (active && current.initialTemporary.intent.value.previousBootstrapKitSHA256 !== active.marker) fail('replacement_recovery_required');
+      const intent = current.initialTemporary.intent.value;
+      if (operationId !== allowOperationId || intent.previousBootstrapKitSHA256 !== active.marker) fail('replacement_recovery_required');
+      records.push({ ...intent, updatedAt: intent.createdAt, before: active, after: active, pending: true });
       continue;
     }
     if (!current.journal) fail('replacement_recovery_required');
-    records.push(terminalJournalRecord(current.journal));
+    const journal = current.journal;
+    const before = kits.get(journal.previousBootstrapKitSHA256);
+    const replacement = kits.get(journal.replacementKitSHA256);
+    const terminal = ['aborted_before_promotion', 'committed', 'rolled_back'].includes(journal.state);
+    if (!before || ((journal.state === 'committed' || journal.state === 'rolled_back')
+      && (!replacement || replacement.manifest.releaseId !== journal.replacementReleaseId))) fail('replacement_recovery_required');
+    if (!terminal && (active.marker !== before.marker && (active.marker !== journal.replacementKitSHA256
+      || active.manifest.releaseId !== journal.replacementReleaseId))) fail('replacement_recovery_required');
+    records.push({ ...journal, before, after: terminal ? (journal.state === 'committed' ? replacement : before) : active, pending: !terminal });
   }
-  assertTerminalHistory(records, active);
+  let history;
+  try { history = validateBootstrapHistory(records, active, allowOperationId); } catch { fail('replacement_recovery_required'); }
+  return { ...history, kits };
 }
 async function ensureReplacementRoot() {
   const stat = await fs.lstat(REPLACEMENTS).catch((error) => error?.code === 'ENOENT' ? null : fail('replacement_recovery_required'));
@@ -1235,7 +1293,7 @@ function verifySignedCandidate(request, anchors) {
 }
 
 function makeJournal(request, state, createdAt = new Date().toISOString()) {
-  const updatedAt = new Date().toISOString();
+  const updatedAt = new Date(Math.max(Date.now(), Date.parse(createdAt))).toISOString();
   return {
     contract: CONTRACT,
     operationId: request.operationId,
@@ -1253,7 +1311,7 @@ function makeJournal(request, state, createdAt = new Date().toISOString()) {
 }
 
 async function transition(operationRoot, journal, state) {
-  const updated = { ...journal, state, updatedAt: new Date().toISOString() };
+  const updated = { ...journal, state, updatedAt: new Date(Math.max(Date.now(), Date.parse(journal.updatedAt) + 1)).toISOString() };
   await writeJournal(operationRoot, updated);
   return updated;
 }
@@ -1350,7 +1408,7 @@ async function replaceKit(request) {
   const { anchorBytes, anchors } = await anchorContext();
   phase('recovery_scan');
   const active = await assertRootTree(ACTIVE, null, anchorBytes);
-  await unresolvedOperations({ active });
+  const history = await unresolvedOperations({ active });
   phase('server_recovery');
   await assertNoServerReleaseRecovery();
   // The historical fixed helpers predate this lock. Refuse a first transition
@@ -1374,7 +1432,7 @@ async function replaceKit(request) {
   if (candidateStat.size !== request.replacementKitBytes) fail('replacement_kit_size_invalid');
   if (request.replacementKitSHA256 !== verified.metadata.bootstrap.sha256) fail('replacement_kit_digest_invalid');
 
-  const created = new Date().toISOString();
+  const created = history.nextCreatedAt;
   let journal = makeJournal(request, 'preparing', created);
   try { await writeInitialJournal(operationRoot, journal); } catch (error) {
     if (error instanceof GateError) throw error;
@@ -1434,7 +1492,8 @@ async function recoverReplacement(opId, targetIdentity) {
     phase('trust_anchor');
     const { anchorBytes } = await anchorContext();
     const active = await assertRootTree(ACTIVE, null, anchorBytes);
-    const evidence = await assertInitialJournalRecoveryEvidence(opId, active);
+    const history = await unresolvedOperations({ active });
+    const evidence = await assertInitialJournalRecoveryEvidence(opId, history.kits.get(current.initialRecovery.activeBootstrapKitSHA256));
     if (evidence.recovery.targetIdentity !== targetIdentity) fail('replacement_target_mismatch');
     phase('recovery_scan');
     await unresolvedOperations({ active });
@@ -1478,6 +1537,8 @@ async function recoverReplacement(opId, targetIdentity) {
   }
   if (journal.targetIdentity !== targetIdentity) fail('replacement_target_mismatch');
   const { anchorBytes } = await anchorContext();
+  const active = await assertRootTree(ACTIVE, null, anchorBytes);
+  await unresolvedOperations({ active, allowOperationId: opId });
   const candidate = path.join(operationRoot, 'candidate');
   const previous = path.join(operationRoot, 'previous');
   const activeMarker = await fs.readFile(path.join(ACTIVE, '.sonuvi-bootstrap-kit-v2.sha256'), 'utf8').then((value) => value.trim()).catch(() => '');
@@ -1568,6 +1629,9 @@ async function rollbackReplacement(opId, targetIdentity, expectedReplacement, ex
     fail('replacement_operation_conflict');
   }
   const { anchorBytes } = await anchorContext();
+  const active = await assertRootTree(ACTIVE, null, anchorBytes);
+  const history = await unresolvedOperations({ active });
+  if (history.latest?.operationId !== opId) fail('replacement_operation_conflict');
   const previous = path.join(operationRoot, 'previous');
   if (journal.state === 'rolled_back') {
     await assertMarker(ACTIVE, expectedPrevious);
@@ -1579,7 +1643,7 @@ async function rollbackReplacement(opId, targetIdentity, expectedReplacement, ex
   await assertMarker(ACTIVE, expectedReplacement);
   await assertMarker(previous, expectedPrevious);
   journal.state = 'rollback_prepared';
-  journal.updatedAt = new Date().toISOString();
+  journal.updatedAt = new Date(Math.max(Date.now(), Date.parse(journal.updatedAt) + 1)).toISOString();
   await writeJournal(operationRoot, journal);
   await exchangeDirectories(ACTIVE, previous);
   await assertMarker(ACTIVE, expectedPrevious);
@@ -1599,6 +1663,16 @@ async function main() {
   await requireEntry(ROOT, { kind: 'directory', mode: 0o700 });
   phase('replacement_root');
   await ensureReplacementRoot();
+  if (operation === 'inspect_bootstrap_kit') {
+    if (argv.length !== 4 || !validId(argv[1]) || !validRelease(argv[3])) fail('invalid_arguments');
+    await currentRelease(argv[3]);
+    await assertNoServerReleaseRecovery();
+    const { anchorBytes } = await anchorContext();
+    const active = await assertRootTree(ACTIVE, null, anchorBytes);
+    await unresolvedOperations({ active });
+    return { contract: CONTRACT, operation, ok: true, state: 'inspected', operationId: argv[1], targetIdentity: target,
+      expectedServerReleaseId: argv[3], activeBootstrapKitSHA256: active.marker, activeBootstrapReleaseId: active.manifest.releaseId };
+  }
   if (operation === 'replace_bootstrap_kit') {
     const request = parseReplacementArgs();
     const { journal } = await readJournal(request.operationId);
@@ -1630,6 +1704,10 @@ async function main() {
 
 try {
   const result = await main();
+  // No success or idempotence shortcut may ignore retained generations.
+  const { anchorBytes } = await anchorContext();
+  const active = await assertRootTree(ACTIVE, null, anchorBytes);
+  await unresolvedOperations({ active });
   process.stdout.write(`${JSON.stringify(result)}\n`);
 } catch (error) {
   const code = FAILURE_CODES.has(error?.code) ? error.code : (PHASE_FAILURE_CODES[operationPhase] || 'bootstrap_replacement_failed');

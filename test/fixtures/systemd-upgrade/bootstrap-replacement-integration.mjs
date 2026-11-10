@@ -15,6 +15,7 @@ import { verifySignedGateCReleaseMetadata } from '../../../src/lib/sonuvi-gate-c
 import { readGateCTargetIdentity } from '../../../src/lib/sonuvi-gate-c-target-preflight.mjs';
 import {
   GATE_C_BOOTSTRAP_ADMISSION_OPERATIONS,
+  gateCBootstrapAdmissionCommand,
   gateCBootstrapAdmissionGuardProgram,
 } from '../../../src/lib/sonuvi-gate-c-bootstrap-replacement-contract.mjs';
 
@@ -117,6 +118,7 @@ function replacementRequest(operationId, overrides = {}) {
 }
 
 function capsuleArgs(operation, request) {
+  if (operation === 'inspect_bootstrap_kit') return [operation, request.operationId, request.targetIdentity, request.expectedServerReleaseId];
   if (operation === 'replace_bootstrap_kit') {
     return [
       operation,
@@ -179,13 +181,37 @@ async function promotedKitHelperPath(script) {
   return helper;
 }
 
-// The isolated fixture is already root. Its argv after sudo is the documented
-// fixed command: flock -n <admission lock> node <promoted helper>.
+function fixedGuardedCommand(operation) {
+  // Exercise the production builder byte-for-byte. The disposable fixture is
+  // already root: remove only its fixed sudo prefix, never the admission guard.
+  const command = gateCBootstrapAdmissionCommand(operation, { requiresPassword: false });
+  const prefix = '/usr/bin/sudo -n -- ';
+  assert.equal(command.startsWith(prefix), true);
+  return command.slice(prefix.length);
+}
+
+async function promotedHelperCommand(script, input) {
+  await promotedKitHelperPath(script);
+  if (script === 'sonuvi-release-stage.mjs') return fixedGuardedCommand('stageRelease');
+  assert.equal(script, 'sonuvi-existing-install-upgrade.mjs');
+  let operation;
+  try { operation = JSON.parse(Buffer.from(input).toString('utf8')).operation; } catch {}
+  return fixedGuardedCommand(operation === 'recover_interrupted_upgrade' ? 'recoverExisting' : 'activateExisting');
+}
+
 async function runPromotedKitHelper(script, input, { requireResponse = true } = {}) {
-  const helper = await promotedKitHelperPath(script);
+  const command = await promotedHelperCommand(script, input);
+  const environment = capsuleEnvironment();
+  if (process.env.SONUVI_BOOTSTRAP_TRACE_RECOVERY === '1' && script === 'sonuvi-existing-install-upgrade.mjs') {
+    let operation;
+    try { operation = JSON.parse(input.toString()).operation; } catch { /* malformed-input tests stay unchanged */ }
+    if (operation === 'recover_interrupted_upgrade') {
+      environment.NODE_OPTIONS = '--require /sonuvi/test/fixtures/systemd-upgrade/capture-upgrade-errors.cjs';
+    }
+  }
   const result = await new Promise((resolve, reject) => {
-    const child = spawn('/usr/bin/flock', ['-n', path.join(BOOTSTRAP_ROOT, 'bootstrap-admission.lock'), '/usr/bin/node', helper], {
-      env: capsuleEnvironment(),
+    const child = spawn('/bin/sh', ['-c', `exec ${command}`], {
+      env: environment,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stdout = '';
@@ -367,14 +393,9 @@ async function runAdmissionGuard(operation) {
 }
 
 async function runPromotedAdmissionGuard(operation) {
-  const lock = await ensureAdmissionLock();
-  const program = gateCBootstrapAdmissionGuardProgram({
-    bootstrapRoot: BOOTSTRAP_ROOT,
-    expectedUID: 0,
-    expectedGID: 0,
-    nodePath: '/usr/bin/node',
-  });
-  const result = run('/usr/bin/flock', ['-n', lock, '/usr/bin/node', '--input-type=module', '--eval', program, operation], { env: capsuleEnvironment() });
+  await ensureAdmissionLock();
+  const key = Object.keys(GATE_C_BOOTSTRAP_ADMISSION_OPERATIONS).find((key) => GATE_C_BOOTSTRAP_ADMISSION_OPERATIONS[key] === operation);
+  const result = run('/bin/sh', ['-c', `exec ${fixedGuardedCommand(key)}`], { env: capsuleEnvironment() });
   return { ...result, response: typedJsonResponse(result, `promoted admission ${operation}`) };
 }
 
@@ -859,6 +880,23 @@ async function recoverInterruptedServerRelease() {
   return invokePromotedExistingInstall({ operation: 'recover_interrupted_upgrade', targetIdentity });
 }
 
+async function promotedFailureDiagnostic(result) {
+  if (result.status === 0) return '';
+  const journal = await readUpgradeState().catch(() => ({}));
+  const services = run('/usr/bin/systemctl', ['show', '--no-pager',
+    '--property=ActiveState,SubState,MainPID,Result,ExecMainCode,ExecMainStatus,NRestarts,ExecStart,ExecStartPre,Environment,Before,After,Requires,Wants,EnvironmentFiles', 'sonuvi-api.service', 'sonuvi-web.service']);
+  // The fixture installs a deterministic machine-id after container boot;
+  // include journald's boot-time identity directory, not only the current ID.
+  const logs = run('/usr/bin/journalctl', ['--directory=/var/log/journal', '--no-pager', '-n', '50', '-u', 'sonuvi-api.service', '-u', 'sonuvi-web.service']);
+  const backup = /^[a-f0-9-]{36}$/.test(journal.transactionId || '')
+    ? await fs.readFile(path.join(stateRoot, 'checkpoints/release-upgrade-backups', journal.transactionId, 'backup.json'), 'utf8').then(JSON.parse).catch(() => null) : null;
+  // This disposable fixture contains only synthetic configuration and probes.
+  // Preserve typed transaction state and service evidence before teardown.
+  return JSON.stringify({ status: result.status, response: result.response, stderr: result.stderr,
+    journal: Object.fromEntries(Object.entries(journal).filter(([key]) => /code|phase|reason/i.test(key))),
+    services: services.stdout, serviceLog: logs.stdout, backup });
+}
+
 async function readUpgradeState() {
   return JSON.parse(await fs.readFile(upgradeStatePath, 'utf8'));
 }
@@ -899,12 +937,11 @@ async function killAndAwaitDetachedFlockProcessTree(child, closed) {
 async function interruptPromotedActivation(attemptId) {
   await fs.writeFile(healthInterruptionPath, `${NEW_SERVER_RELEASE_ID}\n`, { mode: 0o644 });
   await fs.chmod(healthInterruptionPath, 0o644);
-  const helper = await promotedKitHelperPath('sonuvi-existing-install-upgrade.mjs');
   const request = existingInstallRequest(attemptId);
-  // detached makes the direct fixed flock command its session and process-group
-  // leader. flock may fork Node, but the complete documented helper tree stays
-  // in the known group addressed by -child.pid.
-  const child = spawn('/usr/bin/flock', ['-n', path.join(BOOTSTRAP_ROOT, 'bootstrap-admission.lock'), '/usr/bin/node', helper], {
+  const command = await promotedHelperCommand('sonuvi-existing-install-upgrade.mjs', JSON.stringify(request));
+  // exec makes the fixed flock command the detached process-group leader; the
+  // real guard and helper inherit its group and are stopped/collected together.
+  const child = spawn('/bin/sh', ['-c', `exec ${command}`], {
     env: capsuleEnvironment(),
     stdio: ['pipe', 'ignore', 'pipe'],
     detached: true,
@@ -998,6 +1035,13 @@ async function fixtureSetup() {
 test('actual historical v2 kit is replaced by the actual corrected signed kit and retained intact', async () => {
   await fixtureSetup();
   const request = replacementRequest('bkr_10000000-0000-4000-8000-000000000001');
+  const inspected = runCapsule('inspect_bootstrap_kit', request);
+  assert.equal(inspected.status, 0, inspected.stderr);
+  assert.equal(inspected.response.state, 'inspected');
+  assert.equal(inspected.response.activeBootstrapKitSHA256, OLD_KIT_SHA256);
+  assert.equal(inspected.response.activeBootstrapReleaseId, OLD_KIT_RELEASE_ID);
+  assert.equal(inspected.response.expectedServerReleaseId, OLD_SERVER_RELEASE_ID);
+  assert.deepEqual(await fs.readdir(REPLACEMENTS), [], 'inspection must not create a transaction');
   const result = runCapsule('replace_bootstrap_kit', request);
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.response.contract, 'sonuvi.gate-c-bootstrap-kit-replacement.v1');
@@ -1414,46 +1458,51 @@ test('successful replacement permits real historical Server upgrade; failed acti
   assert.equal(['committed', 'rolled-back'].includes(terminalRecovery.phase), true);
 });
 
-test('bootstrap recovery completes before the promoted-kit Server interruption recovery', async () => {
-  await fixtureSetup();
-  const replacement = replacementRequest('bkr_51000000-0000-4000-8000-000000000001');
-  await interruptCapsuleAtExchange(replacement.operationId, 'after');
-  assert.equal(await activeKitDigest(), NEW_KIT_SHA256);
-  await assertAdmissionBlockedForEveryOperation();
-  const actualAdmission = await runPromotedAdmissionGuard('stage_release');
-  assert.notEqual(actualAdmission.status, 0, 'unresolved bootstrap recovery must reject the actual promoted helper path');
-  assert.equal(actualAdmission.response.code, 'bootstrap_recovery_required');
-  const bootstrapRecovered = runCapsule('recover_bootstrap_kit_replacement', replacement);
-  assert.equal(bootstrapRecovered.status, 0, bootstrapRecovered.stderr);
-  assert.equal(bootstrapRecovered.response.state, 'committed_after_interruption');
-  await verifyKitAt(ACTIVE_KIT, NEW_KIT_SHA256);
+test('bootstrap recovery completes before the promoted-kit Server interruption recovery', async (t) => {
+  const repetitions = Number(process.env.SONUVI_BOOTSTRAP_RECOVERY_REPETITIONS || 1);
+  assert.ok(Number.isInteger(repetitions) && repetitions >= 1 && repetitions <= 5);
+  for (let repetition = 0; repetition < repetitions; repetition += 1) {
+    await fixtureSetup();
+    const replacement = replacementRequest('bkr_51000000-0000-4000-8000-000000000001');
+    await interruptCapsuleAtExchange(replacement.operationId, 'after');
+    assert.equal(await activeKitDigest(), NEW_KIT_SHA256);
+    await assertAdmissionBlockedForEveryOperation();
+    const actualAdmission = await runPromotedAdmissionGuard('stage_release');
+    assert.notEqual(actualAdmission.status, 0, 'unresolved bootstrap recovery must reject the actual promoted helper path');
+    assert.equal(actualAdmission.response.code, 'bootstrap_recovery_required');
+    const bootstrapRecovered = runCapsule('recover_bootstrap_kit_replacement', replacement);
+    assert.equal(bootstrapRecovered.status, 0, bootstrapRecovered.stderr);
+    assert.equal(bootstrapRecovered.response.state, 'committed_after_interruption');
+    await verifyKitAt(ACTIVE_KIT, NEW_KIT_SHA256);
 
-  const attemptId = 'boot_bootstrap_fixture_interrupted_20261109';
-  const staged = await stageNewServerRelease(attemptId);
-  assert.equal(staged.status, 0, staged.stderr);
-  assert.equal(staged.response.state, 'staged');
-  assert.equal(await fs.lstat(path.join(layoutRoot, 'releases', NEW_SERVER_RELEASE_ID)).then(() => true).catch(() => false), false, 'only the fixed activation helper promotes the staged release to the host inventory');
-  const interrupted = await interruptPromotedActivation(attemptId);
-  assert.equal(interrupted.phase, 'services-verified');
-  assert.equal((await fs.realpath(path.join(layoutRoot, 'current'))).split(path.sep).at(-1), NEW_SERVER_RELEASE_ID);
-  assert.equal(await fs.lstat(releaseLockPath).then(() => true).catch(() => false), true);
-  const recovered = await recoverInterruptedServerRelease();
-  assert.equal(recovered.status, 0, recovered.stderr);
-  assert.equal(recovered.response.ok, true);
-  assert.equal(recovered.response.operation, 'recover_interrupted_upgrade');
-  assert.equal(recovered.response.state, 'recovered');
-  assert.equal(recovered.response.previousReleaseId, OLD_SERVER_RELEASE_ID);
-  assert.equal((await fs.realpath(path.join(layoutRoot, 'current'))).split(path.sep).at(-1), OLD_SERVER_RELEASE_ID);
-  await assertSystemdServiceIdentity(OLD_SERVER_RELEASE_ID);
-  await assertHealth(OLD_SERVER_RELEASE_ID);
-  await verifyPreservedState();
-  await verifySshAuthorization();
-  await verifyKitAt(ACTIVE_KIT, NEW_KIT_SHA256);
-  await verifyKitAt(path.join(REPLACEMENTS, replacement.operationId, 'previous'), OLD_KIT_SHA256);
-  assert.equal(await fs.lstat(releaseLockPath).then(() => true).catch(() => false), false);
-  const repeated = await recoverInterruptedServerRelease();
-  assert.equal(repeated.status, 0, repeated.stderr);
-  assert.equal(repeated.response.state, 'no-recovery-required');
+    const attemptId = 'boot_bootstrap_fixture_interrupted_20261109';
+    const staged = await stageNewServerRelease(attemptId);
+    assert.equal(staged.status, 0, staged.stderr);
+    assert.equal(staged.response.state, 'staged');
+    assert.equal(await fs.lstat(path.join(layoutRoot, 'releases', NEW_SERVER_RELEASE_ID)).then(() => true).catch(() => false), false, 'only the fixed activation helper promotes the staged release to the host inventory');
+    const interrupted = await interruptPromotedActivation(attemptId);
+    assert.equal(interrupted.phase, 'services-verified');
+    assert.equal((await fs.realpath(path.join(layoutRoot, 'current'))).split(path.sep).at(-1), NEW_SERVER_RELEASE_ID);
+    assert.equal(await fs.lstat(releaseLockPath).then(() => true).catch(() => false), true);
+    const recovered = await recoverInterruptedServerRelease();
+    assert.equal(recovered.status, 0, await promotedFailureDiagnostic(recovered));
+    assert.equal(recovered.response.ok, true);
+    assert.equal(recovered.response.operation, 'recover_interrupted_upgrade');
+    assert.equal(recovered.response.state, 'recovered');
+    assert.equal(recovered.response.previousReleaseId, OLD_SERVER_RELEASE_ID);
+    assert.equal((await fs.realpath(path.join(layoutRoot, 'current'))).split(path.sep).at(-1), OLD_SERVER_RELEASE_ID);
+    await assertSystemdServiceIdentity(OLD_SERVER_RELEASE_ID);
+    await assertHealth(OLD_SERVER_RELEASE_ID);
+    await verifyPreservedState();
+    await verifySshAuthorization();
+    await verifyKitAt(ACTIVE_KIT, NEW_KIT_SHA256);
+    await verifyKitAt(path.join(REPLACEMENTS, replacement.operationId, 'previous'), OLD_KIT_SHA256);
+    assert.equal(await fs.lstat(releaseLockPath).then(() => true).catch(() => false), false);
+    const repeated = await recoverInterruptedServerRelease();
+    assert.equal(repeated.status, 0, repeated.stderr);
+    assert.equal(repeated.response.state, 'no-recovery-required');
+    t.diagnostic(`guarded interrupted Server recovery ${repetition + 1}/${repetitions} passed`);
+  }
 });
 
 test('bootstrap rollback uses only the preserved verified directory exchange', async () => {
@@ -1613,4 +1662,111 @@ test('interrupted bootstrap rollback retains the replacement while a Server rele
   assert.equal(await activeKitDigest(), NEW_KIT_SHA256);
   assert.equal((await parseJournal(request.operationId)).state, 'committed');
   await fs.unlink(releaseLock);
+});
+
+test('recover initial A then replace B permits actual guarded staging and activation with retained original evidence', async () => {
+  await fixtureSetup();
+  const initial = replacementRequest('bkr_91000000-0000-4000-8000-000000000001');
+  const intent = await writeInitialJournalIntent(initial, { syncFile: true, syncRoot: true });
+  const temporary = await writeInitialJournalTemporary(initial.operationId, Buffer.alloc(0), { syncFile: true, syncRoot: true });
+  assert.equal(runCapsule('recover_bootstrap_kit_replacement', initial).response.state, 'aborted_before_promotion');
+  const receiptPath = path.join(REPLACEMENTS, `.initial-journal-recovery-${initial.operationId}.json`);
+  const evidence = await Promise.all([intent.path, temporary, receiptPath].map((file) => fs.readFile(file)));
+
+  const replacement = replacementRequest('bkr_92000000-0000-4000-8000-000000000002');
+  const replaced = runCapsule('replace_bootstrap_kit', replacement);
+  assert.equal(replaced.status, 0, replaced.stderr);
+  assert.equal(replaced.response.state, 'replaced');
+  const repeatedInitialRecovery = runCapsule('recover_bootstrap_kit_replacement', initial);
+  assert.equal(repeatedInitialRecovery.status, 0, repeatedInitialRecovery.stderr);
+  assert.equal(repeatedInitialRecovery.response.state, 'aborted_before_promotion');
+
+  const attempt = 'boot_retained_initial_recovery_upgrade_20261110';
+  const staged = await stageNewServerRelease(attempt);
+  assert.equal(staged.status, 0, staged.stderr);
+  assert.equal(staged.response.state, 'staged');
+  const activated = await activateNewServer(attempt);
+  assert.equal(activated.status, 0, activated.stderr);
+  assert.equal(activated.response.state, 'committed');
+  assert.equal(activated.response.previousReleaseId, OLD_SERVER_RELEASE_ID);
+  assert.equal(activated.response.releaseId, NEW_SERVER_RELEASE_ID);
+  await assertSystemdServiceIdentity(NEW_SERVER_RELEASE_ID);
+  await assertHealth(NEW_SERVER_RELEASE_ID);
+  await verifyPreservedState();
+  await verifySshAuthorization();
+  await verifyKitAt(ACTIVE_KIT, NEW_KIT_SHA256);
+  await verifyKitAt(path.join(REPLACEMENTS, replacement.operationId, 'previous'), OLD_KIT_SHA256);
+  assert.deepEqual(await Promise.all([intent.path, temporary, receiptPath].map((file) => fs.readFile(file))), evidence);
+  const serverRecovery = await recoverInterruptedServerRelease();
+  assert.equal(serverRecovery.status, 0, serverRecovery.stderr);
+  assert.equal(serverRecovery.response.state, 'no-recovery-required');
+});
+
+test('successive replacement generations retain verified history across rollback, corruption rejection and interruption', async () => {
+  await fixtureSetup();
+  const initial = replacementRequest('bkr_93000000-0000-4000-8000-000000000001');
+  await writeInitialJournalIntent(initial, { syncFile: true, syncRoot: true });
+  await writeInitialJournalTemporary(initial.operationId, Buffer.alloc(0), { syncFile: true, syncRoot: true });
+  assert.equal(runCapsule('recover_bootstrap_kit_replacement', initial).response.state, 'aborted_before_promotion');
+  const first = replacementRequest('bkr_93000000-0000-4000-8000-000000000002');
+  assert.equal(runCapsule('replace_bootstrap_kit', first).response.state, 'replaced');
+  assert.equal(runCapsule('rollback_bootstrap_kit', first).response.state, 'rolled_back');
+  assert.equal(runCapsule('rollback_bootstrap_kit', first).response.state, 'already_rolled_back');
+  const second = replacementRequest('bkr_93000000-0000-4000-8000-000000000003');
+  assert.equal(runCapsule('replace_bootstrap_kit', second).response.state, 'replaced');
+  assert.equal(runCapsule('replace_bootstrap_kit', second).response.state, 'already_replaced');
+  assert.equal(runCapsule('recover_bootstrap_kit_replacement', second).response.state, 'already_replaced');
+  expectCapsuleFailure('rollback_bootstrap_kit', first, 'replacement_operation_conflict');
+  const firstJournal = await fs.readFile(path.join(REPLACEMENTS, first.operationId, 'journal.json'));
+  const secondJournalPath = path.join(REPLACEMENTS, second.operationId, 'journal.json');
+  const secondJournal = await fs.readFile(secondJournalPath);
+  assert.ok(Date.parse(JSON.parse(secondJournal).createdAt) > Date.parse(JSON.parse(firstJournal).updatedAt));
+
+  const assertRealGuardBlocked = async () => {
+    for (const operation of Object.values(GATE_C_BOOTSTRAP_ADMISSION_OPERATIONS)) {
+      const blocked = await runPromotedAdmissionGuard(operation);
+      assert.equal(blocked.response.code, 'bootstrap_recovery_required');
+      assert.notEqual(blocked.status, 0);
+    }
+  };
+  const preservedFile = path.join(REPLACEMENTS, first.operationId, 'previous/scripts/sonuvi-release-stage.mjs');
+  const preservedBytes = await fs.readFile(preservedFile);
+  await fs.appendFile(preservedFile, '\n// tampered historical kit\n');
+  await assertRealGuardBlocked();
+  assert.equal(runCapsule('recover_bootstrap_kit_replacement', second).response.ok, false);
+  await fs.writeFile(preservedFile, preservedBytes);
+
+  const receiptPath = path.join(REPLACEMENTS, `.initial-journal-recovery-${initial.operationId}.json`);
+  const receiptBytes = await fs.readFile(receiptPath);
+  const wrongReceipt = { ...JSON.parse(receiptBytes), activeBootstrapReleaseId: NEW_SERVER_RELEASE_ID };
+  await fs.writeFile(receiptPath, `${JSON.stringify(wrongReceipt)}\n`);
+  await assertRealGuardBlocked();
+  assert.equal(runCapsule('recover_bootstrap_kit_replacement', initial).response.ok, false);
+  await fs.writeFile(receiptPath, receiptBytes);
+
+  const ambiguous = { ...JSON.parse(secondJournal), createdAt: JSON.parse(firstJournal).createdAt };
+  await fs.writeFile(secondJournalPath, `${JSON.stringify(ambiguous)}\n`);
+  await assertRealGuardBlocked();
+  assert.equal(runCapsule('recover_bootstrap_kit_replacement', second).response.ok, false);
+  await fs.writeFile(secondJournalPath, secondJournal);
+  assert.equal(runCapsule('recover_bootstrap_kit_replacement', initial).response.state, 'aborted_before_promotion');
+  assert.equal(runCapsule('rollback_bootstrap_kit', second).response.state, 'rolled_back');
+
+  const interrupted = replacementRequest('bkr_93000000-0000-4000-8000-000000000004');
+  await interruptCapsuleAtExchange(interrupted.operationId, 'after');
+  await assertRealGuardBlocked();
+  const pendingJournal = await fs.readFile(path.join(REPLACEMENTS, interrupted.operationId, 'journal.json'));
+  expectCapsuleFailure('inspect_bootstrap_kit', interrupted, 'replacement_recovery_required');
+  assert.deepEqual(await fs.readFile(path.join(REPLACEMENTS, interrupted.operationId, 'journal.json')), pendingJournal,
+    'inspection must never reconcile a pending journal');
+  const recovered = runCapsule('recover_bootstrap_kit_replacement', interrupted);
+  assert.equal(recovered.status, 0, recovered.stderr);
+  assert.equal(recovered.response.state, 'committed_after_interruption');
+  assert.equal(runCapsule('recover_bootstrap_kit_replacement', interrupted).response.state, 'already_replaced');
+  assert.equal(runCapsule('recover_bootstrap_kit_replacement', initial).response.state, 'aborted_before_promotion');
+  const stage = await stageNewServerRelease('boot_repeated_history_stage_20261110');
+  assert.equal(stage.status, 0, stage.stderr);
+  assert.equal(stage.response.ok, true);
+  assert.deepEqual(await fs.readFile(path.join(REPLACEMENTS, first.operationId, 'journal.json')), firstJournal);
+  assert.deepEqual(await fs.readFile(receiptPath), receiptBytes);
 });

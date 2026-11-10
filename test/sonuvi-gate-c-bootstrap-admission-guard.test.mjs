@@ -452,13 +452,13 @@ test('normal helpers become reachable only after the fixed recovery operation ha
   }
 
   const historical = await createFixture(t);
-  const first = await writeJournal(historical, 'bkr_00000000-0000-4000-8000-000000000401', 'committed');
-  await writeKit(path.join(first.root, 'previous'), OLD_KIT);
+  const first = await writeJournal(historical, 'bkr_00000000-0000-4000-8000-000000000401', 'rolled_back');
+  await writeKit(path.join(first.root, 'previous'), NEW_KIT);
   await setJournalTimes(first.file, '2026-11-09T12:00:00.000Z', '2026-11-09T12:01:00.000Z');
-  const second = await writeJournal(historical, 'bkr_00000000-0000-4000-8000-000000000402', 'rolled_back');
-  await writeKit(path.join(second.root, 'previous'), NEW_KIT);
+  const second = await writeJournal(historical, 'bkr_00000000-0000-4000-8000-000000000402', 'committed');
+  await writeKit(path.join(second.root, 'previous'), OLD_KIT);
   await setJournalTimes(second.file, '2026-11-09T12:02:00.000Z', '2026-11-09T12:03:00.000Z');
-  await resetActive(historical, OLD_KIT);
+  await resetActive(historical, NEW_KIT);
   await assertAdmittedForEveryOperation(historical);
 
   await setJournalTimes(second.file, '2026-11-09T12:00:00.000Z', '2026-11-09T12:01:00.000Z');

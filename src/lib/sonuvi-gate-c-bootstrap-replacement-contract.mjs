@@ -1,10 +1,11 @@
 import crypto from 'node:crypto';
 import { GATE_C_UPGRADE_BOOTSTRAP_KIT_FILES } from './sonuvi-gate-c-upgrade-bootstrap-kit.mjs';
+import { validateBootstrapHistory } from './sonuvi-bootstrap-history.mjs';
 
 export const GATE_C_BOOTSTRAP_KIT_REPLACEMENT_CONTRACT = 'sonuvi.gate-c-bootstrap-kit-replacement.v1';
 export const GATE_C_BOOTSTRAP_ADMISSION_LOCK_PATH = '/var/lib/sonuvi-bootstrap/bootstrap-admission.lock';
 export const GATE_C_BOOTSTRAP_REPLACEMENT_JOURNAL_ROOT = '/var/lib/sonuvi-bootstrap/bootstrap-kit-replacements';
-export const GATE_C_BOOTSTRAP_REPLACEMENT_CAPSULE_SHA256 = '4b999ec7131b89238d82a68e53be7faa3932f5e14c744db8615f0f72a5bb4300';
+export const GATE_C_BOOTSTRAP_REPLACEMENT_CAPSULE_SHA256 = '8d4509a7a79fca65ba255e0a13eb59bcf888a8aee963d507adf8bb7d864dd15c';
 
 export const GATE_C_BOOTSTRAP_ADMISSION_HELPERS = Object.freeze({
   stageRelease: '/var/lib/sonuvi-bootstrap/bootstrap-kit-v2/scripts/sonuvi-release-stage.mjs',
@@ -26,6 +27,7 @@ export const GATE_C_BOOTSTRAP_ADMISSION_FAILURE_CODES = Object.freeze([
 ]);
 
 export const GATE_C_BOOTSTRAP_REPLACEMENT_OPERATIONS = Object.freeze({
+  inspect: 'inspect_bootstrap_kit',
   replace: 'replace_bootstrap_kit',
   recover: 'recover_bootstrap_kit_replacement',
   rollback: 'rollback_bootstrap_kit',
@@ -184,6 +186,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 
 const CONFIG = Object.freeze(__CONFIG__);
+__HISTORY_VALIDATOR__
 const JOURNAL_KEYS = Object.freeze([
   'contract', 'createdAt', 'expectedServerReleaseId', 'operationId', 'previousBootstrapKitSHA256',
   'replacementKitBytes', 'replacementKitSHA256', 'replacementReleaseId', 'signedEnvelopeSHA256', 'state', 'targetIdentity', 'updatedAt',
@@ -267,10 +270,10 @@ function validActiveKitManifest(value) {
     && value.target.os === 'linux' && value.target.architecture === 'arm64'
     && Array.isArray(value.files) && value.files.length === ACTIVE_KIT_FILES.length;
 }
-async function assertActiveKitTree() {
+async function assertActiveKitTree(directory = CONFIG.activeKit) {
   if (ACTIVE_KIT_FILES.length === 0 || ACTIVE_KIT_FILE_SET.size !== ACTIVE_KIT_FILES.length) failClosed();
-  const activeMarker = await marker(CONFIG.activeKit);
-  const manifestPath = path.join(CONFIG.activeKit, 'bootstrap-kit-manifest.json');
+  const activeMarker = await marker(directory);
+  const manifestPath = path.join(directory, 'bootstrap-kit-manifest.json');
   await requiredEntry(manifestPath, 'file', 0o600);
   let manifest;
   try { manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8')); } catch { failClosed(); }
@@ -300,7 +303,7 @@ async function assertActiveKitTree() {
       } else failClosed();
     }
   }
-  await walk(CONFIG.activeKit);
+  await walk(directory);
   actual.sort((left, right) => left.path.localeCompare(right.path));
   const expectedTree = [...ACTIVE_KIT_FILES, 'bootstrap-kit-manifest.json', '.sonuvi-bootstrap-kit-v2.sha256', ...expectedDirectories(ACTIVE_KIT_FILES)].sort();
   if (JSON.stringify(visited.sort()) !== JSON.stringify(expectedTree)) failClosed();
@@ -500,23 +503,7 @@ async function assertInitialJournalRecovery(operationId, active) {
     || recovery.temporaryJournalBytes !== contents.length || recovery.temporaryJournalKind !== kind
     || recovery.temporaryJournalSHA256 !== crypto.createHash('sha256').update(contents).digest('hex')
     || Date.parse(recovery.recoveredAt) < Date.parse(intent.value.createdAt)) failClosed();
-  return recovery;
-}
-async function assertTerminalJournal(directory, journal, active) {
-  if (journal.state === 'aborted_before_promotion') {
-    if (active.marker !== journal.previousBootstrapKitSHA256) failClosed();
-    return;
-  }
-  const previous = await marker(path.join(directory, 'previous'));
-  if (journal.state === 'committed') {
-    if (active.marker !== journal.replacementKitSHA256 || previous !== journal.previousBootstrapKitSHA256) failClosed();
-    return;
-  }
-  if (journal.state === 'rolled_back') {
-    if (active.marker !== journal.previousBootstrapKitSHA256 || previous !== journal.replacementKitSHA256) failClosed();
-    return;
-  }
-  failClosed();
+  return { ...recovery, createdAt: intent.value.createdAt };
 }
 async function assertAdmitted() {
   await requiredEntry(CONFIG.root, 'directory', 0o700);
@@ -557,16 +544,34 @@ async function assertAdmitted() {
     failClosed();
   }
   const records = [];
+  const journals = [];
+  const kits = new Map([[active.marker, active]]);
   for (const operationId of directories) {
     if (temporaries.has(operationId) || recoveries.has(operationId) || intents.has(operationId)) failClosed();
     const current = await journalAt(operationId);
     if (!TERMINAL_STATES.has(current.value.state) || Date.parse(current.value.updatedAt) < Date.parse(current.value.createdAt)) failClosed();
-    records.push({ at: current.value.updatedAt, current, kind: 'journal' });
+    journals.push(current);
+    if (current.value.state !== 'aborted_before_promotion') {
+      const preserved = await assertActiveKitTree(path.join(current.directory, 'previous'));
+      const expected = current.value.state === 'committed' ? current.value.previousBootstrapKitSHA256 : current.value.replacementKitSHA256;
+      if (preserved.marker !== expected || (kits.has(expected)
+        && kits.get(expected).manifest.releaseId !== preserved.manifest.releaseId)) failClosed();
+      kits.set(expected, preserved);
+    } else if (await optionalEntry(path.join(current.directory, 'previous'))) failClosed();
+  }
+  for (const { value: journal } of journals) {
+    const before = kits.get(journal.previousBootstrapKitSHA256);
+    const replacement = kits.get(journal.replacementKitSHA256);
+    if (!before || (journal.state !== 'aborted_before_promotion'
+      && (!replacement || replacement.manifest.releaseId !== journal.replacementReleaseId))) failClosed();
+    records.push({ ...journal, before, after: journal.state === 'committed' ? replacement : before });
   }
   for (const operationId of temporaries) {
     if (directories.has(operationId) || !intents.has(operationId) || !recoveries.has(operationId)) failClosed();
-    const recovery = await assertInitialJournalRecovery(operationId, active);
-    records.push({ at: recovery.recoveredAt, kind: 'initial', recovery });
+    const intent = await initialJournalIntentAt(operationId);
+    const original = kits.get(intent.value.previousBootstrapKitSHA256);
+    const recovery = await assertInitialJournalRecovery(operationId, original);
+    records.push({ ...recovery, updatedAt: recovery.recoveredAt, before: original, after: original });
   }
   for (const operationId of intents) {
     if (!temporaries.has(operationId) || !recoveries.has(operationId)) failClosed();
@@ -574,15 +579,7 @@ async function assertAdmitted() {
   for (const operationId of recoveries) {
     if (!temporaries.has(operationId) || !intents.has(operationId)) failClosed();
   }
-  if (!records.length) return;
-  records.sort((left, right) => Date.parse(right.at) - Date.parse(left.at));
-  if (records.length > 1 && Date.parse(records[0].at) === Date.parse(records[1].at)) failClosed();
-  const newest = records[0];
-  if (newest.kind === 'journal') {
-    await assertTerminalJournal(newest.current.directory, newest.current.value, active);
-    return;
-  }
-  if (active.marker !== newest.recovery.activeBootstrapKitSHA256 || active.manifest.releaseId !== newest.recovery.activeBootstrapReleaseId) failClosed();
+  validateBootstrapHistory(records, active);
 }
 function response(operation, code) {
   return {
@@ -638,7 +635,8 @@ process.exitCode = await main();
  * production command construction always uses the fixed defaults above.
  */
 export function gateCBootstrapAdmissionGuardProgram(options = {}) {
-  return ADMISSION_GUARD_TEMPLATE.replace('__CONFIG__', JSON.stringify(admissionGuardConfiguration(options)));
+  return ADMISSION_GUARD_TEMPLATE.replace('__CONFIG__', JSON.stringify(admissionGuardConfiguration(options)))
+    .replace('__HISTORY_VALIDATOR__', validateBootstrapHistory.toString());
 }
 
 function shellArgument(value) {
@@ -700,6 +698,11 @@ export function normalizeGateCBootstrapKitReplacementRequest(input = {}) {
 }
 
 function commandArguments(request) {
+  if (request.operation === GATE_C_BOOTSTRAP_REPLACEMENT_OPERATIONS.inspect) {
+    sameKeys(request, ['operation', 'operationId', 'targetIdentity', 'expectedServerReleaseId'], 'bootstrap inspection request');
+    return [request.operation, validOperationId(request.operationId), validTarget(request.targetIdentity),
+      validReleaseId(request.expectedServerReleaseId, 'expected installed Server release ID')];
+  }
   if (request.operation === GATE_C_BOOTSTRAP_REPLACEMENT_OPERATIONS.replace) {
     const normalized = normalizeGateCBootstrapKitReplacementRequest(request);
     return [
@@ -755,6 +758,17 @@ export function normalizeGateCBootstrapKitReplacementResponse(value, expected = 
   if (!value.ok) {
     sameKeys(value, ['code', 'contract', 'ok', 'operation', 'operationId', 'targetIdentity'], 'bootstrap replacement failure response');
     if (!failureCodes.has(value.code)) throw new Error('bootstrap replacement response code is invalid');
+    return Object.freeze(value);
+  }
+  if (value.operation === GATE_C_BOOTSTRAP_REPLACEMENT_OPERATIONS.inspect) {
+    sameKeys(value, ['contract', 'operation', 'ok', 'state', 'operationId', 'targetIdentity',
+      'expectedServerReleaseId', 'activeBootstrapKitSHA256', 'activeBootstrapReleaseId'], 'bootstrap inspection response');
+    if (value.state !== 'inspected' || value.expectedServerReleaseId !== expected.expectedServerReleaseId) {
+      throw new Error('bootstrap inspection response binding is invalid');
+    }
+    validReleaseId(value.expectedServerReleaseId, 'inspected Server release');
+    validReleaseId(value.activeBootstrapReleaseId, 'inspected bootstrap release');
+    validDigest(value.activeBootstrapKitSHA256, 'inspected bootstrap digest');
     return Object.freeze(value);
   }
   const boundedInitialJournalOutcome = value.state === 'aborted_before_promotion'

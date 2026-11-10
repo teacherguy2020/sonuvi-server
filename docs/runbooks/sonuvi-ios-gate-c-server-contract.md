@@ -7,6 +7,14 @@ runbook and does not replace its first-administrator/controller separation.
 
 ## Security boundary
 
+This document's fixed first-install commands are **v1 only**. The active v2
+existing-install/replacement contract is authoritative in
+[v2 bootstrap replacement](sonuvi-v2-bootstrap-kit-replacement.md) and
+[in-place upgrade](sonuvi-in-place-upgrade.md). v2 requires the pinned capsule,
+content-addressed SFTP path, persisted bootstrap operation identity, and
+`flock → fixed client admission guard → promoted helper`; do not reuse the
+unguarded v1 commands for v2. First-install v1 behavior remains unchanged.
+
 Every bootstrap operation travels over the iPad's pinned SSH connection. The
 iPad never sends an arbitrary command, path, package name, URL, or service
 name. It may invoke only the fixed operations below after explicit host-key
