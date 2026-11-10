@@ -13,12 +13,10 @@ import {
 } from '../../../src/lib/release-artifact.mjs';
 import { verifySignedGateCReleaseMetadata } from '../../../src/lib/sonuvi-gate-c-release.mjs';
 import { readGateCTargetIdentity } from '../../../src/lib/sonuvi-gate-c-target-preflight.mjs';
-import { activateReleaseTransaction } from '../../../src/lib/release-activation.mjs';
 import {
   GATE_C_BOOTSTRAP_ADMISSION_OPERATIONS,
   gateCBootstrapAdmissionGuardProgram,
 } from '../../../src/lib/sonuvi-gate-c-bootstrap-replacement-contract.mjs';
-import { createLinuxSystemdUpgradeAdapter } from '../../../src/lib/sonuvi-linux-systemd-upgrade.mjs';
 
 const CAPSULE = '/sonuvi/scripts/sonuvi-sftp-bootstrap-activate-v2.sh';
 const OLD_KIT_SHA256 = '91b2d8cc171e5106ca87102a50e3e29392680f52b748c02ac9c5926a71d1b63d';
@@ -47,11 +45,17 @@ const layoutRoot = '/opt/sonuvi';
 const stateRoot = '/var/lib/sonuvi';
 const unitRoot = '/etc/systemd/system';
 const healthFailurePath = '/run/sonuvi-bootstrap-replacement-fail-health';
+const healthPausePath = '/run/sonuvi-bootstrap-replacement-pause-health';
 const fixtureMarker = '/run/sonuvi-bootstrap-replacement-fixture-owned';
 const interposerSource = '/sonuvi/test/fixtures/systemd-upgrade/renameat2-interrupt.c';
 const interposerLibrary = '/tmp/sonuvi-bootstrap-replacement-interrupt.so';
 const admissionGuardHelper = '/tmp/sonuvi-bootstrap-admission-helper.mjs';
 const admissionGuardMarker = '/run/sonuvi-bootstrap-admission-helper-loaded';
+const sshDirectory = path.join(HOME, '.ssh');
+const sshAuthorizedKeys = path.join(sshDirectory, 'authorized_keys');
+const sshAuthorization = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixtureOnlyPinnedSshAuthorization sonuvi-fixture\n';
+const upgradeStatePath = path.join(stateRoot, 'checkpoints/release-upgrade-state.json');
+const releaseLockPath = path.join(stateRoot, 'checkpoints/release-activation.lock');
 function ensureSystemUser(name, args) {
   const existing = spawnSync('/usr/bin/id', ['-u', name], { encoding: 'utf8' });
   if (existing.status === 0) return;
@@ -145,6 +149,63 @@ function runCapsule(operation, request, envOverrides = {}) {
   try { response = JSON.parse(lines.at(-1)); } catch {}
   assert.ok(response, `capsule returned no typed JSON response (${result.status}): ${result.stderr}`);
   return { ...result, response };
+}
+
+function typedJsonResponse(result, label, { required = true } = {}) {
+  const lines = String(result.stdout || '').trim().split(/\r?\n/);
+  let response = null;
+  try { response = JSON.parse(lines.at(-1)); } catch {}
+  if (required) assert.ok(response, `${label} returned no typed JSON response (${result.status}): ${result.stderr}`);
+  return response;
+}
+
+async function promotedKitHelperPath(script) {
+  const manifest = await verifyKitAt(ACTIVE_KIT, NEW_KIT_SHA256);
+  const relative = `scripts/${script}`;
+  assert.equal(manifest.files.some((entry) => entry.path === relative), true, `${relative} is absent from the promoted kit inventory`);
+  const helper = path.join(ACTIVE_KIT, relative);
+  const stat = await fs.lstat(helper);
+  assert.equal(stat.isFile() && !stat.isSymbolicLink(), true, `${relative} is not a regular promoted-kit helper`);
+  assert.equal(stat.uid, 0, `${relative} is not root-owned`);
+  assert.equal(stat.mode & 0o777, 0o600, `${relative} is not mode 0600`);
+  return helper;
+}
+
+// The isolated fixture is already root. Its argv after sudo is the documented
+// fixed command: flock -n <admission lock> node <promoted helper>.
+async function runPromotedKitHelper(script, input, { requireResponse = true } = {}) {
+  const helper = await promotedKitHelperPath(script);
+  const result = run('/usr/bin/flock', ['-n', path.join(BOOTSTRAP_ROOT, 'bootstrap-admission.lock'), '/usr/bin/node', helper], {
+    input,
+    env: capsuleEnvironment(),
+  });
+  return { ...result, response: typedJsonResponse(result, `promoted ${script}`, { required: requireResponse }) };
+}
+
+async function stageNewServerRelease(attemptId, overrides = {}) {
+  const archive = overrides.archive ?? await fs.readFile(NEW_RELEASE_ARCHIVE);
+  const request = {
+    operation: 'stage_release',
+    envelope: overrides.envelope ?? envelope,
+    attemptId,
+    targetIdentity: overrides.targetIdentity ?? targetIdentity,
+  };
+  const input = Buffer.concat([Buffer.from(`${JSON.stringify(request)}\n`, 'utf8'), Buffer.from(archive)]);
+  return runPromotedKitHelper('sonuvi-release-stage.mjs', input);
+}
+
+function existingInstallRequest(attemptId, overrides = {}) {
+  return {
+    operation: overrides.operation ?? 'activate_existing_install',
+    attemptId,
+    targetIdentity: overrides.targetIdentity ?? targetIdentity,
+    expectedPreviousReleaseId: overrides.expectedPreviousReleaseId ?? OLD_SERVER_RELEASE_ID,
+    envelope: overrides.envelope ?? envelope,
+  };
+}
+
+async function invokePromotedExistingInstall(request) {
+  return runPromotedKitHelper('sonuvi-existing-install-upgrade.mjs', Buffer.from(JSON.stringify(request), 'utf8'));
 }
 
 function expectCapsuleFailure(operation, request, code, envOverrides = {}) {
@@ -270,6 +331,18 @@ async function runAdmissionGuard(operation) {
   let response = null;
   try { response = JSON.parse(line); } catch {}
   return { ...result, response };
+}
+
+async function runPromotedAdmissionGuard(operation) {
+  const lock = await ensureAdmissionLock();
+  const program = gateCBootstrapAdmissionGuardProgram({
+    bootstrapRoot: BOOTSTRAP_ROOT,
+    expectedUID: 0,
+    expectedGID: 0,
+    nodePath: '/usr/bin/node',
+  });
+  const result = run('/usr/bin/flock', ['-n', lock, '/usr/bin/node', '--input-type=module', '--eval', program, operation], { env: capsuleEnvironment() });
+  return { ...result, response: typedJsonResponse(result, `promoted admission ${operation}`) };
 }
 
 async function readAdmissionGuardMarker() {
@@ -434,6 +507,32 @@ async function writeStateFile(relative, value, mode = 0o640) {
   return target;
 }
 
+async function writeSshAuthorization() {
+  await fs.mkdir(sshDirectory, { recursive: true, mode: 0o700 });
+  await fs.chown(sshDirectory, userId, userGroupId);
+  await fs.chmod(sshDirectory, 0o700);
+  await fs.writeFile(sshAuthorizedKeys, sshAuthorization, { mode: 0o600 });
+  await fs.chown(sshAuthorizedKeys, userId, userGroupId);
+  await fs.chmod(sshAuthorizedKeys, 0o600);
+}
+
+async function verifySshAuthorization() {
+  const stat = await fs.lstat(sshAuthorizedKeys);
+  assert.equal(stat.isFile() && !stat.isSymbolicLink(), true, 'fixture SSH authorization remains a regular file');
+  assert.equal(stat.uid, userId, 'fixture SSH authorization owner is preserved');
+  assert.equal(stat.gid, userGroupId, 'fixture SSH authorization group is preserved');
+  assert.equal(stat.mode & 0o777, 0o600, 'fixture SSH authorization mode is preserved');
+  assert.equal(await fs.readFile(sshAuthorizedKeys, 'utf8'), sshAuthorization, 'fixture SSH authorization is preserved');
+}
+
+async function writeHealthControls() {
+  for (const [file, value] of [[healthFailurePath, 'none\n'], [healthPausePath, 'none\n']]) {
+    await fs.writeFile(file, value, { mode: 0o644 });
+    await fs.chown(file, 0, 0);
+    await fs.chmod(file, 0o644);
+  }
+}
+
 async function writeProbe() {
   const source = `
 import fs from 'node:fs';
@@ -441,8 +540,10 @@ import http from 'node:http';
 const kind = process.argv[2];
 const releaseId = process.env.SONUVI_RELEASE_ID;
 const failingRelease = fs.readFileSync('${healthFailurePath}', 'utf8').trim();
+const pausedRelease = fs.readFileSync('${healthPausePath}', 'utf8').trim();
 const api = kind === 'api';
 const server = http.createServer((_request, response) => {
+  if (pausedRelease === releaseId) return;
   response.setHeader('content-type', 'application/json');
   response.end(JSON.stringify(api
     ? { contract: 'sonuvi.health.v1', ok: failingRelease !== releaseId, release: { mode: 'immutable-release', releaseId } }
@@ -526,6 +627,25 @@ async function assertHealth(expectedReleaseId) {
       const status = run('/usr/bin/systemctl', ['--no-pager', '--full', 'status', `sonuvi-${kind}.service`]);
       throw new Error(`${kind} service health unavailable: ${String(status.stdout || status.stderr).slice(0, 1200)}`);
     }
+  }
+}
+
+// HTTP endpoints below are fixture probes; service/process assertions remain
+// against the real systemd units and their live process environments.
+async function assertSystemdServiceIdentity(expectedReleaseId) {
+  for (const kind of ['api', 'web']) {
+    const unit = `sonuvi-${kind}.service`;
+    const result = assertCommandOk(run('/usr/bin/systemctl', ['show', '--no-pager', '--property=ActiveState,SubState,MainPID,Environment', unit]), `show ${unit}`);
+    const properties = Object.fromEntries(String(result.stdout).trim().split(/\r?\n/).map((line) => line.split(/=(.*)/s)));
+    assert.equal(properties.ActiveState, 'active', `${unit} is active`);
+    assert.equal(properties.SubState, 'running', `${unit} is running`);
+    const pid = Number(properties.MainPID);
+    assert.equal(Number.isSafeInteger(pid) && pid > 0, true, `${unit} has a main process`);
+    assert.match(properties.Environment || '', new RegExp(`SONUVI_RELEASE_ID=${expectedReleaseId}`), `${unit} unit identity`);
+    assert.match(properties.Environment || '', new RegExp(`SONUVI_RELEASE_ROOT=/opt/sonuvi/releases/${expectedReleaseId}`), `${unit} unit root`);
+    const environment = await fs.readFile(`/proc/${pid}/environ`, 'utf8');
+    assert.equal(environment.includes(`SONUVI_RELEASE_ID=${expectedReleaseId}\0`), true, `${unit} process identity`);
+    assert.equal(environment.includes(`SONUVI_RELEASE_ROOT=/opt/sonuvi/releases/${expectedReleaseId}\0`), true, `${unit} process root`);
   }
 }
 
@@ -624,8 +744,7 @@ function resetReleaseCheckpoint(previousReleaseId, originalCheckpoint) {
       'checkpoints/public-traffic-open.json',
       'checkpoints/release-upgrade-backups',
     ]) await fs.rm(path.join(stateRoot, relative), { recursive: true, force: true });
-    await fs.writeFile(healthFailurePath, 'none\n');
-    await fs.chmod(healthFailurePath, 0o644);
+    await writeHealthControls();
     await startServices();
     await assertHealth(previousReleaseId);
   })();
@@ -649,11 +768,12 @@ async function setupServerReleases() {
   await fs.copyFile(ANCHORS_PATH, '/etc/sonuvi/release-trust-anchors.json');
   await fs.chown('/etc/sonuvi/release-trust-anchors.json', 0, 0);
   await fs.chmod('/etc/sonuvi/release-trust-anchors.json', 0o644);
+  await fs.rm(path.join(layoutRoot, 'releases', NEW_SERVER_RELEASE_ID), { recursive: true, force: true });
   await copyReleaseArchive(OLD_RELEASE_ARCHIVE, path.join(layoutRoot, 'releases', OLD_SERVER_RELEASE_ID), OLD_SERVER_RELEASE_ID);
-  await copyReleaseArchive(NEW_RELEASE_ARCHIVE, path.join(layoutRoot, 'releases', NEW_SERVER_RELEASE_ID), NEW_SERVER_RELEASE_ID);
   for (const [relative, value] of Object.entries(PRESERVED_STATE)) {
     await writeStateFile(relative, value, relative.startsWith('protected/') ? 0o600 : 0o640);
   }
+  await writeSshAuthorization();
   const checkpointPath = await writeStateFile('checkpoints/release-activation-state.json', `${JSON.stringify({
     contract: 'sonuvi.release-activation.v1',
     transactionId: crypto.randomUUID(),
@@ -665,33 +785,54 @@ async function setupServerReleases() {
   const checkpoint = { path: checkpointPath, bytes: await fs.readFile(checkpointPath), mode: 0o640 };
   await setCurrent(OLD_SERVER_RELEASE_ID);
   await writeProbe();
-  await fs.writeFile(healthFailurePath, 'none\n', { mode: 0o644 });
-  await fs.chmod(healthFailurePath, 0o644);
+  await writeHealthControls();
   await writeUnit('sonuvi-api.service', 'api', OLD_SERVER_RELEASE_ID);
   await writeUnit('sonuvi-web.service', 'web', OLD_SERVER_RELEASE_ID);
   assertCommandOk(run('/usr/bin/systemctl', ['daemon-reload']), 'initial systemd daemon-reload');
   run('/usr/bin/systemctl', ['enable', 'sonuvi-api.service', 'sonuvi-web.service']);
   assertCommandOk(run('/usr/bin/systemctl', ['start', 'sonuvi-api.service', 'sonuvi-web.service']), 'start old Server services');
   await assertHealth(OLD_SERVER_RELEASE_ID);
+  await assertSystemdServiceIdentity(OLD_SERVER_RELEASE_ID);
   return checkpoint;
 }
 
-async function activateNewServer(releaseId, attemptId) {
-  const candidate = { releaseId, root: path.join(layoutRoot, 'releases', releaseId) };
-  const previous = { releaseId: OLD_SERVER_RELEASE_ID, root: path.join(layoutRoot, 'releases', OLD_SERVER_RELEASE_ID) };
-  const verifiedEnvelope = JSON.parse(await fs.readFile(ENVELOPE_PATH, 'utf8'));
-  return activateReleaseTransaction({
-    layoutRoot,
-    stateRoot,
-    ownerUID: 0,
-    releaseId,
-    expectedPreviousReleaseId: previous.releaseId,
-    attemptId,
-    targetIdentity,
-    envelope: verifiedEnvelope,
-    trustedAnchors,
-    adapter: createLinuxSystemdUpgradeAdapter(),
+async function activateNewServer(attemptId, overrides = {}) {
+  return invokePromotedExistingInstall(existingInstallRequest(attemptId, overrides));
+}
+
+async function recoverInterruptedServerRelease() {
+  return invokePromotedExistingInstall({ operation: 'recover_interrupted_upgrade', targetIdentity });
+}
+
+async function readUpgradeState() {
+  return JSON.parse(await fs.readFile(upgradeStatePath, 'utf8'));
+}
+
+async function interruptPromotedActivation(attemptId) {
+  await fs.writeFile(healthPausePath, `${NEW_SERVER_RELEASE_ID}\n`, { mode: 0o644 });
+  await fs.chmod(healthPausePath, 0o644);
+  const helper = await promotedKitHelperPath('sonuvi-existing-install-upgrade.mjs');
+  const request = existingInstallRequest(attemptId);
+  const child = spawn('/usr/bin/setsid', ['/usr/bin/flock', '-n', path.join(BOOTSTRAP_ROOT, 'bootstrap-admission.lock'), '/usr/bin/node', helper], {
+    env: capsuleEnvironment(),
+    stdio: ['pipe', 'ignore', 'pipe'],
   });
+  child.stdin.end(Buffer.from(JSON.stringify(request), 'utf8'));
+  let state = null;
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    try {
+      state = await readUpgradeState();
+      if (state.phase === 'services-verified') break;
+    } catch {}
+    if (child.exitCode !== null) throw new Error('promoted activation exited before the simulated health probe could be interrupted');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(state?.phase, 'services-verified', 'promoted helper reached the simulated health probe after real systemd restart');
+  process.kill(-child.pid, 'SIGKILL');
+  await new Promise((resolve) => child.once('close', resolve));
+  await fs.writeFile(healthPausePath, 'none\n', { mode: 0o644 });
+  await fs.chmod(healthPausePath, 0o644);
+  return state;
 }
 
 function parseJournal(operationId) {
@@ -710,6 +851,7 @@ async function fixtureSetup() {
   await fs.chmod('/etc/machine-id', 0o444);
   targetIdentity = await readGateCTargetIdentity();
   const signed = verifySignedGateCReleaseMetadata({ envelope, trustedAnchors });
+  await stopServices();
   assert.equal(signed.keyId, 'sonuvi-lab-gate-c-20261105');
   assert.equal(signed.metadata.releaseId, NEW_SERVER_RELEASE_ID);
   assert.equal(signed.metadata.bootstrap.sha256, NEW_KIT_SHA256);
@@ -1055,6 +1197,41 @@ test('admission-lock contention is rejected, and the fixed archive validator rej
   await assertUnsafeArchiveRejected();
 });
 
+test('promoted-kit fixed helpers reject bad framing and identities before staged activation', async () => {
+  await fixtureSetup();
+  const replacement = replacementRequest('bkr_41000000-0000-4000-8000-000000000001');
+  assert.equal(runCapsule('replace_bootstrap_kit', replacement).response.state, 'replaced');
+  const wrongTarget = `sonuvi-target-v1-${'f'.repeat(64)}`;
+  const malformedStage = await runPromotedKitHelper('sonuvi-release-stage.mjs', Buffer.from('{"operation":"stage_release"}\n', 'utf8'));
+  assert.notEqual(malformedStage.status, 0);
+  assert.equal(malformedStage.response.ok, false);
+  assert.equal(malformedStage.response.code, 'stage_input_invalid');
+  const wrongStage = await stageNewServerRelease('boot_bootstrap_fixture_wrong_target_20261109', { targetIdentity: wrongTarget });
+  assert.notEqual(wrongStage.status, 0);
+  assert.equal(wrongStage.response.code, 'stage_target_mismatch');
+  const malformedUpgrade = await runPromotedKitHelper('sonuvi-existing-install-upgrade.mjs', Buffer.from('{', 'utf8'));
+  assert.notEqual(malformedUpgrade.status, 0);
+  assert.equal(malformedUpgrade.response.code, 'upgrade_input_invalid');
+  const wrongUpgrade = await activateNewServer('boot_bootstrap_fixture_wrong_target_20261109', { targetIdentity: wrongTarget });
+  assert.notEqual(wrongUpgrade.status, 0);
+  assert.equal(wrongUpgrade.response.code, 'upgrade_target_mismatch');
+  const admissionLock = await ensureAdmissionLock();
+  const holder = spawn('/usr/bin/flock', ['-n', admissionLock, '/usr/bin/sleep', '30'], { stdio: 'ignore', detached: true });
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  const locked = await runPromotedKitHelper('sonuvi-release-stage.mjs', Buffer.from('{"operation":"stage_release"}\n', 'utf8'), { requireResponse: false });
+  assert.notEqual(locked.status, 0, 'the fixed flock command must reject concurrent admission before Node opens the helper');
+  assert.equal(locked.response, null, 'the contended fixed command must not load a release helper');
+  process.kill(-holder.pid, 'SIGTERM');
+  await new Promise((resolve) => holder.once('close', resolve));
+  const staged = await stageNewServerRelease('boot_bootstrap_fixture_framing_20261109');
+  assert.equal(staged.status, 0, staged.stderr);
+  assert.equal(staged.response.ok, true);
+  assert.equal(staged.response.state, 'staged');
+  const repeated = await stageNewServerRelease('boot_bootstrap_fixture_framing_20261109');
+  assert.equal(repeated.status, 0, repeated.stderr);
+  assert.equal(repeated.response.state, 'already_staged');
+});
+
 test('successful replacement permits real historical Server upgrade; failed activation rolls back release and preserves state', async () => {
   await resetBootstrapFixture();
   const replacement = replacementRequest('bkr_50000000-0000-4000-8000-000000000001');
@@ -1067,11 +1244,33 @@ test('successful replacement permits real historical Server upgrade; failed acti
   assert.equal((await fs.realpath(path.join(layoutRoot, 'current'))).split(path.sep).at(-1), OLD_SERVER_RELEASE_ID);
   assert.equal(await fs.lstat(path.join(stateRoot, 'checkpoints/release-activation.lock')).then(() => true).catch(() => false), false);
 
-  const successful = await activateNewServer(NEW_SERVER_RELEASE_ID, 'boot_bootstrap_fixture_success_20261109');
-  assert.equal(successful.releaseId, NEW_SERVER_RELEASE_ID);
+  const successAttempt = 'boot_bootstrap_fixture_success_20261109';
+  const staged = await stageNewServerRelease(successAttempt);
+  assert.equal(staged.status, 0, staged.stderr);
+  assert.equal(staged.response.ok, true);
+  assert.equal(staged.response.contract, 'sonuvi.gate-c-stage-response.v1');
+  assert.equal(staged.response.operation, 'stage_release');
+  assert.equal(staged.response.state, 'staged');
+  assert.equal(staged.response.releaseId, NEW_SERVER_RELEASE_ID);
+  const repeatedStage = await stageNewServerRelease(successAttempt);
+  assert.equal(repeatedStage.status, 0, repeatedStage.stderr);
+  assert.equal(repeatedStage.response.state, 'already_staged');
+
+  const successful = await activateNewServer(successAttempt);
+  assert.equal(successful.status, 0, successful.stderr);
+  assert.equal(successful.response.ok, true);
+  assert.equal(successful.response.contract, 'sonuvi.gate-c-existing-install-upgrade.v1');
+  assert.equal(successful.response.operation, 'activate_existing_install');
+  assert.equal(successful.response.state, 'committed');
+  assert.equal(successful.response.releaseId, NEW_SERVER_RELEASE_ID);
+  assert.equal(successful.response.previousReleaseId, OLD_SERVER_RELEASE_ID);
+  assert.equal(successful.response.attemptId, successAttempt);
+  assert.equal(successful.response.targetIdentity, targetIdentity);
   assert.equal((await fs.realpath(path.join(layoutRoot, 'current'))).split(path.sep).at(-1), NEW_SERVER_RELEASE_ID);
+  await assertSystemdServiceIdentity(NEW_SERVER_RELEASE_ID);
   await assertHealth(NEW_SERVER_RELEASE_ID);
   await verifyPreservedState();
+  await verifySshAuthorization();
   assert.equal(await activeKitDigest(), NEW_KIT_SHA256);
   const committedState = JSON.parse(await fs.readFile(path.join(stateRoot, 'checkpoints/release-upgrade-state.json'), 'utf8'));
   assert.equal(committedState.phase, 'committed');
@@ -1082,19 +1281,67 @@ test('successful replacement permits real historical Server upgrade; failed acti
   await resetReleaseCheckpoint(OLD_SERVER_RELEASE_ID, originalCheckpoint);
   await fs.writeFile(healthFailurePath, `${NEW_SERVER_RELEASE_ID}\n`);
   await fs.chmod(healthFailurePath, 0o644);
-  await assert.rejects(
-    activateNewServer(NEW_SERVER_RELEASE_ID, 'boot_bootstrap_fixture_rollback_20261109'),
-    /health|activation failed/i,
-  );
+  const rollbackAttempt = 'boot_bootstrap_fixture_rollback_20261109';
+  const restaged = await stageNewServerRelease(rollbackAttempt);
+  assert.equal(restaged.status, 0, restaged.stderr);
+  assert.equal(restaged.response.state, 'already_staged');
+  const failed = await activateNewServer(rollbackAttempt);
+  assert.notEqual(failed.status, 0, 'simulated health failure unexpectedly committed');
+  assert.equal(failed.response.ok, false);
+  assert.equal(failed.response.code, 'upgrade_activation_failed');
   assert.equal((await fs.realpath(path.join(layoutRoot, 'current'))).split(path.sep).at(-1), OLD_SERVER_RELEASE_ID);
+  await assertSystemdServiceIdentity(OLD_SERVER_RELEASE_ID);
   await assertHealth(OLD_SERVER_RELEASE_ID);
   await verifyPreservedState();
+  await verifySshAuthorization();
   assert.equal(await activeKitDigest(), NEW_KIT_SHA256);
   const rolledBackState = JSON.parse(await fs.readFile(path.join(stateRoot, 'checkpoints/release-upgrade-state.json'), 'utf8'));
   assert.equal(rolledBackState.phase, 'rolled-back');
   assert.equal(await fs.lstat(path.join(stateRoot, 'checkpoints/release-activation.lock')).then(() => true).catch(() => false), false);
   const terminalRecovery = JSON.parse(await fs.readFile(path.join(stateRoot, 'checkpoints/release-upgrade-state.json'), 'utf8'));
   assert.equal(['committed', 'rolled-back'].includes(terminalRecovery.phase), true);
+});
+
+test('bootstrap recovery completes before the promoted-kit Server interruption recovery', async () => {
+  await fixtureSetup();
+  const replacement = replacementRequest('bkr_51000000-0000-4000-8000-000000000001');
+  await interruptCapsuleAtExchange(replacement.operationId, 'after');
+  assert.equal(await activeKitDigest(), NEW_KIT_SHA256);
+  await assertAdmissionBlockedForEveryOperation();
+  const actualAdmission = await runPromotedAdmissionGuard('stage_release');
+  assert.notEqual(actualAdmission.status, 0, 'unresolved bootstrap recovery must reject the actual promoted helper path');
+  assert.equal(actualAdmission.response.code, 'bootstrap_recovery_required');
+  const bootstrapRecovered = runCapsule('recover_bootstrap_kit_replacement', replacement);
+  assert.equal(bootstrapRecovered.status, 0, bootstrapRecovered.stderr);
+  assert.equal(bootstrapRecovered.response.state, 'committed_after_interruption');
+  await verifyKitAt(ACTIVE_KIT, NEW_KIT_SHA256);
+
+  const attemptId = 'boot_bootstrap_fixture_interrupted_20261109';
+  const staged = await stageNewServerRelease(attemptId);
+  assert.equal(staged.status, 0, staged.stderr);
+  assert.equal(staged.response.state, 'staged');
+  assert.equal(await fs.lstat(path.join(layoutRoot, 'releases', NEW_SERVER_RELEASE_ID)).then(() => true).catch(() => false), false, 'only the fixed activation helper promotes the staged release to the host inventory');
+  const interrupted = await interruptPromotedActivation(attemptId);
+  assert.equal(interrupted.phase, 'services-verified');
+  assert.equal((await fs.realpath(path.join(layoutRoot, 'current'))).split(path.sep).at(-1), NEW_SERVER_RELEASE_ID);
+  assert.equal(await fs.lstat(releaseLockPath).then(() => true).catch(() => false), true);
+  const recovered = await recoverInterruptedServerRelease();
+  assert.equal(recovered.status, 0, recovered.stderr);
+  assert.equal(recovered.response.ok, true);
+  assert.equal(recovered.response.operation, 'recover_interrupted_upgrade');
+  assert.equal(recovered.response.state, 'recovered');
+  assert.equal(recovered.response.previousReleaseId, OLD_SERVER_RELEASE_ID);
+  assert.equal((await fs.realpath(path.join(layoutRoot, 'current'))).split(path.sep).at(-1), OLD_SERVER_RELEASE_ID);
+  await assertSystemdServiceIdentity(OLD_SERVER_RELEASE_ID);
+  await assertHealth(OLD_SERVER_RELEASE_ID);
+  await verifyPreservedState();
+  await verifySshAuthorization();
+  await verifyKitAt(ACTIVE_KIT, NEW_KIT_SHA256);
+  await verifyKitAt(path.join(REPLACEMENTS, replacement.operationId, 'previous'), OLD_KIT_SHA256);
+  assert.equal(await fs.lstat(releaseLockPath).then(() => true).catch(() => false), false);
+  const repeated = await recoverInterruptedServerRelease();
+  assert.equal(repeated.status, 0, repeated.stderr);
+  assert.equal(repeated.response.state, 'no-recovery-required');
 });
 
 test('bootstrap rollback uses only the preserved verified directory exchange', async () => {
