@@ -13,9 +13,11 @@ import {
 } from '../../../src/lib/release-artifact.mjs';
 import { verifySignedGateCReleaseMetadata } from '../../../src/lib/sonuvi-gate-c-release.mjs';
 import { readGateCTargetIdentity } from '../../../src/lib/sonuvi-gate-c-target-preflight.mjs';
+import { activateReleaseTransaction } from '../../../src/lib/release-activation.mjs';
 import {
-  activateReleaseTransaction,
-} from '../../../src/lib/release-activation.mjs';
+  GATE_C_BOOTSTRAP_ADMISSION_OPERATIONS,
+  gateCBootstrapAdmissionGuardProgram,
+} from '../../../src/lib/sonuvi-gate-c-bootstrap-replacement-contract.mjs';
 import { createLinuxSystemdUpgradeAdapter } from '../../../src/lib/sonuvi-linux-systemd-upgrade.mjs';
 
 const CAPSULE = '/sonuvi/scripts/sonuvi-sftp-bootstrap-activate-v2.sh';
@@ -48,6 +50,8 @@ const healthFailurePath = '/run/sonuvi-bootstrap-replacement-fail-health';
 const fixtureMarker = '/run/sonuvi-bootstrap-replacement-fixture-owned';
 const interposerSource = '/sonuvi/test/fixtures/systemd-upgrade/renameat2-interrupt.c';
 const interposerLibrary = '/tmp/sonuvi-bootstrap-replacement-interrupt.so';
+const admissionGuardHelper = '/tmp/sonuvi-bootstrap-admission-helper.mjs';
+const admissionGuardMarker = '/run/sonuvi-bootstrap-admission-helper-loaded';
 function ensureSystemUser(name, args) {
   const existing = spawnSync('/usr/bin/id', ['-u', name], { encoding: 'utf8' });
   if (existing.status === 0) return;
@@ -151,6 +155,144 @@ function expectCapsuleFailure(operation, request, code, envOverrides = {}) {
   assert.equal(result.response.operationId, request.operationId);
   assert.equal(result.response.targetIdentity, request.targetIdentity);
   return result.response;
+}
+
+function initialJournal(request) {
+  const now = '2026-11-09T12:00:00.000Z';
+  return {
+    contract: 'sonuvi.gate-c-bootstrap-kit-replacement.v1',
+    operationId: request.operationId,
+    targetIdentity: request.targetIdentity,
+    expectedServerReleaseId: request.expectedServerReleaseId,
+    previousBootstrapKitSHA256: request.previousBootstrapKitSHA256,
+    replacementReleaseId: request.replacementReleaseId,
+    replacementKitSHA256: request.replacementKitSHA256,
+    replacementKitBytes: request.replacementKitBytes,
+    signedEnvelopeSHA256: crypto.createHash('sha256').update(JSON.stringify(request.envelope)).digest('hex'),
+    state: 'preparing',
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function initialJournalIntent(request) {
+  const journal = initialJournal(request);
+  return {
+    contract: 'sonuvi.gate-c-bootstrap-initial-journal-intent.v1',
+    operationId: journal.operationId,
+    targetIdentity: journal.targetIdentity,
+    expectedServerReleaseId: journal.expectedServerReleaseId,
+    previousBootstrapKitSHA256: journal.previousBootstrapKitSHA256,
+    createdAt: journal.createdAt,
+  };
+}
+
+async function syncFixtureDirectory(directory) {
+  const handle = await fs.open(directory, 'r');
+  try { await handle.sync(); } finally { await handle.close(); }
+}
+
+async function writeInitialJournalIntent(request, { syncFile = false, syncRoot = false } = {}) {
+  await fs.mkdir(REPLACEMENTS, { recursive: true, mode: 0o700 });
+  await fs.chown(REPLACEMENTS, 0, 0);
+  await fs.chmod(REPLACEMENTS, 0o700);
+  const value = initialJournalIntent(request);
+  const contents = Buffer.from(`${JSON.stringify(value)}\n`, 'utf8');
+  const target = path.join(REPLACEMENTS, `.initial-journal-intent-${request.operationId}.json`);
+  const temporary = path.join(REPLACEMENTS, `.initial-journal-intent-${request.operationId}-${crypto.randomUUID()}.tmp`);
+  const handle = await fs.open(temporary, 'wx', 0o600);
+  try {
+    await handle.writeFile(contents);
+    await handle.chown(0, 0);
+    await handle.chmod(0o600);
+    if (syncFile) await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  await fs.rename(temporary, target);
+  if (syncRoot) await syncFixtureDirectory(REPLACEMENTS);
+  return { contents, path: target, value };
+}
+
+async function writeInitialJournalTemporary(operationId, contents, { syncFile = false, syncRoot = false } = {}) {
+  await fs.mkdir(REPLACEMENTS, { recursive: true, mode: 0o700 });
+  await fs.chown(REPLACEMENTS, 0, 0);
+  await fs.chmod(REPLACEMENTS, 0o700);
+  const temporary = path.join(REPLACEMENTS, `.journal-${operationId}.tmp`);
+  const handle = await fs.open(temporary, 'wx', 0o600);
+  try {
+    if (contents.length) await handle.writeFile(contents);
+    if (syncFile) await handle.sync();
+    await handle.chown(0, 0);
+    await handle.chmod(0o600);
+  } finally {
+    await handle.close();
+  }
+  if (syncRoot) await syncFixtureDirectory(REPLACEMENTS);
+  return temporary;
+}
+
+async function ensureAdmissionGuardFixture() {
+  await fs.writeFile(admissionGuardHelper, [
+    "import fs from 'node:fs/promises';",
+    "await fs.appendFile(process.env.SONUVI_ADMISSION_FIXTURE_MARKER, 'loaded\\n');",
+  ].join('\n'), { mode: 0o600 });
+  await fs.chown(admissionGuardHelper, 0, 0);
+  await fs.chmod(admissionGuardHelper, 0o600);
+  await fs.writeFile(admissionGuardMarker, '', { mode: 0o600 });
+  await fs.chown(admissionGuardMarker, 0, 0);
+  await fs.chmod(admissionGuardMarker, 0o600);
+}
+
+async function ensureAdmissionLock() {
+  const lock = path.join(BOOTSTRAP_ROOT, 'bootstrap-admission.lock');
+  const handle = await fs.open(lock, 'a', 0o600);
+  await handle.close();
+  await fs.chown(lock, 0, 0);
+  await fs.chmod(lock, 0o600);
+  return lock;
+}
+
+async function runAdmissionGuard(operation) {
+  const lock = await ensureAdmissionLock();
+  const helpers = Object.fromEntries(Object.values(GATE_C_BOOTSTRAP_ADMISSION_OPERATIONS).map((name) => [name, admissionGuardHelper]));
+  const program = gateCBootstrapAdmissionGuardProgram({
+    bootstrapRoot: BOOTSTRAP_ROOT,
+    expectedUID: 0,
+    expectedGID: 0,
+    helpers,
+    nodePath: process.execPath,
+  });
+  const result = run('/usr/bin/flock', ['-n', lock, process.execPath, '--input-type=module', '--eval', program, operation], {
+    env: { ...capsuleEnvironment(), SONUVI_ADMISSION_FIXTURE_MARKER: admissionGuardMarker },
+  });
+  const line = String(result.stdout || '').trim().split(/\r?\n/).at(-1);
+  let response = null;
+  try { response = JSON.parse(line); } catch {}
+  return { ...result, response };
+}
+
+async function readAdmissionGuardMarker() {
+  return await fs.readFile(admissionGuardMarker, 'utf8');
+}
+
+async function assertAdmissionBlockedForEveryOperation() {
+  for (const operation of Object.values(GATE_C_BOOTSTRAP_ADMISSION_OPERATIONS)) {
+    await fs.truncate(admissionGuardMarker, 0);
+    const result = await runAdmissionGuard(operation);
+    assert.notEqual(result.status, 0, `${operation} unexpectedly loaded a replaceable helper`);
+    assert.equal(result.response?.code, 'bootstrap_recovery_required');
+    assert.equal(await readAdmissionGuardMarker(), '', `${operation} loaded a replaceable helper while blocked`);
+  }
+}
+
+async function assertAdmissionOpenedForEveryOperation() {
+  for (const operation of Object.values(GATE_C_BOOTSTRAP_ADMISSION_OPERATIONS)) {
+    await fs.truncate(admissionGuardMarker, 0);
+    const result = await runAdmissionGuard(operation);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.equal(await readAdmissionGuardMarker(), 'loaded\n', `${operation} did not reach its replaceable helper`);
+  }
 }
 
 async function ensureRootKitFromArchive(archive, destination, expectedDigest) {
@@ -593,6 +735,7 @@ async function fixtureSetup() {
   assert.equal(replacementRelease.length, signed.metadata.artifact.bytes);
   assert.equal(crypto.createHash('sha256').update(replacementRelease).digest('hex'), signed.metadata.artifact.sha256);
   await compileInterposer();
+  await ensureAdmissionGuardFixture();
   await resetBootstrapFixture();
   assert.equal(await activeKitDigest(), OLD_KIT_SHA256);
   await setupServerReleases();

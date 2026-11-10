@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -58,6 +59,68 @@ async function writeJournal(fixture, operationId, state) {
   await fs.writeFile(file, `${JSON.stringify(journal(operationId, state))}\n`, { mode: 0o600 });
   await fs.chmod(file, 0o600);
   return { file, root };
+}
+
+function incompleteInitialJournal(operationId, { partial = false, afterByteCountDelimiter = false } = {}) {
+  if (!partial && !afterByteCountDelimiter) return Buffer.alloc(0);
+  const source = Buffer.from(`${JSON.stringify(journal(operationId, 'preparing'))}\n`, 'utf8');
+  if (afterByteCountDelimiter) {
+    const delimiter = Buffer.from('"replacementKitBytes":', 'utf8');
+    return source.subarray(0, source.indexOf(delimiter) + delimiter.length);
+  }
+  return source.subarray(0, Math.floor(source.length / 2));
+}
+
+function initialJournalIntent(operationId) {
+  return {
+    contract: 'sonuvi.gate-c-bootstrap-initial-journal-intent.v1',
+    operationId,
+    targetIdentity: TARGET,
+    expectedServerReleaseId: OLD_RELEASE,
+    previousBootstrapKitSHA256: OLD_KIT,
+    createdAt: '2026-11-09T12:00:00.000Z',
+  };
+}
+
+async function writeInitialTemporary(fixture, operationId, contents) {
+  await fs.mkdir(fixture.replacements, { recursive: true, mode: 0o700 });
+  await fs.chmod(fixture.replacements, 0o700);
+  const file = path.join(fixture.replacements, `.journal-${operationId}.tmp`);
+  await fs.writeFile(file, contents, { mode: 0o600 });
+  await fs.chmod(file, 0o600);
+  return file;
+}
+
+async function writeInitialJournalIntent(fixture, operationId) {
+  await fs.mkdir(fixture.replacements, { recursive: true, mode: 0o700 });
+  await fs.chmod(fixture.replacements, 0o700);
+  const value = initialJournalIntent(operationId);
+  const contents = Buffer.from(`${JSON.stringify(value)}\n`, 'utf8');
+  const file = path.join(fixture.replacements, `.initial-journal-intent-${operationId}.json`);
+  await fs.writeFile(file, contents, { mode: 0o600 });
+  await fs.chmod(file, 0o600);
+  return { contents, file, value };
+}
+
+async function writeInitialRecoveryReceipt(fixture, operationId, contents, intent, { activeDigest = OLD_KIT } = {}) {
+  const receipt = {
+    contract: 'sonuvi.gate-c-bootstrap-initial-journal-recovery.v1',
+    operationId,
+    targetIdentity: TARGET,
+    activeBootstrapKitSHA256: activeDigest,
+    activeBootstrapReleaseId: OLD_RELEASE,
+    initialJournalIntentBytes: intent.contents.length,
+    initialJournalIntentSHA256: crypto.createHash('sha256').update(intent.contents).digest('hex'),
+    temporaryJournalBytes: contents.length,
+    temporaryJournalSHA256: crypto.createHash('sha256').update(contents).digest('hex'),
+    temporaryJournalKind: contents.length === 0 ? 'empty' : 'truncated',
+    state: 'aborted_before_promotion',
+    recoveredAt: '2026-11-09T12:00:00.000Z',
+  };
+  const file = path.join(fixture.replacements, `.initial-journal-recovery-${operationId}.json`);
+  await fs.writeFile(file, `${JSON.stringify(receipt)}\n`, { mode: 0o600 });
+  await fs.chmod(file, 0o600);
+  return { file, receipt };
 }
 
 async function setJournalTimes(file, createdAt, updatedAt) {
@@ -216,6 +279,69 @@ test('actual locked admission entrypoint blocks every normal helper for replacem
     assert.equal((await fs.readFile(path.join(fixture.active, '.sonuvi-bootstrap-kit-v2.sha256'), 'utf8')).trim(), scenario.active, `${scenario.label} changed the active kit`);
     assert.deepEqual(await fs.readFile(independent.journalPath), independent.journal, `${scenario.label} touched the Server release journal`);
     assert.deepEqual(await fs.readFile(independent.lockPath), independent.lock, `${scenario.label} touched the Server release lock`);
+  }
+});
+
+test('actual locked admission entrypoint resumes only after retained empty or truncated initial-journal evidence has a terminal fixed-recovery receipt', {
+  skip: !flockAvailable || !Number.isSafeInteger(uid) || !Number.isSafeInteger(gid),
+}, async (t) => {
+  for (const [index, contents] of [
+    incompleteInitialJournal('bkr_00000000-0000-4000-8000-000000000501'),
+    incompleteInitialJournal('bkr_00000000-0000-4000-8000-000000000502', { partial: true }),
+    incompleteInitialJournal('bkr_00000000-0000-4000-8000-000000000503', { afterByteCountDelimiter: true }),
+  ].entries()) {
+    const fixture = await createFixture(t);
+    const operationId = `bkr_00000000-0000-4000-8000-${String(index + 501).padStart(12, '0')}`;
+    const intent = await writeInitialJournalIntent(fixture, operationId);
+    const temporary = await writeInitialTemporary(fixture, operationId, contents);
+
+    await assertBlockedForEveryOperation(fixture);
+    const { file: receipt } = await writeInitialRecoveryReceipt(fixture, operationId, contents, intent);
+    await assertAdmittedForEveryOperation(fixture);
+
+    assert.deepEqual(await fs.readFile(temporary), contents, 'admission must retain incomplete journal evidence');
+    assert.equal(JSON.parse(await fs.readFile(receipt, 'utf8')).state, 'aborted_before_promotion');
+  }
+});
+
+test('admission guard fails closed for forged, substituted, or ambiguous initial-journal evidence', {
+  skip: !flockAvailable || !Number.isSafeInteger(uid) || !Number.isSafeInteger(gid),
+}, async (t) => {
+  const scenarios = [
+    {
+      label: 'arbitrary malformed journal',
+      contents: () => Buffer.from('{not-json', 'utf8'),
+      mutate: async () => {},
+    },
+    {
+      label: 'valid initial journal substituted for an incomplete record',
+      contents: (operationId) => Buffer.from(`${JSON.stringify(journal(operationId, 'preparing'))}\n`, 'utf8'),
+      mutate: async () => {},
+    },
+    {
+      label: 'active kit changed after recovery evidence',
+      contents: (operationId) => incompleteInitialJournal(operationId, { partial: true }),
+      mutate: async (fixture) => { await resetActive(fixture, NEW_KIT); },
+    },
+    {
+      label: 'transaction directory exists beside incomplete evidence',
+      contents: (operationId) => incompleteInitialJournal(operationId, { partial: true }),
+      mutate: async (fixture, operationId) => {
+        const root = path.join(fixture.replacements, operationId);
+        await fs.mkdir(root, { mode: 0o700 });
+        await fs.chmod(root, 0o700);
+      },
+    },
+  ];
+  for (const [index, scenario] of scenarios.entries()) {
+    const fixture = await createFixture(t);
+    const operationId = `bkr_00000000-0000-4000-8000-${String(index + 601).padStart(12, '0')}`;
+    const contents = scenario.contents(operationId);
+    const intent = await writeInitialJournalIntent(fixture, operationId);
+    await writeInitialTemporary(fixture, operationId, contents);
+    await writeInitialRecoveryReceipt(fixture, operationId, contents, intent);
+    await scenario.mutate(fixture, operationId);
+    await assertBlockedForEveryOperation(fixture);
   }
 });
 

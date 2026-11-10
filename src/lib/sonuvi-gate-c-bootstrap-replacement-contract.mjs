@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 export const GATE_C_BOOTSTRAP_KIT_REPLACEMENT_CONTRACT = 'sonuvi.gate-c-bootstrap-kit-replacement.v1';
 export const GATE_C_BOOTSTRAP_ADMISSION_LOCK_PATH = '/var/lib/sonuvi-bootstrap/bootstrap-admission.lock';
 export const GATE_C_BOOTSTRAP_REPLACEMENT_JOURNAL_ROOT = '/var/lib/sonuvi-bootstrap/bootstrap-kit-replacements';
-export const GATE_C_BOOTSTRAP_REPLACEMENT_CAPSULE_SHA256 = '30ced067ecc63bdf7d32c8968d108296fdc6ff10bbc54da1fa37cf2ee364f8e2';
+export const GATE_C_BOOTSTRAP_REPLACEMENT_CAPSULE_SHA256 = '81d12cfa6b27ef82ee6aa3536729e0f004b9024d4aa2e2fcedb821b0c542334d';
 
 export const GATE_C_BOOTSTRAP_ADMISSION_HELPERS = Object.freeze({
   stageRelease: '/var/lib/sonuvi-bootstrap/bootstrap-kit-v2/scripts/sonuvi-release-stage.mjs',
@@ -176,6 +176,7 @@ function admissionGuardConfiguration({
 // atomically replaceable kit. It uses only Node built-ins until it has inspected
 // a root-owned replacement journal while flock still holds the admission lock.
 const ADMISSION_GUARD_TEMPLATE = String.raw`
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -185,6 +186,20 @@ const JOURNAL_KEYS = Object.freeze([
   'contract', 'createdAt', 'expectedServerReleaseId', 'operationId', 'previousBootstrapKitSHA256',
   'replacementKitBytes', 'replacementKitSHA256', 'replacementReleaseId', 'signedEnvelopeSHA256', 'state', 'targetIdentity', 'updatedAt',
 ]);
+const INITIAL_INTENT_KEYS = Object.freeze([
+  'contract', 'createdAt', 'expectedServerReleaseId', 'operationId', 'previousBootstrapKitSHA256', 'targetIdentity',
+]);
+const INITIAL_RECOVERY_KEYS = Object.freeze([
+  'activeBootstrapKitSHA256', 'activeBootstrapReleaseId', 'contract', 'initialJournalIntentBytes', 'initialJournalIntentSHA256',
+  'operationId', 'recoveredAt', 'state', 'targetIdentity', 'temporaryJournalBytes', 'temporaryJournalKind', 'temporaryJournalSHA256',
+]);
+const INITIAL_INTENT_CONTRACT = 'sonuvi.gate-c-bootstrap-initial-journal-intent.v1';
+const INITIAL_INTENT_PREFIX = '.initial-journal-intent-';
+const INITIAL_INTENT_SUFFIX = '.json';
+const INITIAL_RECOVERY_CONTRACT = 'sonuvi.gate-c-bootstrap-initial-journal-recovery.v1';
+const INITIAL_RECOVERY_PREFIX = '.initial-journal-recovery-';
+const INITIAL_RECOVERY_SUFFIX = '.json';
+const INITIAL_JOURNAL_MAX_BYTES = 32 * 1024;
 const TERMINAL_STATES = new Set(['aborted_before_promotion', 'committed', 'rolled_back']);
 const ALL_STATES = new Set(['aborted_before_promotion', 'committed', 'prepared', 'preparing', 'promoted', 'rollback_prepared', 'rolled_back']);
 const operationIdPattern = /^bkr_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -197,6 +212,9 @@ function modeOf(stat) { return stat.mode & 0o7777; }
 function sameKeys(value, expected) {
   return value && typeof value === 'object' && !Array.isArray(value)
     && Object.keys(value).sort().join(',') === [...expected].sort().join(',');
+}
+function validTimestamp(value) {
+  return typeof value === 'string' && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
 }
 function trusted(stat, kind, mode) {
   return Boolean(stat) && !stat.isSymbolicLink() && stat.uid === CONFIG.expectedUID && stat.gid === CONFIG.expectedGID
@@ -233,19 +251,184 @@ function validJournal(value, operationId) {
     && digestPattern.test(value.previousBootstrapKitSHA256) && releasePattern.test(value.replacementReleaseId)
     && digestPattern.test(value.replacementKitSHA256) && digestPattern.test(value.signedEnvelopeSHA256)
     && Number.isSafeInteger(value.replacementKitBytes) && value.replacementKitBytes >= 1 && value.replacementKitBytes <= 16 * 1024 * 1024
-    && ALL_STATES.has(value.state) && typeof value.createdAt === 'string' && Number.isFinite(Date.parse(value.createdAt))
-    && typeof value.updatedAt === 'string' && Number.isFinite(Date.parse(value.updatedAt));
+    && ALL_STATES.has(value.state) && validTimestamp(value.createdAt) && validTimestamp(value.updatedAt);
+}
+function initialTemporaryName(operationId) { return '.journal-' + operationId + '.tmp'; }
+function initialIntentName(operationId) { return INITIAL_INTENT_PREFIX + operationId + INITIAL_INTENT_SUFFIX; }
+function initialRecoveryName(operationId) { return INITIAL_RECOVERY_PREFIX + operationId + INITIAL_RECOVERY_SUFFIX; }
+function operationIdForInitialTemporary(name) {
+  if (!name.startsWith('.journal-') || !name.endsWith('.tmp')) return null;
+  const operationId = name.slice('.journal-'.length, -'.tmp'.length);
+  return operationIdPattern.test(operationId) ? operationId : null;
+}
+function operationIdForInitialRecovery(name) {
+  if (!name.startsWith(INITIAL_RECOVERY_PREFIX) || !name.endsWith(INITIAL_RECOVERY_SUFFIX)) return null;
+  const operationId = name.slice(INITIAL_RECOVERY_PREFIX.length, -INITIAL_RECOVERY_SUFFIX.length);
+  return operationIdPattern.test(operationId) ? operationId : null;
+}
+function operationIdForInitialIntent(name) {
+  if (!name.startsWith(INITIAL_INTENT_PREFIX) || !name.endsWith(INITIAL_INTENT_SUFFIX)) return null;
+  const operationId = name.slice(INITIAL_INTENT_PREFIX.length, -INITIAL_INTENT_SUFFIX.length);
+  return operationIdPattern.test(operationId) ? operationId : null;
+}
+function knownPrefix(value, prefix, suffixLength) {
+  if (value.length > prefix.length + suffixLength) return false;
+  if (value.length <= prefix.length) return prefix.startsWith(value);
+  return value.startsWith(prefix) && /^[a-f0-9]*$/.test(value.slice(prefix.length));
+}
+function timestampPrefix(value) {
+  const layout = 'NNNN-NN-NNTNN:NN:NN.NNNZ';
+  if (value.length > layout.length) return false;
+  for (let index = 0; index < value.length; index += 1) {
+    if (layout[index] === 'N') {
+      if (!/[0-9]/.test(value[index])) return false;
+    } else if (value[index] !== layout[index]) return false;
+  }
+  return true;
+}
+function initialByteCountPrefix(value) {
+  return value === '' || (/^[1-9][0-9]{0,7}$/.test(value) && Number(value) <= 16 * 1024 * 1024);
+}
+function validInitialByteCount(value) {
+  return /^[1-9][0-9]{0,7}$/.test(value) && Number(value) <= 16 * 1024 * 1024;
+}
+function isInitialJournalPrefix(contents, operationId) {
+  let source;
+  try { source = new TextDecoder('utf-8', { fatal: true }).decode(contents); } catch { return false; }
+  let cursor = 0;
+  const consumeLiteral = (literal) => {
+    const observed = source.slice(cursor, cursor + literal.length);
+    if (observed.length < literal.length) return literal.startsWith(observed) ? 'incomplete' : 'invalid';
+    if (observed !== literal) return 'invalid';
+    cursor += literal.length;
+    return 'complete';
+  };
+  const consumeQuoted = (prefix, complete) => {
+    const closing = source.indexOf('"', cursor);
+    if (closing === -1) return prefix(source.slice(cursor)) ? 'incomplete' : 'invalid';
+    const value = source.slice(cursor, closing);
+    if (!complete(value)) return 'invalid';
+    cursor = closing + 1;
+    return 'complete';
+  };
+  const consumeDelimited = (delimiter, prefix, complete) => {
+    const closing = source.indexOf(delimiter, cursor);
+    if (closing === -1) return prefix(source.slice(cursor)) ? 'incomplete' : 'invalid';
+    const value = source.slice(cursor, closing);
+    if (!complete(value)) return 'invalid';
+    cursor = closing;
+    return 'complete';
+  };
+  const steps = [
+    ['literal', '{"contract":"sonuvi.gate-c-bootstrap-kit-replacement.v1","operationId":"'],
+    ['quoted', (value) => operationId.startsWith(value), (value) => value === operationId],
+    ['literal', ',"targetIdentity":"'],
+    ['quoted', (value) => knownPrefix(value, 'sonuvi-target-v1-', 64), (value) => targetPattern.test(value)],
+    ['literal', ',"expectedServerReleaseId":"'],
+    ['quoted', (value) => knownPrefix(value, 'sonuvi-', 64), (value) => releasePattern.test(value)],
+    ['literal', ',"previousBootstrapKitSHA256":"'],
+    ['quoted', (value) => /^[a-f0-9]{0,64}$/.test(value), (value) => digestPattern.test(value)],
+    ['literal', ',"replacementReleaseId":"'],
+    ['quoted', (value) => knownPrefix(value, 'sonuvi-', 64), (value) => releasePattern.test(value)],
+    ['literal', ',"replacementKitSHA256":"'],
+    ['quoted', (value) => /^[a-f0-9]{0,64}$/.test(value), (value) => digestPattern.test(value)],
+    ['literal', ',"replacementKitBytes":'],
+    ['delimited', ',', initialByteCountPrefix, validInitialByteCount],
+    ['literal', ',"signedEnvelopeSHA256":"'],
+    ['quoted', (value) => /^[a-f0-9]{0,64}$/.test(value), (value) => digestPattern.test(value)],
+    ['literal', ',"state":"'],
+    ['quoted', (value) => 'preparing'.startsWith(value), (value) => value === 'preparing'],
+    ['literal', ',"createdAt":"'],
+    ['quoted', timestampPrefix, validTimestamp],
+    ['literal', ',"updatedAt":"'],
+    ['quoted', timestampPrefix, validTimestamp],
+    ['literal', '}\n'],
+  ];
+  for (const [kind, ...values] of steps) {
+    const result = kind === 'literal' ? consumeLiteral(values[0])
+      : kind === 'quoted' ? consumeQuoted(values[0], values[1])
+        : consumeDelimited(values[0], values[1], values[2]);
+    if (result === 'incomplete') return true;
+    if (result === 'invalid') return false;
+  }
+  return cursor === source.length;
 }
 async function journalAt(operationId) {
   const directory = path.join(CONFIG.replacements, operationId);
   await requiredEntry(directory, 'directory', 0o700);
   const journalPath = path.join(directory, 'journal.json');
   const stat = await requiredEntry(journalPath, 'file', 0o600);
-  if (stat.size < 2 || stat.size > 32 * 1024) failClosed();
+  if (stat.nlink !== 1 || stat.size < 2 || stat.size > 32 * 1024) failClosed();
   let value;
   try { value = JSON.parse(await fs.readFile(journalPath, 'utf8')); } catch { failClosed(); }
   if (!validJournal(value, operationId)) failClosed();
   return { directory, value };
+}
+function validInitialJournalIntent(value, operationId) {
+  return sameKeys(value, INITIAL_INTENT_KEYS)
+    && value.contract === INITIAL_INTENT_CONTRACT && value.operationId === operationId && operationIdPattern.test(value.operationId)
+    && targetPattern.test(value.targetIdentity) && releasePattern.test(value.expectedServerReleaseId)
+    && digestPattern.test(value.previousBootstrapKitSHA256) && validTimestamp(value.createdAt);
+}
+async function initialJournalIntentAt(operationId) {
+  const intentPath = path.join(CONFIG.replacements, initialIntentName(operationId));
+  const stat = await requiredEntry(intentPath, 'file', 0o600);
+  if (stat.nlink !== 1 || stat.size < 2 || stat.size > 8 * 1024) failClosed();
+  let contents;
+  let value;
+  try {
+    contents = await fs.readFile(intentPath);
+    value = JSON.parse(contents.toString('utf8'));
+  } catch { failClosed(); }
+  if (!validInitialJournalIntent(value, operationId)) failClosed();
+  const canonical = Buffer.from(JSON.stringify(value) + '\n', 'utf8');
+  if (!contents.equals(canonical)) failClosed();
+  return {
+    value,
+    size: contents.length,
+    sha256: crypto.createHash('sha256').update(contents).digest('hex'),
+  };
+}
+function validInitialRecovery(value, operationId) {
+  return sameKeys(value, INITIAL_RECOVERY_KEYS)
+    && value.contract === INITIAL_RECOVERY_CONTRACT && value.operationId === operationId && operationIdPattern.test(value.operationId)
+    && targetPattern.test(value.targetIdentity) && digestPattern.test(value.activeBootstrapKitSHA256)
+    && releasePattern.test(value.activeBootstrapReleaseId) && Number.isSafeInteger(value.initialJournalIntentBytes)
+    && value.initialJournalIntentBytes >= 2 && value.initialJournalIntentBytes <= 8 * 1024
+    && digestPattern.test(value.initialJournalIntentSHA256) && Number.isSafeInteger(value.temporaryJournalBytes)
+    && value.temporaryJournalBytes >= 0 && value.temporaryJournalBytes <= INITIAL_JOURNAL_MAX_BYTES
+    && (value.temporaryJournalKind === 'empty' || value.temporaryJournalKind === 'truncated')
+    && digestPattern.test(value.temporaryJournalSHA256) && value.state === 'aborted_before_promotion'
+    && validTimestamp(value.recoveredAt);
+}
+async function assertInitialJournalRecovery(operationId) {
+  const transaction = await optionalEntry(path.join(CONFIG.replacements, operationId));
+  if (transaction) failClosed();
+  const intent = await initialJournalIntentAt(operationId);
+  const temporaryPath = path.join(CONFIG.replacements, initialTemporaryName(operationId));
+  const temporary = await requiredEntry(temporaryPath, 'file', 0o600);
+  if (temporary.nlink !== 1 || temporary.size > INITIAL_JOURNAL_MAX_BYTES) failClosed();
+  let contents;
+  try { contents = await fs.readFile(temporaryPath); } catch { failClosed(); }
+  if (contents.length !== temporary.size) failClosed();
+  let parsed = null;
+  try { parsed = JSON.parse(contents.toString('utf8')); } catch {}
+  if (parsed && validJournal(parsed, operationId)) failClosed();
+  if (!isInitialJournalPrefix(contents, operationId)) failClosed();
+  const recoveryPath = path.join(CONFIG.replacements, initialRecoveryName(operationId));
+  const recoveryStat = await requiredEntry(recoveryPath, 'file', 0o600);
+  if (recoveryStat.nlink !== 1 || recoveryStat.size < 2 || recoveryStat.size > 8 * 1024) failClosed();
+  let recovery;
+  try { recovery = JSON.parse(await fs.readFile(recoveryPath, 'utf8')); } catch { failClosed(); }
+  if (!validInitialRecovery(recovery, operationId)) failClosed();
+  const kind = contents.length === 0 ? 'empty' : 'truncated';
+  if (recovery.targetIdentity !== intent.value.targetIdentity
+    || recovery.activeBootstrapKitSHA256 !== intent.value.previousBootstrapKitSHA256
+    || recovery.initialJournalIntentBytes !== intent.size || recovery.initialJournalIntentSHA256 !== intent.sha256
+    || recovery.temporaryJournalBytes !== contents.length || recovery.temporaryJournalKind !== kind
+    || recovery.temporaryJournalSHA256 !== crypto.createHash('sha256').update(contents).digest('hex')
+    || Date.parse(recovery.recoveredAt) < Date.parse(intent.value.createdAt)) failClosed();
+  return recovery;
 }
 async function assertTerminalJournal(directory, journal) {
   const active = await marker(CONFIG.activeKit);
@@ -273,23 +456,62 @@ async function assertAdmitted() {
   let entries;
   try { entries = await fs.readdir(CONFIG.replacements, { withFileTypes: true }); } catch { failClosed(); }
   if (entries.length > 128) failClosed();
-  const journals = [];
+  const directories = new Set();
+  const temporaries = new Set();
+  const recoveries = new Set();
+  const intents = new Set();
   for (const entry of entries) {
-    if (!entry.isDirectory() || entry.isSymbolicLink() || !operationIdPattern.test(entry.name)) failClosed();
-    const current = await journalAt(entry.name);
-    if (!TERMINAL_STATES.has(current.value.state)) failClosed();
-    journals.push(current);
+    if (entry.isSymbolicLink()) failClosed();
+    if (entry.isDirectory()) {
+      if (!operationIdPattern.test(entry.name)) failClosed();
+      directories.add(entry.name);
+      continue;
+    }
+    if (!entry.isFile()) failClosed();
+    const temporaryId = operationIdForInitialTemporary(entry.name);
+    if (temporaryId) {
+      temporaries.add(temporaryId);
+      continue;
+    }
+    const recoveryId = operationIdForInitialRecovery(entry.name);
+    if (recoveryId) {
+      recoveries.add(recoveryId);
+      continue;
+    }
+    const intentId = operationIdForInitialIntent(entry.name);
+    if (intentId) {
+      intents.add(intentId);
+      continue;
+    }
+    failClosed();
   }
-  if (!journals.length) return;
-  // Retained journals describe historical exchanges too. The newest terminal
-  // journal alone must agree with the live pair; a timestamp tie is ambiguous
-  // and therefore is not admitted.
-  journals.sort((left, right) => Date.parse(right.value.updatedAt) - Date.parse(left.value.updatedAt));
-  if (journals.length > 1 && Date.parse(journals[0].value.updatedAt) === Date.parse(journals[1].value.updatedAt)) failClosed();
-  await assertTerminalJournal(journals[0].directory, journals[0].value);
-  for (const current of journals) {
-    if (Date.parse(current.value.updatedAt) < Date.parse(current.value.createdAt)) failClosed();
+  const records = [];
+  for (const operationId of directories) {
+    if (temporaries.has(operationId) || recoveries.has(operationId) || intents.has(operationId)) failClosed();
+    const current = await journalAt(operationId);
+    if (!TERMINAL_STATES.has(current.value.state) || Date.parse(current.value.updatedAt) < Date.parse(current.value.createdAt)) failClosed();
+    records.push({ at: current.value.updatedAt, current, kind: 'journal' });
   }
+  for (const operationId of temporaries) {
+    if (directories.has(operationId) || !intents.has(operationId) || !recoveries.has(operationId)) failClosed();
+    const recovery = await assertInitialJournalRecovery(operationId);
+    records.push({ at: recovery.recoveredAt, kind: 'initial', recovery });
+  }
+  for (const operationId of intents) {
+    if (!temporaries.has(operationId) || !recoveries.has(operationId)) failClosed();
+  }
+  for (const operationId of recoveries) {
+    if (!temporaries.has(operationId) || !intents.has(operationId)) failClosed();
+  }
+  if (!records.length) return;
+  records.sort((left, right) => Date.parse(right.at) - Date.parse(left.at));
+  if (records.length > 1 && Date.parse(records[0].at) === Date.parse(records[1].at)) failClosed();
+  const newest = records[0];
+  if (newest.kind === 'journal') {
+    await assertTerminalJournal(newest.current.directory, newest.current.value);
+    return;
+  }
+  if (await marker(CONFIG.activeKit) !== newest.recovery.activeBootstrapKitSHA256) failClosed();
 }
 function response(operation, code) {
   return {
@@ -464,7 +686,9 @@ export function normalizeGateCBootstrapKitReplacementResponse(value, expected = 
     if (!failureCodes.has(value.code)) throw new Error('bootstrap replacement response code is invalid');
     return Object.freeze(value);
   }
-  if (value.state === 'no_recovery_required') {
+  const boundedInitialJournalOutcome = value.state === 'aborted_before_promotion'
+    && Object.keys(value).sort().join(',') === ['contract', 'operation', 'ok', 'operationId', 'state', 'targetIdentity'].sort().join(',');
+  if (value.state === 'no_recovery_required' || boundedInitialJournalOutcome) {
     sameKeys(value, ['contract', 'operation', 'ok', 'operationId', 'state', 'targetIdentity'], 'bootstrap replacement recovery response');
     if (value.operation !== GATE_C_BOOTSTRAP_REPLACEMENT_OPERATIONS.recover) {
       throw new Error('bootstrap replacement response state is invalid for this operation');

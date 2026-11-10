@@ -111,6 +111,28 @@ test('replacement response distinguishes no-recovery from bound transaction outc
     operation: GATE_C_BOOTSTRAP_REPLACEMENT_OPERATIONS.replace,
   }, { operation: GATE_C_BOOTSTRAP_REPLACEMENT_OPERATIONS.replace }), /state/);
 
+  const initialJournalAbort = {
+    contract: GATE_C_BOOTSTRAP_KIT_REPLACEMENT_CONTRACT,
+    operation: GATE_C_BOOTSTRAP_REPLACEMENT_OPERATIONS.recover,
+    ok: true,
+    state: 'aborted_before_promotion',
+    operationId: request.operationId,
+    targetIdentity: request.targetIdentity,
+  };
+  assert.deepEqual(normalizeGateCBootstrapKitReplacementResponse(initialJournalAbort, {
+    operation: GATE_C_BOOTSTRAP_REPLACEMENT_OPERATIONS.recover,
+    operationId: request.operationId,
+    targetIdentity: request.targetIdentity,
+  }), initialJournalAbort);
+  assert.throws(() => normalizeGateCBootstrapKitReplacementResponse({
+    ...initialJournalAbort,
+    operation: GATE_C_BOOTSTRAP_REPLACEMENT_OPERATIONS.replace,
+  }, { operation: GATE_C_BOOTSTRAP_REPLACEMENT_OPERATIONS.replace }), /state/);
+  assert.throws(() => normalizeGateCBootstrapKitReplacementResponse({
+    ...initialJournalAbort,
+    extra: 'unbounded',
+  }, { operation: GATE_C_BOOTSTRAP_REPLACEMENT_OPERATIONS.recover }), /success response/);
+
   const replaced = {
     contract: GATE_C_BOOTSTRAP_KIT_REPLACEMENT_CONTRACT,
     operation: GATE_C_BOOTSTRAP_REPLACEMENT_OPERATIONS.replace,

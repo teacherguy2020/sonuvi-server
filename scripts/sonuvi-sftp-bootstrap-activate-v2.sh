@@ -113,6 +113,13 @@ const MAX_KIT_BYTES = 16 * 1024 * 1024;
 const ROOT = '/var/lib/sonuvi-bootstrap';
 const ACTIVE = path.join(ROOT, 'bootstrap-kit-v2');
 const REPLACEMENTS = path.join(ROOT, 'bootstrap-kit-replacements');
+const INITIAL_JOURNAL_INTENT_CONTRACT = 'sonuvi.gate-c-bootstrap-initial-journal-intent.v1';
+const INITIAL_JOURNAL_INTENT_PREFIX = '.initial-journal-intent-';
+const INITIAL_JOURNAL_INTENT_SUFFIX = '.json';
+const INITIAL_JOURNAL_RECOVERY_CONTRACT = 'sonuvi.gate-c-bootstrap-initial-journal-recovery.v1';
+const INITIAL_JOURNAL_RECOVERY_PREFIX = '.initial-journal-recovery-';
+const INITIAL_JOURNAL_RECOVERY_SUFFIX = '.json';
+const INITIAL_JOURNAL_MAX_BYTES = 32 * 1024;
 const TRUST_ROOT = '/etc/sonuvi';
 const TRUST_FILE = path.join(TRUST_ROOT, 'release-trust-anchors.json');
 const CURRENT_LINK = '/opt/sonuvi/current';
@@ -177,6 +184,9 @@ function validDigest(value) { return typeof value === 'string' && digestPattern.
 function validTarget(value) { return typeof value === 'string' && targetPattern.test(value); }
 function modeOf(stat) { return stat.mode & 0o7777; }
 function ownerIsRoot(stat) { return stat.uid === 0 && stat.gid === 0; }
+function validTimestamp(value) {
+  return typeof value === 'string' && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
+}
 function normalizedTrustAnchors(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).length < 1 || Object.keys(value).length > 32) fail('replacement_trust_anchor_mismatch');
@@ -692,6 +702,7 @@ async function writeJournal(operationRoot, journal) {
 }
 
 async function writeInitialJournal(operationRoot, journal) {
+  const intent = await writeInitialJournalIntent(journal);
   const temporary = path.join(REPLACEMENTS, `.journal-${journal.operationId}.tmp`);
   const handle = await fs.open(temporary, 'wx', 0o600).catch(() => fail('replacement_operation_conflict'));
   try {
@@ -706,7 +717,8 @@ async function writeInitialJournal(operationRoot, journal) {
   try {
     await fs.mkdir(operationRoot, { mode: 0o700 });
   } catch {
-    await fs.unlink(temporary).catch(() => {});
+    // The durable initial temporary journal is recovery evidence. Never remove
+    // it here: fixed recovery decides whether the interruption was pre-promotion.
     fail('replacement_operation_conflict');
   }
   await fs.chown(operationRoot, 0, 0);
@@ -714,6 +726,7 @@ async function writeInitialJournal(operationRoot, journal) {
   await syncDirectory(REPLACEMENTS);
   await fs.rename(temporary, path.join(operationRoot, 'journal.json'));
   await syncDirectory(operationRoot);
+  await discardInitialJournalIntent(intent, journal);
 }
 
 function validateJournal(value, expectedId) {
@@ -726,9 +739,334 @@ function validateJournal(value, expectedId) {
     || !validDigest(value.replacementKitSHA256) || !validDigest(value.signedEnvelopeSHA256) || !Number.isSafeInteger(value.replacementKitBytes)
     || value.replacementKitBytes < 1 || value.replacementKitBytes > MAX_KIT_BYTES
     || !['aborted_before_promotion', 'committed', 'prepared', 'preparing', 'promoted', 'rollback_prepared', 'rolled_back'].includes(value.state)
-    || typeof value.createdAt !== 'string' || !Number.isFinite(Date.parse(value.createdAt))
-    || typeof value.updatedAt !== 'string' || !Number.isFinite(Date.parse(value.updatedAt))) fail('replacement_recovery_required');
+    || !validTimestamp(value.createdAt) || !validTimestamp(value.updatedAt)) fail('replacement_recovery_required');
   return value;
+}
+
+function initialTemporaryName(operationId) { return `.journal-${operationId}.tmp`; }
+function initialRecoveryName(operationId) { return `${INITIAL_JOURNAL_RECOVERY_PREFIX}${operationId}${INITIAL_JOURNAL_RECOVERY_SUFFIX}`; }
+function initialIntentName(operationId) { return `${INITIAL_JOURNAL_INTENT_PREFIX}${operationId}${INITIAL_JOURNAL_INTENT_SUFFIX}`; }
+function initialTemporaryPath(operationId) { return path.join(REPLACEMENTS, initialTemporaryName(operationId)); }
+function initialRecoveryPath(operationId) { return path.join(REPLACEMENTS, initialRecoveryName(operationId)); }
+function initialIntentPath(operationId) { return path.join(REPLACEMENTS, initialIntentName(operationId)); }
+function operationIdForInitialTemporary(name) {
+  if (!name.startsWith('.journal-') || !name.endsWith('.tmp')) return null;
+  const operationId = name.slice('.journal-'.length, -'.tmp'.length);
+  return validId(operationId) ? operationId : null;
+}
+function operationIdForInitialRecovery(name) {
+  if (!name.startsWith(INITIAL_JOURNAL_RECOVERY_PREFIX) || !name.endsWith(INITIAL_JOURNAL_RECOVERY_SUFFIX)) return null;
+  const operationId = name.slice(INITIAL_JOURNAL_RECOVERY_PREFIX.length, -INITIAL_JOURNAL_RECOVERY_SUFFIX.length);
+  return validId(operationId) ? operationId : null;
+}
+function operationIdForInitialIntent(name) {
+  if (!name.startsWith(INITIAL_JOURNAL_INTENT_PREFIX) || !name.endsWith(INITIAL_JOURNAL_INTENT_SUFFIX)) return null;
+  const operationId = name.slice(INITIAL_JOURNAL_INTENT_PREFIX.length, -INITIAL_JOURNAL_INTENT_SUFFIX.length);
+  return validId(operationId) ? operationId : null;
+}
+function knownPrefix(value, prefix, suffixLength) {
+  if (value.length > prefix.length + suffixLength) return false;
+  if (value.length <= prefix.length) return prefix.startsWith(value);
+  return value.startsWith(prefix) && /^[a-f0-9]*$/.test(value.slice(prefix.length));
+}
+function timestampPrefix(value) {
+  const layout = 'NNNN-NN-NNTNN:NN:NN.NNNZ';
+  if (value.length > layout.length) return false;
+  for (let index = 0; index < value.length; index += 1) {
+    if (layout[index] === 'N') {
+      if (!/[0-9]/.test(value[index])) return false;
+    } else if (value[index] !== layout[index]) return false;
+  }
+  return true;
+}
+function initialByteCountPrefix(value) {
+  return value === '' || (/^[1-9][0-9]{0,7}$/.test(value) && Number(value) <= MAX_KIT_BYTES);
+}
+function validInitialByteCount(value) {
+  return /^[1-9][0-9]{0,7}$/.test(value) && Number(value) <= MAX_KIT_BYTES;
+}
+function isInitialJournalPrefix(contents, operationId) {
+  let source;
+  try { source = new TextDecoder('utf-8', { fatal: true }).decode(contents); } catch { return false; }
+  let cursor = 0;
+  const consumeLiteral = (literal) => {
+    const observed = source.slice(cursor, cursor + literal.length);
+    if (observed.length < literal.length) return literal.startsWith(observed) ? 'incomplete' : 'invalid';
+    if (observed !== literal) return 'invalid';
+    cursor += literal.length;
+    return 'complete';
+  };
+  const consumeQuoted = (prefix, complete) => {
+    const closing = source.indexOf('"', cursor);
+    if (closing === -1) return prefix(source.slice(cursor)) ? 'incomplete' : 'invalid';
+    const value = source.slice(cursor, closing);
+    if (!complete(value)) return 'invalid';
+    cursor = closing + 1;
+    return 'complete';
+  };
+  const consumeDelimited = (delimiter, prefix, complete) => {
+    const closing = source.indexOf(delimiter, cursor);
+    if (closing === -1) return prefix(source.slice(cursor)) ? 'incomplete' : 'invalid';
+    const value = source.slice(cursor, closing);
+    if (!complete(value)) return 'invalid';
+    cursor = closing;
+    return 'complete';
+  };
+  const steps = [
+    ['literal', `{"contract":"${CONTRACT}","operationId":"`],
+    ['quoted', (value) => operationId.startsWith(value), (value) => value === operationId],
+    ['literal', ',"targetIdentity":"'],
+    ['quoted', (value) => knownPrefix(value, 'sonuvi-target-v1-', 64), validTarget],
+    ['literal', ',"expectedServerReleaseId":"'],
+    ['quoted', (value) => knownPrefix(value, 'sonuvi-', 64), validRelease],
+    ['literal', ',"previousBootstrapKitSHA256":"'],
+    ['quoted', (value) => /^[a-f0-9]{0,64}$/.test(value), validDigest],
+    ['literal', ',"replacementReleaseId":"'],
+    ['quoted', (value) => knownPrefix(value, 'sonuvi-', 64), validRelease],
+    ['literal', ',"replacementKitSHA256":"'],
+    ['quoted', (value) => /^[a-f0-9]{0,64}$/.test(value), validDigest],
+    ['literal', ',"replacementKitBytes":'],
+    ['delimited', ',', initialByteCountPrefix, validInitialByteCount],
+    ['literal', ',"signedEnvelopeSHA256":"'],
+    ['quoted', (value) => /^[a-f0-9]{0,64}$/.test(value), validDigest],
+    ['literal', ',"state":"'],
+    ['quoted', (value) => 'preparing'.startsWith(value), (value) => value === 'preparing'],
+    ['literal', ',"createdAt":"'],
+    ['quoted', timestampPrefix, validTimestamp],
+    ['literal', ',"updatedAt":"'],
+    ['quoted', timestampPrefix, validTimestamp],
+    ['literal', '}\n'],
+  ];
+  for (const [kind, ...values] of steps) {
+    const result = kind === 'literal' ? consumeLiteral(values[0])
+      : kind === 'quoted' ? consumeQuoted(values[0], values[1])
+        : consumeDelimited(values[0], values[1], values[2]);
+    if (result === 'incomplete') return true;
+    if (result === 'invalid') return false;
+  }
+  return cursor === source.length;
+}
+
+function classifyInitialTemporary(contents, operationId) {
+  if (contents.length > INITIAL_JOURNAL_MAX_BYTES) fail('replacement_recovery_required');
+  try {
+    return { journal: validateJournal(JSON.parse(contents.toString('utf8')), operationId), kind: null };
+  } catch {
+    if (!isInitialJournalPrefix(contents, operationId)) fail('replacement_recovery_required');
+    return { journal: null, kind: contents.length === 0 ? 'empty' : 'truncated' };
+  }
+}
+
+function initialJournalIntent(journal) {
+  return {
+    contract: INITIAL_JOURNAL_INTENT_CONTRACT,
+    operationId: journal.operationId,
+    targetIdentity: journal.targetIdentity,
+    expectedServerReleaseId: journal.expectedServerReleaseId,
+    previousBootstrapKitSHA256: journal.previousBootstrapKitSHA256,
+    createdAt: journal.createdAt,
+  };
+}
+
+function validateInitialJournalIntent(value, expectedId) {
+  if (!sameKeys(value, [
+    'contract', 'createdAt', 'expectedServerReleaseId', 'operationId', 'previousBootstrapKitSHA256', 'targetIdentity',
+  ]) || value.contract !== INITIAL_JOURNAL_INTENT_CONTRACT || value.operationId !== expectedId || !validId(value.operationId)
+    || !validTarget(value.targetIdentity) || !validRelease(value.expectedServerReleaseId)
+    || !validDigest(value.previousBootstrapKitSHA256) || !validTimestamp(value.createdAt)) fail('replacement_recovery_required');
+  return value;
+}
+
+async function readInitialJournalIntent(operationId) {
+  const filePath = initialIntentPath(operationId);
+  const stat = await fs.lstat(filePath).catch((error) => error?.code === 'ENOENT' ? null : fail('replacement_recovery_required'));
+  if (!stat) return null;
+  if (!stat.isFile() || stat.isSymbolicLink() || !ownerIsRoot(stat) || modeOf(stat) !== 0o600 || stat.nlink !== 1 || stat.size < 2 || stat.size > 8 * 1024) {
+    fail('replacement_recovery_required');
+  }
+  let contents;
+  let value;
+  try {
+    contents = await fs.readFile(filePath);
+    value = validateInitialJournalIntent(JSON.parse(contents.toString('utf8')), operationId);
+  } catch { fail('replacement_recovery_required'); }
+  const canonical = Buffer.from(`${JSON.stringify(value)}\n`, 'utf8');
+  if (!contents.equals(canonical)) fail('replacement_recovery_required');
+  return { value, path: filePath, contents, size: contents.length, sha256: sha256(contents) };
+}
+
+async function writeInitialJournalIntent(journal) {
+  const intent = initialJournalIntent(journal);
+  const target = initialIntentPath(journal.operationId);
+  const existing = await fs.lstat(target).catch((error) => error?.code === 'ENOENT' ? null : fail('replacement_recovery_required'));
+  if (existing) fail('replacement_operation_conflict');
+  const temporary = path.join(REPLACEMENTS, `${INITIAL_JOURNAL_INTENT_PREFIX}${journal.operationId}-${crypto.randomUUID()}.tmp`);
+  const handle = await fs.open(temporary, 'wx', 0o600).catch(() => fail('replacement_operation_conflict'));
+  try {
+    await handle.writeFile(`${JSON.stringify(intent)}\n`, 'utf8');
+    await handle.chown(0, 0);
+    await handle.chmod(0o600);
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  await syncDirectory(REPLACEMENTS);
+  await fs.rename(temporary, target).catch(() => fail('replacement_recovery_required'));
+  await syncDirectory(REPLACEMENTS);
+  return await readInitialJournalIntent(journal.operationId);
+}
+
+function assertInitialIntentMatchesJournal(intent, journal) {
+  if (!intent || intent.value.operationId !== journal.operationId || intent.value.targetIdentity !== journal.targetIdentity
+    || intent.value.expectedServerReleaseId !== journal.expectedServerReleaseId
+    || intent.value.previousBootstrapKitSHA256 !== journal.previousBootstrapKitSHA256
+    || intent.value.createdAt !== journal.createdAt) fail('replacement_recovery_required');
+}
+
+async function discardInitialJournalIntent(intent, journal) {
+  assertInitialIntentMatchesJournal(intent, journal);
+  await fs.unlink(intent.path).catch(() => fail('replacement_recovery_required'));
+  await syncDirectory(REPLACEMENTS);
+}
+
+
+async function readInitialTemporary(operationId, intent = null) {
+  const filePath = initialTemporaryPath(operationId);
+  const stat = await fs.lstat(filePath).catch((error) => error?.code === 'ENOENT' ? null : fail('replacement_recovery_required'));
+  if (!stat) return null;
+  if (!stat.isFile() || stat.isSymbolicLink() || !ownerIsRoot(stat) || modeOf(stat) !== 0o600 || stat.nlink !== 1
+    || stat.size > INITIAL_JOURNAL_MAX_BYTES) fail('replacement_recovery_required');
+  let contents;
+  try { contents = await fs.readFile(filePath); } catch { fail('replacement_recovery_required'); }
+  if (contents.length !== stat.size) fail('replacement_recovery_required');
+  const classified = classifyInitialTemporary(contents, operationId);
+  if (!classified.journal && !intent) fail('replacement_recovery_required');
+  if (classified.journal && intent) assertInitialIntentMatchesJournal(intent, classified.journal);
+  return {
+    ...classified,
+    contents,
+    path: filePath,
+    sha256: sha256(contents),
+    size: contents.length,
+    intent,
+  };
+}
+
+function validateInitialJournalRecovery(value, expectedId) {
+  if (!sameKeys(value, [
+    'activeBootstrapKitSHA256', 'activeBootstrapReleaseId', 'contract', 'initialJournalIntentBytes', 'initialJournalIntentSHA256',
+    'operationId', 'recoveredAt', 'state', 'targetIdentity', 'temporaryJournalBytes', 'temporaryJournalKind', 'temporaryJournalSHA256',
+  ]) || value.contract !== INITIAL_JOURNAL_RECOVERY_CONTRACT || value.operationId !== expectedId || !validId(value.operationId)
+    || !validTarget(value.targetIdentity) || !validDigest(value.activeBootstrapKitSHA256) || !validRelease(value.activeBootstrapReleaseId)
+    || !Number.isSafeInteger(value.initialJournalIntentBytes) || value.initialJournalIntentBytes < 2 || value.initialJournalIntentBytes > 8 * 1024
+    || !validDigest(value.initialJournalIntentSHA256) || !Number.isSafeInteger(value.temporaryJournalBytes)
+    || value.temporaryJournalBytes < 0 || value.temporaryJournalBytes > INITIAL_JOURNAL_MAX_BYTES
+    || !['empty', 'truncated'].includes(value.temporaryJournalKind) || !validDigest(value.temporaryJournalSHA256)
+    || value.state !== 'aborted_before_promotion' || !validTimestamp(value.recoveredAt)) fail('replacement_recovery_required');
+  return value;
+}
+
+async function readInitialJournalRecovery(operationId) {
+  const filePath = initialRecoveryPath(operationId);
+  const stat = await fs.lstat(filePath).catch((error) => error?.code === 'ENOENT' ? null : fail('replacement_recovery_required'));
+  if (!stat) return null;
+  if (!stat.isFile() || stat.isSymbolicLink() || !ownerIsRoot(stat) || modeOf(stat) !== 0o600 || stat.nlink !== 1 || stat.size < 2 || stat.size > 8 * 1024) {
+    fail('replacement_recovery_required');
+  }
+  let value;
+  try { value = JSON.parse(await fs.readFile(filePath, 'utf8')); } catch { fail('replacement_recovery_required'); }
+  return validateInitialJournalRecovery(value, operationId);
+}
+
+async function assertInitialJournalRecoveryEvidence(operationId) {
+  const operationRoot = path.join(REPLACEMENTS, operationId);
+  const transaction = await fs.lstat(operationRoot).catch((error) => error?.code === 'ENOENT' ? null : fail('replacement_recovery_required'));
+  if (transaction) fail('replacement_recovery_required');
+  const intent = await readInitialJournalIntent(operationId);
+  const initial = intent && await readInitialTemporary(operationId, intent);
+  const recovery = await readInitialJournalRecovery(operationId);
+  if (!intent || !initial || initial.journal || !recovery || recovery.targetIdentity !== intent.value.targetIdentity
+    || recovery.activeBootstrapKitSHA256 !== intent.value.previousBootstrapKitSHA256
+    || recovery.initialJournalIntentBytes !== intent.size || recovery.initialJournalIntentSHA256 !== intent.sha256
+    || recovery.temporaryJournalBytes !== initial.size || recovery.temporaryJournalKind !== initial.kind
+    || recovery.temporaryJournalSHA256 !== initial.sha256
+    || Date.parse(recovery.recoveredAt) < Date.parse(intent.value.createdAt)) fail('replacement_recovery_required');
+  return { initial, intent, recovery };
+}
+
+async function writeInitialJournalRecovery(operationId, targetIdentity, active, initial) {
+  const operationRoot = path.join(REPLACEMENTS, operationId);
+  const transaction = await fs.lstat(operationRoot).catch((error) => error?.code === 'ENOENT' ? null : fail('replacement_recovery_required'));
+  const target = initialRecoveryPath(operationId);
+  const existing = await fs.lstat(target).catch((error) => error?.code === 'ENOENT' ? null : fail('replacement_recovery_required'));
+  const intent = initial.intent;
+  if (transaction || existing || !intent || initial.journal || !['empty', 'truncated'].includes(initial.kind)
+    || targetIdentity !== intent.value.targetIdentity || intent.value.previousBootstrapKitSHA256 !== active.marker) {
+    fail('replacement_recovery_required');
+  }
+  const recovery = {
+    contract: INITIAL_JOURNAL_RECOVERY_CONTRACT,
+    operationId,
+    targetIdentity,
+    activeBootstrapKitSHA256: active.marker,
+    activeBootstrapReleaseId: active.manifest.releaseId,
+    initialJournalIntentBytes: intent.size,
+    initialJournalIntentSHA256: intent.sha256,
+    temporaryJournalBytes: initial.size,
+    temporaryJournalSHA256: initial.sha256,
+    temporaryJournalKind: initial.kind,
+    state: 'aborted_before_promotion',
+    recoveredAt: new Date().toISOString(),
+  };
+  const temporary = path.join(REPLACEMENTS, `${INITIAL_JOURNAL_RECOVERY_PREFIX}${operationId}-${crypto.randomUUID()}.tmp`);
+  const handle = await fs.open(temporary, 'wx', 0o600).catch(() => fail('replacement_recovery_required'));
+  try {
+    await handle.writeFile(`${JSON.stringify(recovery)}\n`, 'utf8');
+    await handle.chown(0, 0);
+    await handle.chmod(0o600);
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  await syncDirectory(REPLACEMENTS);
+  await fs.rename(temporary, target).catch(() => fail('replacement_recovery_required'));
+  await syncDirectory(REPLACEMENTS);
+  return recovery;
+}
+
+function initialJournalRecoveryResponse(recovery) {
+  return {
+    contract: CONTRACT,
+    operation,
+    ok: true,
+    state: 'aborted_before_promotion',
+    operationId: recovery.operationId,
+    targetIdentity: recovery.targetIdentity,
+  };
+}
+async function assertEmptyOperationRoot(operationRoot) {
+  let entries;
+  try { entries = await fs.readdir(operationRoot, { withFileTypes: true }); } catch { fail('replacement_recovery_required'); }
+  if (entries.length !== 0) fail('replacement_recovery_required');
+}
+
+
+async function promoteInitialJournal(operationRoot, directory, initial, intent) {
+  if (!initial?.journal || initial.journal.state !== 'preparing') fail('replacement_recovery_required');
+  if (intent) assertInitialIntentMatchesJournal(intent, initial.journal);
+  const journalPath = path.join(operationRoot, 'journal.json');
+  if (!directory) {
+    await fs.mkdir(operationRoot, { mode: 0o700 }).catch(() => fail('replacement_recovery_required'));
+    await fs.chown(operationRoot, 0, 0);
+    await fs.chmod(operationRoot, 0o700);
+    await syncDirectory(REPLACEMENTS);
+  } else {
+    await assertEmptyOperationRoot(operationRoot);
+  }
+  await fs.rename(initial.path, journalPath).catch(() => fail('replacement_recovery_required'));
+  await syncDirectory(operationRoot);
+  if (intent) await discardInitialJournalIntent(intent, initial.journal);
+  return initial.journal;
 }
 
 async function readJournal(operationId) {
@@ -736,50 +1074,110 @@ async function readJournal(operationId) {
   const directory = await fs.lstat(operationRoot).catch((error) => error?.code === 'ENOENT' ? null : fail('replacement_recovery_required'));
   if (directory && (!directory.isDirectory() || directory.isSymbolicLink() || !ownerIsRoot(directory) || modeOf(directory) !== 0o700)) fail('replacement_recovery_required');
   const journalPath = path.join(operationRoot, 'journal.json');
-  let stat = await fs.lstat(journalPath).catch((error) => error?.code === 'ENOENT' ? null : fail('replacement_recovery_required'));
+  const stat = await fs.lstat(journalPath).catch((error) => error?.code === 'ENOENT' ? null : fail('replacement_recovery_required'));
+  const intent = await readInitialJournalIntent(operationId);
+  const recovery = await readInitialJournalRecovery(operationId);
+  const initial = await readInitialTemporary(operationId, intent);
+  if (recovery) {
+    if (directory || stat) fail('replacement_recovery_required');
+    const evidence = await assertInitialJournalRecoveryEvidence(operationId);
+    return { operationRoot, journal: null, initialRecovery: evidence.recovery };
+  }
   if (!directory && !stat) {
-    const initialPath = path.join(REPLACEMENTS, `.journal-${operationId}.tmp`);
-    const initial = await fs.lstat(initialPath).catch((error) => error?.code === 'ENOENT' ? null : fail('replacement_recovery_required'));
-    if (!initial) return { operationRoot, journal: null };
-    if (!initial.isFile() || initial.isSymbolicLink() || !ownerIsRoot(initial) || modeOf(initial) !== 0o600) fail('replacement_recovery_required');
-    let initialValue;
-    try { initialValue = validateJournal(JSON.parse(await fs.readFile(initialPath, 'utf8')), operationId); } catch { fail('replacement_recovery_required'); }
-    await fs.mkdir(operationRoot, { mode: 0o700 }).catch(() => fail('replacement_recovery_required'));
-    await fs.chown(operationRoot, 0, 0);
-    await fs.chmod(operationRoot, 0o700);
-    await syncDirectory(REPLACEMENTS);
-    await fs.rename(initialPath, journalPath);
-    await syncDirectory(operationRoot);
-    stat = await fs.lstat(journalPath);
-    return { operationRoot, journal: initialValue };
+    if (!initial) {
+      if (intent) fail('replacement_recovery_required');
+      return { operationRoot, journal: null };
+    }
+    if (!initial.journal) return { operationRoot, journal: null, initialTemporary: initial };
+    return { operationRoot, journal: await promoteInitialJournal(operationRoot, directory, initial, intent) };
   }
   if (!directory) fail('replacement_recovery_required');
   if (!stat) {
-    const initialPath = path.join(REPLACEMENTS, `.journal-${operationId}.tmp`);
-    const initial = await fs.lstat(initialPath).catch((error) => error?.code === 'ENOENT' ? null : fail('replacement_recovery_required'));
-    if (!initial || !initial.isFile() || initial.isSymbolicLink() || !ownerIsRoot(initial) || modeOf(initial) !== 0o600) fail('replacement_recovery_required');
-    let initialValue;
-    try { initialValue = validateJournal(JSON.parse(await fs.readFile(initialPath, 'utf8')), operationId); } catch { fail('replacement_recovery_required'); }
-    await fs.rename(initialPath, journalPath);
-    await syncDirectory(operationRoot);
-    return { operationRoot, journal: initialValue };
+    if (!initial?.journal) fail('replacement_recovery_required');
+    return { operationRoot, journal: await promoteInitialJournal(operationRoot, directory, initial, intent) };
   }
-  if (!stat.isFile() || stat.isSymbolicLink() || !ownerIsRoot(stat) || modeOf(stat) !== 0o600) fail('replacement_recovery_required');
+  if (initial || !stat.isFile() || stat.isSymbolicLink() || !ownerIsRoot(stat) || modeOf(stat) !== 0o600 || stat.nlink !== 1) {
+    fail('replacement_recovery_required');
+  }
   let value;
   try { value = JSON.parse(await fs.readFile(journalPath, 'utf8')); } catch { fail('replacement_recovery_required'); }
-  return { operationRoot, journal: validateJournal(value, operationId) };
+  const journal = validateJournal(value, operationId);
+  if (intent) await discardInitialJournalIntent(intent, journal);
+  return { operationRoot, journal };
 }
 
-async function unresolvedOperations() {
+function terminalJournalRecord(journal) {
+  if (!['aborted_before_promotion', 'committed', 'rolled_back'].includes(journal.state)
+    || Date.parse(journal.updatedAt) < Date.parse(journal.createdAt)) fail('replacement_recovery_required');
+  return {
+    at: journal.updatedAt,
+    expectedActive: journal.state === 'committed' ? journal.replacementKitSHA256 : journal.previousBootstrapKitSHA256,
+  };
+}
+
+function terminalInitialJournalRecord(recovery) {
+  return {
+    at: recovery.recoveredAt,
+    expectedActive: recovery.activeBootstrapKitSHA256,
+    expectedActiveRelease: recovery.activeBootstrapReleaseId,
+  };
+}
+
+function assertTerminalHistory(records, active) {
+  if (!active || records.length === 0) return;
+  records.sort((left, right) => Date.parse(right.at) - Date.parse(left.at));
+  if (records.length > 1 && Date.parse(records[0].at) === Date.parse(records[1].at)) fail('replacement_recovery_required');
+  if (records[0].expectedActive !== active.marker) fail('replacement_recovery_required');
+  if (records[0].expectedActiveRelease && records[0].expectedActiveRelease !== active.manifest.releaseId) fail('replacement_recovery_required');
+}
+
+async function unresolvedOperations({ allowInitialOperationId = null, active = null } = {}) {
+  if (allowInitialOperationId !== null && !validId(allowInitialOperationId)) fail('replacement_recovery_required');
   const entries = await fs.readdir(REPLACEMENTS, { withFileTypes: true }).catch((error) => error?.code === 'ENOENT' ? [] : fail('replacement_recovery_required'));
+  if (entries.length > 128) fail('replacement_recovery_required');
+  const operationIds = new Set();
   for (const entry of entries) {
-    if (!entry.isDirectory() || entry.isSymbolicLink() || !validId(entry.name)) fail('replacement_recovery_required');
-    const { journal } = await readJournal(entry.name);
-    if (!journal) fail('replacement_recovery_required');
-    if (!['aborted_before_promotion', 'committed', 'rolled_back'].includes(journal.state)) fail('replacement_recovery_required');
+    if (entry.isSymbolicLink()) fail('replacement_recovery_required');
+    if (entry.isDirectory()) {
+      if (!validId(entry.name)) fail('replacement_recovery_required');
+      operationIds.add(entry.name);
+      continue;
+    }
+    if (!entry.isFile()) fail('replacement_recovery_required');
+    const temporaryId = operationIdForInitialTemporary(entry.name);
+    if (temporaryId) {
+      operationIds.add(temporaryId);
+      continue;
+    }
+    const recoveryId = operationIdForInitialRecovery(entry.name);
+    if (recoveryId) {
+      operationIds.add(recoveryId);
+      continue;
+    }
+    const intentId = operationIdForInitialIntent(entry.name);
+    if (intentId) {
+      operationIds.add(intentId);
+      continue;
+    }
+    fail('replacement_recovery_required');
   }
+  const records = [];
+  for (const operationId of operationIds) {
+    const current = await readJournal(operationId);
+    if (current.initialRecovery) {
+      records.push(terminalInitialJournalRecord(current.initialRecovery));
+      continue;
+    }
+    if (current.initialTemporary) {
+      if (operationId !== allowInitialOperationId) fail('replacement_recovery_required');
+      if (active && current.initialTemporary.intent.value.previousBootstrapKitSHA256 !== active.marker) fail('replacement_recovery_required');
+      continue;
+    }
+    if (!current.journal) fail('replacement_recovery_required');
+    records.push(terminalJournalRecord(current.journal));
+  }
+  assertTerminalHistory(records, active);
 }
-
 async function ensureReplacementRoot() {
   const stat = await fs.lstat(REPLACEMENTS).catch((error) => error?.code === 'ENOENT' ? null : fail('replacement_recovery_required'));
   if (!stat) {
@@ -913,7 +1311,12 @@ async function replaceKit(request) {
   phase('target');
   await assertServerTarget(request.targetIdentity, request.expectedServerReleaseId);
   phase('journal');
-  const { operationRoot, journal: existing } = await readJournal(request.operationId);
+  const current = await readJournal(request.operationId);
+  const { operationRoot, journal: existing } = current;
+  // An initial-journal recovery is terminal only for the interrupted request.
+  // Reusing that operation ID could turn forensic evidence into authorization.
+  if (current.initialRecovery) fail('replacement_operation_conflict');
+  if (current.initialTemporary) fail('replacement_recovery_required');
   if (existing) {
     const sameBinding = existing.targetIdentity === request.targetIdentity
       && existing.expectedServerReleaseId === request.expectedServerReleaseId
@@ -941,10 +1344,11 @@ async function replaceKit(request) {
     }
     fail('replacement_recovery_required');
   }
-  phase('recovery_scan');
-  await unresolvedOperations();
   phase('trust_anchor');
   const { anchorBytes, anchors } = await anchorContext();
+  phase('recovery_scan');
+  const active = await assertRootTree(ACTIVE, null, anchorBytes);
+  await unresolvedOperations({ active });
   phase('server_recovery');
   await assertNoServerReleaseRecovery();
   // The historical fixed helpers predate this lock. Refuse a first transition
@@ -957,7 +1361,7 @@ async function replaceKit(request) {
   phase('envelope');
   const verified = verifySignedCandidate(request, anchors);
   phase('previous_kit');
-  await assertCurrentKit(request.previousBootstrapKitSHA256, anchorBytes);
+  if (active.marker !== request.previousBootstrapKitSHA256) fail('previous_bootstrap_mismatch');
   phase('staged_file');
   const candidateHandle = await stagedArchiveHandle(user, request.replacementKitSHA256);
   const candidateStat = await candidateHandle.stat();
@@ -1022,11 +1426,45 @@ async function recoverReplacement(opId, targetIdentity) {
   await ensureReplacementRoot();
   if (await currentTargetIdentity() !== targetIdentity) fail('replacement_target_mismatch');
   await assertNoHistoricalHelpers();
-  const { operationRoot, journal: existingJournal } = await readJournal(opId);
+  const current = await readJournal(opId);
+  const { operationRoot, journal: existingJournal } = current;
+  if (current.initialRecovery) {
+    phase('trust_anchor');
+    const { anchorBytes } = await anchorContext();
+    const active = await assertRootTree(ACTIVE, null, anchorBytes);
+    const evidence = await assertInitialJournalRecoveryEvidence(opId);
+    if (evidence.recovery.targetIdentity !== targetIdentity) fail('replacement_target_mismatch');
+    phase('recovery_scan');
+    await unresolvedOperations({ active });
+    return initialJournalRecoveryResponse(evidence.recovery);
+  }
+  if (current.initialTemporary) {
+    if (current.initialTemporary.intent.value.targetIdentity !== targetIdentity) fail('replacement_target_mismatch');
+    // The temporary was never promoted into a transaction directory. Verify
+    // every other retained transaction is terminal, the independent Server
+    // transaction is clear, and the active kit is a complete trusted tree
+    // before recording this bounded pre-promotion outcome.
+    phase('server_recovery');
+    await assertNoServerReleaseRecovery();
+    await currentRelease(current.initialTemporary.intent.value.expectedServerReleaseId);
+    phase('trust_anchor');
+    const { anchorBytes } = await anchorContext();
+    const active = await assertRootTree(ACTIVE, null, anchorBytes);
+    phase('recovery_scan');
+    await unresolvedOperations({ allowInitialOperationId: opId, active });
+    const recovery = await writeInitialJournalRecovery(opId, targetIdentity, active, current.initialTemporary);
+    const evidence = await assertInitialJournalRecoveryEvidence(opId);
+    await unresolvedOperations({ active });
+    if (evidence.recovery.targetIdentity !== targetIdentity || evidence.recovery.temporaryJournalSHA256 !== recovery.temporaryJournalSHA256) {
+      fail('replacement_recovery_required');
+    }
+    return initialJournalRecoveryResponse(evidence.recovery);
+  }
   let journal = existingJournal;
   if (!journal) {
     const { anchorBytes } = await anchorContext();
-    await assertRootTree(ACTIVE, null, anchorBytes);
+    const active = await assertRootTree(ACTIVE, null, anchorBytes);
+    await unresolvedOperations({ active });
     return {
       contract: CONTRACT,
       operation,
