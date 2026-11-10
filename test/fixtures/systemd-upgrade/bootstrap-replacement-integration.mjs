@@ -847,7 +847,7 @@ test('idempotent rollback recovery verifies complete kit trees before reporting 
     assert.equal(await activeKitDigest(), NEW_KIT_SHA256, 'corruption must retain the matching marker');
   });
 
-  await expectPreparedFailure('bkr_71000000-0000-4000-8000-000000000003', 'missing preserved kit', 'bootstrap_root_invalid', async ({ previous }) => {
+  await expectPreparedFailure('bkr_71000000-0000-4000-8000-000000000003', 'missing preserved kit', 'replacement_recovery_required', async ({ previous }) => {
     await fs.rm(previous, { recursive: true, force: true });
   });
 
