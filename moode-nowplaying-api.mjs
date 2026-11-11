@@ -29,6 +29,11 @@ import { readEffectiveRuntimeConfig, writeNativeRuntimeConfig } from './src/lib/
 import { startLibraryHealthScan, waitForLibraryHealthScan } from './src/routes/config.library-health-read.routes.mjs';
 import { runtimeDiagnostics as nativeRuntimeDiagnostics } from './src/lib/config-runtime-diagnostics.mjs';
 import { installRuntimeShutdown } from './src/lib/runtime-shutdown.mjs';
+import { resolveHardwareCompatibility, createHardwareCompatibilityServer } from './src/lib/hardware-compatibility.mjs';
+
+// Validate explicit hardware exposure before starting any runtime listeners.
+const hardwareCompatibilityConfig = resolveHardwareCompatibility({ apiHost: API_LISTEN_HOST, apiPort: PORT, trackKey: TRACK_KEY });
+let hardwareCompatibilityRuntime = null;
 import { lookupAnimatedArt, resolveAnimatedMediaFile } from './src/routes/config.library-health-animated-art.routes.mjs';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
@@ -9238,7 +9243,7 @@ const dlnaRuntime = createDlnaRuntime({
   },
   log,
 });
-stopRuntimeForShutdown = () => dlnaRuntime.stop();
+stopRuntimeForShutdown = () => Promise.all([dlnaRuntime.stop(), hardwareCompatibilityRuntime?.close()]);
 const startDlnaRuntime = () => dlnaRuntime.start();
 
 
@@ -10055,7 +10060,18 @@ app.post('/youtube/queue', async (req, res) => {
   }
 });
 
+if (hardwareCompatibilityConfig.enabled) {
+  hardwareCompatibilityRuntime = createHardwareCompatibilityServer({ config: hardwareCompatibilityConfig, trackKey: TRACK_KEY });
+  hardwareCompatibilityRuntime.server.on('error', () => {
+    log.error('Hardware compatibility listener failed; refusing partial startup');
+    stopRuntimeForShutdown().finally(() => process.exit(1));
+  });
+}
+
 app.listen(PORT, API_LISTEN_HOST, () => {
+  if (hardwareCompatibilityRuntime) {
+    hardwareCompatibilityRuntime.server.listen(hardwareCompatibilityConfig.port, hardwareCompatibilityConfig.host);
+  }
   log.debug(`moOde now-playing server running on port ${PORT}`);
   log.debug(`Endpoint: http://${LOCAL_ADDRESS}:${PORT}/now-playing`);
   log.debug(`Endpoint: http://${LOCAL_ADDRESS}:${PORT}/next-up`);
