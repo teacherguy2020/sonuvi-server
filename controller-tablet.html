@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <script src="scripts/runtime-auth.js?v=20261024-h2"></script>
+  <script src="scripts/controller-browser-auth.js?v=20261110-browser1"></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#000000" />
@@ -1306,9 +1307,7 @@
     r.style.setProperty("--np-blur-overlay", isLight ? "linear-gradient(180deg, rgba(255,255,255,.26), rgba(255,255,255,.42))" : "linear-gradient(180deg, rgba(7,12,20,.36), rgba(7,12,20,.52))");
     r.style.setProperty("--np-blur-overlay-strong", isLight ? "linear-gradient(180deg, rgba(255,255,255,.62), rgba(255,255,255,.78))" : "linear-gradient(180deg, rgba(7,12,20,.74), rgba(7,12,20,.86))");
   }
-  const base = !location.port || location.port === "80" || location.port === "443"
-    ? location.origin
-    : "".concat(location.protocol, "//").concat(location.hostname || "sonuvi.local", ":3101");
+  const base = location.origin;
   let runtimeTrackKey = "";
   let runtimeMoodeHost = "moode.local";
   var recentLastfmPrefCache = { ts: 0, enabled: false, mode: "toptracks" };

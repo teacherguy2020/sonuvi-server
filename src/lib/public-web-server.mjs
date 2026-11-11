@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { resolvePublicWebAsset } from './public-web-root.mjs';
+import { createControllerWebGateway } from './controller-web-gateway.mjs';
 
 const MIME_TYPES = Object.freeze({
   '.avif': 'image/avif',
@@ -50,7 +51,7 @@ function sendStatus(response, statusCode) {
  * Serve only assets accepted by the H2 positive allowlist. This deliberately
  * has no directory listing or catch-all checkout fallback.
  */
-export async function createPublicWebServer({ publicRoot } = {}) {
+export async function createPublicWebServer({ publicRoot, ...gatewayOptions } = {}) {
   if (!String(publicRoot || '').trim() || !path.isAbsolute(publicRoot)) {
     throw new Error('public web root must be an absolute path');
   }
@@ -59,7 +60,9 @@ export async function createPublicWebServer({ publicRoot } = {}) {
   const stat = await fs.lstat(root);
   if (!stat.isDirectory()) throw new Error('public web root is not a directory');
 
+  const controllerGateway = createControllerWebGateway(gatewayOptions);
   return http.createServer(async (request, response) => {
+    if (await controllerGateway(request, response)) return;
     if (!['GET', 'HEAD'].includes(String(request.method || 'GET').toUpperCase())) {
       sendStatus(response, 405);
       return;

@@ -259,6 +259,7 @@ import { execFileStrict } from './src/lib/exec.mjs';
 import { createRuntimeCapabilities, rehearsalReadOnlyMiddleware } from './src/lib/runtime-capabilities.mjs';
 import { publicRuntimeReleaseIdentity, resolveRuntimePublicWebRoot, resolveRuntimeReleaseIdentity } from './src/lib/release-runtime.mjs';
 import { hasConfiguredTrackKey, isAuthorizedTrackKey } from './src/lib/track-key-auth.mjs';
+import { isControllerDispatchable, verifyControllerDispatch } from './src/lib/controller-browser-dispatch.mjs';
 import { radioDisplayName, radioStationNameForFile } from './src/lib/radio-display.mjs';
 import {
   isAirplayCurrentSong,
@@ -2537,6 +2538,10 @@ function extractYear(str) {
 }
 
 function requireTrackKey(req, res) {
+  const controllerSecret = String(process.env.SONUVI_CONTROLLER_WEB_SECRET || '').trim();
+  const controllerPath = String(req.path || req.originalUrl || '').split('?', 1)[0];
+  if (isControllerDispatchable({ method: req.method, pathname: controllerPath })
+    && verifyControllerDispatch({ secret: controllerSecret, header: req.headers['x-sonuvi-controller-dispatch'], method: req.method, pathname: controllerPath })) return true;
   if (!hasConfiguredTrackKey(TRACK_KEY)) {
     // Do not silently run an immutable release with its privileged endpoints
     // unauthenticated. Legacy checkouts retain their historical open behavior
