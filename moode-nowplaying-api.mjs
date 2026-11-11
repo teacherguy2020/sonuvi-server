@@ -1,9 +1,4 @@
-import { readEffectiveRuntimeConfig, writeNativeRuntimeConfig } from './src/lib/native-configuration-store.mjs';
 #!/usr/bin/env node
-import { startLibraryHealthScan, waitForLibraryHealthScan } from './src/routes/config.library-health-read.routes.mjs';
-import { runtimeDiagnostics as nativeRuntimeDiagnostics } from './src/lib/config-runtime-diagnostics.mjs';
-import { installRuntimeShutdown } from './src/lib/runtime-shutdown.mjs';
-import { lookupAnimatedArt, resolveAnimatedMediaFile } from './src/routes/config.library-health-animated-art.routes.mjs';
 /**
  * moode-nowplaying-api.mjs -- moOde Now-Playing API (Pi4)
  *
@@ -30,6 +25,11 @@ import { lookupAnimatedArt, resolveAnimatedMediaFile } from './src/routes/config
 // network, and state-write boundaries before legacy route modules capture
 // Node built-in helpers.
 import './src/lib/rehearsal-runtime-boundary.mjs';
+import { readEffectiveRuntimeConfig, writeNativeRuntimeConfig } from './src/lib/native-configuration-store.mjs';
+import { startLibraryHealthScan, waitForLibraryHealthScan } from './src/routes/config.library-health-read.routes.mjs';
+import { runtimeDiagnostics as nativeRuntimeDiagnostics } from './src/lib/config-runtime-diagnostics.mjs';
+import { installRuntimeShutdown } from './src/lib/runtime-shutdown.mjs';
+import { lookupAnimatedArt, resolveAnimatedMediaFile } from './src/routes/config.library-health-animated-art.routes.mjs';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
