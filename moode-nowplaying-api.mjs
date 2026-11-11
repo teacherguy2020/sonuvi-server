@@ -9441,7 +9441,7 @@ registerNativeAdministratorConfigurationRoutes(app, {
   },
   getServerIdentity: () => publicRuntimeReleaseIdentity(RELEASE_IDENTITY),
   getBrowseIndexStatus: () => runtimeBrowseIndex.getBrowseIndexStatus(MPD_HOST),
-  refreshIndex: () => runtimeBrowseIndex.buildBrowseIndex(MPD_HOST),
+  refreshIndex: () => runtimeBrowseIndex.getBrowseIndex(MPD_HOST, { force: true }),
   scanLibrary: async () => {
     startLibraryHealthScan({ getRatingForFile, mpdStickerGetSong });
     await waitForLibraryHealthScan();
