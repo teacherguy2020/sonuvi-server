@@ -52,6 +52,7 @@ import {
   MobilePairingError,
   MobilePairingStore,
   MOBILE_PAIRING_PROTOCOL_VERSION,
+  MOBILE_REVERSE_PAIRING_PROTOCOL_VERSION,
 } from '../lib/mobile-pairing.mjs';
 import {
   normalizeMobilePushEnvironment,
@@ -638,6 +639,10 @@ export function registerMobileRoutes(app, deps = {}) {
     ? deps.getUpnpPlaybackQueue
     : () => deps.upnpPlaybackQueue || null;
   const expectedRendererHost = text(deps.expectedRendererHost) || '10.0.0.254';
+  const dlnaMediaServer = deps.dlnaMediaServer
+    && typeof deps.dlnaMediaServer.capabilities === 'function'
+    && typeof deps.dlnaMediaServer.resourceForFile === 'function'
+    ? deps.dlnaMediaServer : null;
   // The browser pairing widget authenticates with the existing Track Key.
   // An already-paired native device has an equivalent trusted credential in
   // its bearer session, so it can host the same QR/approval flow without
@@ -2343,6 +2348,25 @@ export function registerMobileRoutes(app, deps = {}) {
     }
   };
 
+  app.get('/v1/mobile/dlna/capabilities', asyncRoute(async (req, res) => {
+    if (!requireSession(req, res)) return;
+    if (!dlnaMediaServer) return res.json({ ok: true, supported: false, enabled: false });
+    return res.json({ ok: true, ...(await dlnaMediaServer.capabilities()) });
+  }));
+
+  app.get('/v1/mobile/dlna/tracks/:trackId/resource', asyncRoute(async (req, res) => {
+    if (!requireSession(req, res)) return;
+    if (!dlnaMediaServer) return errorResponse(res, 404, 'native DLNA MediaServer is unavailable');
+    const catalog = await loadCatalog();
+    const track = catalog.byTrackId.get(text(req?.params?.trackId));
+    if (!track) return errorResponse(res, 404, 'track not found');
+    const capabilities = await dlnaMediaServer.capabilities();
+    if (!capabilities.enabled) return errorResponse(res, 409, 'native DLNA MediaServer is disabled');
+    const resource = await dlnaMediaServer.resourceForFile(track.file);
+    if (!resource) return errorResponse(res, 422, 'track is unavailable for DLNA delivery');
+    return res.json({ ok: true, trackId: track.id, udn: capabilities.udn, available: true, resource });
+  }));
+
   registerMobileUpnpRoutes(app, {
     requireEnabled,
     requireSession,
@@ -2450,6 +2474,14 @@ export function registerMobileRoutes(app, deps = {}) {
     return true;
   };
 
+  const requireTrustedMobilePairingCredential = (req, res) => {
+    if (!pairingAuthConfigured) { errorResponse(res, 503, 'pairing display authorization is not configured'); return false; }
+    const claims = verifyMobileToken(readBearerToken(req), { secret: apiSecret, scope: 'mobile-api' });
+    if (!claims) { errorResponse(res, 403, 'Forbidden'); return false; }
+    return true;
+  };
+  const pairingPresentationSource = (req) => text(req?.socket?.remoteAddress || req?.connection?.remoteAddress) || 'unknown';
+
   const requirePairingDisplay = (req, res) => {
     if (!requirePairingCredential(req, res)) return null;
     const displayToken = text(req?.headers?.['x-mobile-pairing-display-token']);
@@ -2548,6 +2580,27 @@ export function registerMobileRoutes(app, deps = {}) {
     });
     return res.json({ ok: true, ...result });
   }));
+
+  app.post('/v1/mobile/pairing/presentations', pairingRoute(async (req, res) => {
+    const created = pairingStore.createPresentation({ baseUrl: pairingBaseUrl(req, mobileBaseUrl), source: pairingPresentationSource(req) });
+    return res.status(201).json({ ok: true, protocolVersion: MOBILE_REVERSE_PAIRING_PROTOCOL_VERSION, ...created });
+  }));
+  app.post('/v1/mobile/pairing/presentations/:presentationId/attest', pairingRoute(async (req, res) => {
+    const result = pairingStore.attestPresentation({ presentationId: req?.params?.presentationId, deviceId: req?.body?.deviceId, deviceName: req?.body?.deviceName, deviceModel: req?.body?.deviceModel, publicKey: req?.body?.publicKey, signature: req?.body?.signature, signatureAlgorithm: req?.body?.signatureAlgorithm });
+    return res.status(202).json({ ok: true, ...result });
+  }));
+  app.get('/v1/mobile/pairing/presentations/:presentationId', pairingRoute(async (req, res) => {
+    if (!requireTrustedMobilePairingCredential(req, res)) return;
+    return res.json({ ok: true, protocolVersion: MOBILE_REVERSE_PAIRING_PROTOCOL_VERSION, ...pairingStore.inspectPresentation({ presentationId: req?.params?.presentationId }) });
+  }));
+  for (const [route, method] of [['approve', 'approvePresentation'], ['reject', 'rejectPresentation']]) {
+    app.post('/v1/mobile/pairing/presentations/:presentationId/' + route, pairingRoute(async (req, res) => {
+      if (!requireTrustedMobilePairingCredential(req, res)) return;
+      return res.json({ ok: true, ...pairingStore[method]({ presentationId: req?.params?.presentationId, verificationCode: req?.body?.verificationCode }) });
+    }));
+  }
+  app.post('/v1/mobile/pairing/presentations/:presentationId/cancel', pairingRoute(async (req, res) => res.json({ ok: true, ...pairingStore.cancelPresentation({ presentationId: req?.params?.presentationId, pollToken: text(req?.headers?.['x-mobile-pairing-poll-token']) }) })));
+  app.get('/v1/mobile/pairing/presentations/:presentationId/complete', pairingRoute(async (req, res) => res.json({ ok: true, ...pairingStore.completePresentation({ presentationId: req?.params?.presentationId, pollToken: text(req?.headers?.['x-mobile-pairing-poll-token']), issueSession: ({ deviceId }) => issueMobileSession(deviceId) }) })));
 
   app.post('/v1/mobile/session', asyncRoute(async (req, res) => {
     const suppliedCode = text(req?.headers?.['x-mobile-enrollment-code']);
