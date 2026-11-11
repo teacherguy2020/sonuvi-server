@@ -311,6 +311,7 @@ import { getLibraryHealthStatus } from './src/routes/config.library-health-read.
 import { registerNativeAdministratorConfigurationRoutes } from './src/routes/admin-native-configuration.routes.mjs';
 import { registerUpnpRoutes } from './src/routes/upnp.routes.mjs';
 import { createDlnaMediaServer, isPrivateLanAddress } from './src/lib/dlna-media-server.mjs';
+import { createDlnaRuntime } from './src/lib/dlna-runtime.mjs';
 import { startDlnaSsdpResponder } from './src/lib/dlna-ssdp.mjs';
 import { registerPodcastSubscriptionRoutes } from './src/routes/podcasts-subscriptions.routes.mjs';
 import { registerPodcastRefreshRoutes } from './src/routes/podcasts-refresh.routes.mjs';
@@ -9197,22 +9198,44 @@ const runtimeBrowseIndex = createRuntimeBrowseIndexProvider({
 const getBrowseIndex = runtimeBrowseIndex.getBrowseIndex;
 configureBrowseIndexQuality({ getAudioQualityRecord: sourceAudioProbe.getRecord });
 const dlnaConfigured = ENABLE_DLNA_MEDIA_SERVER && !RUNTIME_CAPABILITIES.rehearsal && isPrivateLanAddress(DLNA_LAN_ADDRESS) && Number.isInteger(DLNA_PORT) && DLNA_PORT > 0 && DLNA_PORT <= 65535;
-const dlnaMediaServer = createDlnaMediaServer({ enabled: dlnaConfigured, getBrowseIndex: () => getBrowseIndex(MPD_HOST), resolveFile: async (file) => mpdFileToLocalPath(file), mountRoot: PI4_MOUNT_BASE, identityPath: RUNTIME_STATE_PATHS.dlnaMediaServerIdentityPath, localAddress: DLNA_LAN_ADDRESS, port: DLNA_PORT, log });
+const dlnaArtworkDependencies = { MOODE_BASE_URL, normalizeCoverUrl, dispatcherForUrl, agentForUrl, normalizeArtKey, updateArtCacheIfNeeded, artPath640ForKey, safeIsFile };
+async function readDlnaArtworkForTrack(file) {
+  let statusCode = 500;
+  let body = null;
+  const headers = new Map();
+  const response = {
+    status(code) { statusCode = Number(code) || 500; return this; },
+    set(name, value) { headers.set(String(name).toLowerCase(), String(value)); return this; },
+    send(value) { body = Buffer.isBuffer(value) ? value : Buffer.from(value || ''); return this; },
+    end(value) { if (value !== undefined) this.send(value); return this; },
+  };
+  await serveTrackArtwork(response, file, dlnaArtworkDependencies);
+  const contentType = headers.get('content-type') || '';
+  return statusCode === 200 && body?.length && contentType.startsWith('image/') ? { body, contentType } : null;
+}
+const dlnaMediaServer = createDlnaMediaServer({ enabled: dlnaConfigured, getBrowseIndex: () => getBrowseIndex(MPD_HOST), resolveFile: async (file) => mpdFileToLocalPath(file), readArtworkForTrack: readDlnaArtworkForTrack, mountRoot: PI4_MOUNT_BASE, identityPath: RUNTIME_STATE_PATHS.dlnaMediaServerIdentityPath, localAddress: DLNA_LAN_ADDRESS, port: DLNA_PORT, log });
 const dlnaApp = express();
 dlnaApp.get('/icons/app-192.png', (_req, res) => res.sendFile(path.join(resolveRuntimePublicWebRoot(), 'icons', 'app-192.png')));
 dlnaMediaServer.register(dlnaApp, express);
-let dlnaListener = null;
-async function startDlnaRuntime() {
-  if (!dlnaMediaServer.enabled || dlnaListener) return false;
-  await new Promise((resolve, reject) => {
-    dlnaListener = dlnaApp.listen(DLNA_PORT, DLNA_LAN_ADDRESS, resolve);
-    dlnaListener.once('error', reject);
-  });
-  const udn = await dlnaMediaServer.initialize();
-  await startDlnaSsdpResponder({ udn, baseUrl: dlnaMediaServer.baseUrl, localAddress: DLNA_LAN_ADDRESS, log });
-  log.info?.(`[dlna] MediaServer isolated at ${dlnaMediaServer.baseUrl}`);
-  return true;
-}
+const dlnaRuntime = createDlnaRuntime({
+  enabled: dlnaMediaServer.enabled,
+  listen: () => new Promise((resolve, reject) => {
+    const listener = dlnaApp.listen(DLNA_PORT, DLNA_LAN_ADDRESS);
+    const failed = (error) => { listener.removeListener('listening', ready); reject(error); };
+    const ready = () => { listener.removeListener('error', failed); resolve(listener); };
+    listener.once('error', failed);
+    listener.once('listening', ready);
+  }),
+  initialize: () => dlnaMediaServer.initialize(),
+  startSsdp: async (udn) => {
+    const socket = await startDlnaSsdpResponder({ udn, baseUrl: dlnaMediaServer.baseUrl, localAddress: DLNA_LAN_ADDRESS, log });
+    log.info?.('[dlna] MediaServer isolated at ' + dlnaMediaServer.baseUrl);
+    return socket;
+  },
+  log,
+});
+const startDlnaRuntime = () => dlnaRuntime.start();
+for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => { dlnaRuntime.stop().catch(() => {}); });
 
 
 registerMobileRoutes(app, {
@@ -9413,7 +9436,7 @@ registerNativeAdministratorConfigurationRoutes(app, {
   getServerIdentity: () => publicRuntimeReleaseIdentity(RELEASE_IDENTITY),
   getBrowseIndexStatus: () => runtimeBrowseIndex.getBrowseIndexStatus(MPD_HOST),
   getLibraryHealthStatus,
-  getDlnaStatus: async () => ({ installed: true, enabled: dlnaMediaServer.enabled, status: dlnaMediaServer.enabled ? 'enabled' : 'disabled', reason: dlnaMediaServer.enabled ? 'configured_for_private_lan_listener' : 'operator_configuration_required', ...(dlnaMediaServer.enabled ? { deviceDescriptionUrl: `${dlnaMediaServer.baseUrl}/dlna/device.xml` } : {}) }),
+  getDlnaStatus: async () => ({ installed: true, ...dlnaRuntime.status(), ...(dlnaRuntime.status().status === 'running' ? { deviceDescriptionUrl: dlnaMediaServer.baseUrl + '/dlna/device.xml' } : {}) }),
 });
 
 registerRatingRoutes(app, {
@@ -10017,7 +10040,7 @@ app.listen(PORT, API_LISTEN_HOST, () => {
   log.debug(`moOde now-playing server running on port ${PORT}`);
   log.debug(`Endpoint: http://${LOCAL_ADDRESS}:${PORT}/now-playing`);
   log.debug(`Endpoint: http://${LOCAL_ADDRESS}:${PORT}/next-up`);
-  startDlnaRuntime().catch((error) => log.warn?.('[dlna] MediaServer startup failed', error?.message || error));
+  startDlnaRuntime();
   log.debug(`Public: ${PUBLIC_BASE_URL}`);
   log.debug(`Alexa routes enabled? ${ENABLE_ALEXA ? 'YES' : 'NO'}`);
 });
