@@ -1,3 +1,14 @@
+## In-progress configuration completion — 2026-11-11
+
+Current isolated source adds the administrator-only configuration workspace and
+configuration-only JSON transfer described in `native-configuration-completion-20261111.md`.
+It is not installed on the VM. Live native administrative acceptance is blocked
+by a preserved-enrollment/current-Simulator identity mismatch; no identity or
+credential replacement has been performed. Historical statements below about
+DLNA being unimplemented are superseded by the current Server runtime; the
+new source corrects its native status projection. See
+`server-web-access-audit-20261111.md` for the separate read-only8443 audit.
+
 # Native configuration API — typed administrator projection and edits
 
 This contract supplements the [native administrator session contract](sonuvi-native-administrator-session.md). It adds one narrowly allowlisted configuration mutation; it adds no scan, refresh, host command, DLNA server, or direct-LAN administration path.

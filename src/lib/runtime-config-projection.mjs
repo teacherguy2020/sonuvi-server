@@ -202,6 +202,8 @@ export function projectRuntimeAdminConfig(cfg, {
         ['notifyEnabled', 'TRACK_NOTIFY_ENABLED'], ['pollMs', 'TRACK_NOTIFY_POLL_MS'],
         ['dedupeMs', 'TRACK_NOTIFY_DEDUPE_MS'], ['alexaMaxAgeMs', 'TRACK_NOTIFY_ALEXA_MAX_AGE_MS'],
         ['pathPiMountBase', 'PI4_MOUNT_BASE'], ['pathPodcastRoot', 'PODCAST_ROOT'],
+        ['pathMusicLibraryRoot', 'MUSIC_LIBRARY_ROOT'], ['featureDlnaMediaServer', 'ENABLE_DLNA_MEDIA_SERVER'],
+        ['featureAlexaSkill', 'ENABLE_ALEXA'], ['apiPort', 'PORT'], ['uiPort', 'SONUVI_WEB_PORT'],
       ].filter(([, variable]) => text(environment[variable])).map(([id]) => id),
     },
     alexa: projectedAlexa(source),

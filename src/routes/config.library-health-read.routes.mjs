@@ -222,6 +222,24 @@ async function computeLibraryHealthSnapshot({ sampleLimit, scanLimit, getRatingF
   };
 }
 
+export function waitForLibraryHealthScan() { return libraryHealthJob?.promise ?? Promise.resolve(); }
+
+export function startLibraryHealthScan({ sampleLimit = 100, scanLimit = Number.MAX_SAFE_INTEGER, getRatingForFile, mpdStickerGetSong }) {
+  if (libraryHealthJob?.promise) return { ok:true, started:false, running:true, startedAt:libraryHealthJob.startedAt };
+      const startedAt = new Date().toISOString();
+      const promise = computeLibraryHealthSnapshot({ sampleLimit, scanLimit, getRatingForFile, mpdStickerGetSong })
+        .then((payload) => {
+          libraryHealthCache = { payload, cachedAt: Date.now() };
+          return payload;
+        })
+        .finally(() => {
+          libraryHealthJob = null;
+        });
+
+      libraryHealthJob = { startedAt, promise };
+      return { ok: true, started: true, running: true, startedAt };
+}
+
 export function registerConfigLibraryHealthReadRoutes(app, deps) {
   const { requireTrackKey, mpdQueryRaw, getRatingForFile, mpdStickerGetSong } = deps;
 
@@ -304,27 +322,10 @@ export function registerConfigLibraryHealthReadRoutes(app, deps) {
   app.post('/config/library-health/refresh', async (req, res) => {
     try {
       if (!requireTrackKey(req, res)) return;
-      if (libraryHealthJob?.promise) {
-        return res.json({ ok: true, started: false, running: true, startedAt: libraryHealthJob.startedAt });
-      }
       const sampleLimit = Math.max(10, Math.min(500, Number(req.body?.sampleLimit || req.query?.sampleLimit || 100)));
-      const scanLimit =
-        req.body?.scanLimit != null || req.query?.scanLimit != null
-          ? Math.max(100, Math.min(200000, Number(req.body?.scanLimit || req.query?.scanLimit || 100)))
-          : Number.MAX_SAFE_INTEGER;
-
-      const startedAt = new Date().toISOString();
-      const promise = computeLibraryHealthSnapshot({ sampleLimit, scanLimit, getRatingForFile, mpdStickerGetSong })
-        .then((payload) => {
-          libraryHealthCache = { payload, cachedAt: Date.now() };
-          return payload;
-        })
-        .finally(() => {
-          libraryHealthJob = null;
-        });
-
-      libraryHealthJob = { startedAt, promise };
-      return res.json({ ok: true, started: true, running: true, startedAt });
+      const scanLimit = req.body?.scanLimit != null || req.query?.scanLimit != null
+        ? Math.max(100, Math.min(200000, Number(req.body?.scanLimit || req.query?.scanLimit || 100))) : Number.MAX_SAFE_INTEGER;
+      return res.json(startLibraryHealthScan({ sampleLimit, scanLimit, getRatingForFile, mpdStickerGetSong }));
     } catch (e) {
       return res.status(500).json({ ok: false, error: e?.message || String(e) });
     }

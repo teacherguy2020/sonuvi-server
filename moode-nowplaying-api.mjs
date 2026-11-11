@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { startLibraryHealthScan, waitForLibraryHealthScan } from './src/routes/config.library-health-read.routes.mjs';
+import { runtimeDiagnostics as nativeRuntimeDiagnostics } from './src/lib/config-runtime-diagnostics.mjs';
 import { installRuntimeShutdown } from './src/lib/runtime-shutdown.mjs';
 import { lookupAnimatedArt, resolveAnimatedMediaFile } from './src/routes/config.library-health-animated-art.routes.mjs';
 /**
@@ -9439,6 +9441,17 @@ registerNativeAdministratorConfigurationRoutes(app, {
   },
   getServerIdentity: () => publicRuntimeReleaseIdentity(RELEASE_IDENTITY),
   getBrowseIndexStatus: () => runtimeBrowseIndex.getBrowseIndexStatus(MPD_HOST),
+  refreshIndex: () => runtimeBrowseIndex.buildBrowseIndex(MPD_HOST),
+  scanLibrary: async () => {
+    startLibraryHealthScan({ getRatingForFile, mpdStickerGetSong });
+    await waitForLibraryHealthScan();
+  },
+  checkEnvironment: async () => nativeRuntimeDiagnostics(JSON.parse(await fsp.readFile(RUNTIME_CONFIG_PATH, 'utf8')), { execFileP }),
+  getWebAccess: () => ({
+    address: process.env.SONUVI_CONTROLLER_WEB_ORIGIN || null,
+    discovery: 'not-configured-by-native-api',
+    explanation: 'The web service owns its HTTPS origin. This API does not infer an address or change listeners. See the installation web-access record.',
+  }),
   getLibraryHealthStatus,
   getDlnaStatus: async () => ({ installed: true, ...dlnaRuntime.status(), ...(dlnaRuntime.status().status === 'running' ? { deviceDescriptionUrl: dlnaMediaServer.baseUrl + '/dlna/device.xml' } : {}) }),
 });

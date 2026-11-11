@@ -1,3 +1,5 @@
+import { projectNativeDlnaStatus } from '../lib/native-configuration-workspace.mjs';
+import { registerConfigurationWorkspaceRoutes } from './admin-configuration-workspace.routes.mjs';
 import { requireAdministratorAuthorization } from '../lib/sonuvi-admin-authority.mjs';
 import { normalizeMoodeBaseUrl } from '../lib/moode-url.mjs';
 import { assertImmutableRuntimeConfig } from '../lib/runtime-config-security.mjs';
@@ -209,8 +211,13 @@ export function registerNativeAdministratorConfigurationRoutes(app, {
   getServerIdentity = () => ({}),
   getBrowseIndexStatus = async () => ({}),
   getLibraryHealthStatus = async () => ({}),
+  refreshIndex = null,
+  scanLibrary = null,
+  checkEnvironment = null,
+  getWebAccess = () => ({}),
   getDlnaStatus = async () => ({ installed: true, enabled: false, status: 'disabled', reason: 'operator_configuration_required' }),
 } = {}) {
+  registerConfigurationWorkspaceRoutes(app, { administratorAuthority, readConfig, writeConfig, runtimeProjectionOptions, getBrowseIndexStatus, getLibraryHealthStatus, getDlnaStatus, refreshIndex, scanLibrary, checkEnvironment, getWebAccess });
   const available = administratorAuthority
     && typeof administratorAuthority.verifyAccessToken === 'function'
     && typeof readConfig === 'function';
@@ -323,6 +330,6 @@ export function registerNativeAdministratorConfigurationRoutes(app, {
   app.get('/v1/admin/dlna', async (req, res) => {
     if (!(await authorize(req, res))) return;
     const status = await getDlnaStatus().catch(() => null);
-    return res.json({ ok: true, contract: NATIVE_ADMIN_DLNA_CONTRACT, installed: status?.installed === true, enabled: status?.enabled === true, status: ['enabled', 'disabled', 'unavailable'].includes(text(status?.status)) ? text(status.status) : 'unavailable', reason: text(status?.reason, 'status_unavailable'), ...(status?.deviceDescriptionUrl ? { deviceDescriptionUrl: text(status.deviceDescriptionUrl) } : {}) });
+    return res.json({ ok: true, contract: NATIVE_ADMIN_DLNA_CONTRACT, ...projectNativeDlnaStatus(status) });
   });
 }

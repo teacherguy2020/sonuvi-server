@@ -39,7 +39,8 @@ export async function runtimeDiagnostics(cfg, {
   } catch {}
   const pathChecks = [];
   for (const [name, scope] of [['musicLibraryRoot', 'remote'], ['moodeUsbMount', 'remote'], ['piMountBase', 'local'], ['podcastRoot', 'local']]) {
-    const configuredPath = String(cfg.paths?.[name] || '').trim();
+    const override = { musicLibraryRoot: 'MUSIC_LIBRARY_ROOT', piMountBase: 'PI4_MOUNT_BASE', podcastRoot: 'PODCAST_ROOT' }[name];
+    const configuredPath = String((override && environment[override]) || cfg.paths?.[name] || '').trim();
     let status = !configuredPath ? 'not-configured' : scope === 'remote' ? 'restricted' : 'unavailable';
     if (configuredPath && scope === 'local') {
       try { status = (await stat(configuredPath)).isDirectory() ? 'present' : 'not-directory'; }
