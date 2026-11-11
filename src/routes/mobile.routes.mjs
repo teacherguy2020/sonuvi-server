@@ -4799,9 +4799,10 @@ export function registerMobileRoutes(app, deps = {}) {
     const q = text(req?.query?.q).toLocaleLowerCase();
     if (!q) return errorResponse(res, 400, 'q is required');
     const tracks = catalog.tracks
-      .filter((track) => `${track.title} ${track.artist} ${track.album}`.toLocaleLowerCase().includes(q))
-    const enriched = await Promise.all(tracks.map((track) => enrichSourceAudio(track)));
-    return res.json({ ok: true, ...page(enriched.map((track) => publicMobileTrack(track, { baseUrl: requestBaseUrl(req, mobileBaseUrl) })), pageArgs(req.query)) });
+      .filter((track) => `${track.title} ${track.artist} ${track.album}`.toLocaleLowerCase().includes(q));
+    const result = page(tracks, pageArgs(req.query));
+    const enriched = await Promise.all(result.items.map((track) => enrichSourceAudio(track)));
+    return res.json({ ok: true, ...result, items: enriched.map((track) => publicMobileTrack(track, { baseUrl: requestBaseUrl(req, mobileBaseUrl) })) });
   }));
 
   app.get('/v1/mobile/catalog/videos', asyncRoute(async (req, res) => {
