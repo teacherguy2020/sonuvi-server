@@ -73,6 +73,7 @@ export async function startDlnaSsdpResponder({ udn, baseUrl, localAddress, log =
     if (!['ssdp:all', 'upnp:rootdevice', DLNA_DEVICE_TYPE, CONTENT_DIRECTORY_TYPE, CONNECTION_MANAGER_TYPE].includes(target)) return;
     socket.send(response({ target, udn, baseUrl }), remote.port, remote.address);
   });
+  try {
   await new Promise((resolve, reject) => {
     socket.once('error', reject);
     socket.bind(SSDP_PORT, () => { socket.off('error', reject); resolve(); });
@@ -88,4 +89,8 @@ export async function startDlnaSsdpResponder({ udn, baseUrl, localAddress, log =
   refresh.unref();
   socket.once('close', () => clearInterval(refresh));
   return socket;
+  } catch (error) {
+    try { socket.close(); } catch {}
+    throw error;
+  }
 }

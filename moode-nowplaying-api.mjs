@@ -300,6 +300,8 @@ import { createLastfmScrobbler } from './src/lib/lastfm-scrobbler.mjs';
 import { createApnsProvider } from './src/lib/apns.mjs';
 import { resolveApnsMediaUrl } from './src/lib/apns-artwork.mjs';
 import { createMobilePushTokenStore } from './src/lib/mobile-push-store.mjs';
+import { createRadioFeatureService } from './src/lib/radio-feature-service.mjs';
+import { readMoodeRadioCatalog } from './src/lib/moode-radio-catalog.mjs';
 import { createMobileVideoCatalog } from './src/lib/mobile-video-catalog.mjs';
 import { AdministratorAuthority } from './src/lib/sonuvi-admin-authority.mjs';
 import { buildAnimatedArtContext } from './src/lib/animated-art-context.mjs';
@@ -409,6 +411,7 @@ const qobuzConnect = {
 if (!RUNTIME_CAPABILITIES.rehearsal) pibuzQobuz.startEvents();
 
 let pibuzShutdownPromise = null;
+let stopRuntimeForShutdown = async () => {};
 async function stopPibuzEventsForShutdown(signal) {
   if (pibuzShutdownPromise) return pibuzShutdownPromise;
   pibuzShutdownPromise = (async () => {
@@ -426,7 +429,7 @@ async function stopPibuzEventsForShutdown(signal) {
 
 for (const signal of ['SIGTERM', 'SIGINT']) {
   process.once(signal, () => {
-    stopPibuzEventsForShutdown(signal).then(
+    Promise.all([stopPibuzEventsForShutdown(signal), stopRuntimeForShutdown(signal)]).then(
       () => process.exit(0),
       () => process.exit(1),
     );
@@ -9217,6 +9220,7 @@ const dlnaMediaServer = createDlnaMediaServer({ enabled: dlnaConfigured, getBrow
 const dlnaApp = express();
 dlnaApp.get('/icons/app-192.png', (_req, res) => res.sendFile(path.join(resolveRuntimePublicWebRoot(), 'icons', 'app-192.png')));
 dlnaMediaServer.register(dlnaApp, express);
+const radioFeatures = createRadioFeatureService({ readRadioCatalog: () => readMoodeRadioCatalog() });
 const dlnaRuntime = createDlnaRuntime({
   enabled: dlnaMediaServer.enabled,
   listen: () => new Promise((resolve, reject) => {
@@ -9235,7 +9239,6 @@ const dlnaRuntime = createDlnaRuntime({
   log,
 });
 const startDlnaRuntime = () => dlnaRuntime.start();
-for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => { dlnaRuntime.stop().catch(() => {}); });
 
 
 registerMobileRoutes(app, {
@@ -9252,6 +9255,7 @@ registerMobileRoutes(app, {
   musicLibraryRoot: PI4_MOUNT_BASE,
   videoCatalog: mobileVideoCatalog,
   listeningHistory,
+  radioFeatures,
   pushTokenStore: mobilePushTokenStore,
   apnsConfigured: apnsProvider.isConfigured(),
   apnsTopic: APNS_TOPIC,
@@ -9715,6 +9719,7 @@ if (!RUNTIME_CAPABILITIES.rehearsal) {
 const configRouteHandles = registerAllConfigRoutes(app, {
   requireTrackKey,
   log,
+  radioFeatures,
   trackKey: TRACK_KEY,
   getLocalHistoryItems: ({ kind, limit, period, windowDays, baseUrl, trackKey } = {}) => listeningHistory.getItems(kind, {
     limit,

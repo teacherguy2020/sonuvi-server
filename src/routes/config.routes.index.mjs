@@ -25,6 +25,7 @@ import { registerEchoLinkRoutes } from './echo-link.routes.mjs';
 export function registerAllConfigRoutes(app, deps) {
   registerEchoLinkRoutes(app, {
     requireTrackKey: deps.requireTrackKey,
+    radioFeatures: deps.radioFeatures,
   });
 
   registerConfigQueueWizardBasicRoutes(app, {

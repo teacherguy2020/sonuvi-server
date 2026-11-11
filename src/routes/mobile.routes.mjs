@@ -712,6 +712,11 @@ export function registerMobileRoutes(app, deps = {}) {
   const fetchInternalRequest = typeof deps.fetchInternalRequest === 'function'
     ? deps.fetchInternalRequest
     : null;
+  const radioFeatures = deps.radioFeatures
+    && typeof deps.radioFeatures.options === 'function'
+    && typeof deps.radioFeatures.preview === 'function'
+    ? deps.radioFeatures
+    : null;
   const fetchRadioStream = typeof deps.fetchRadioStream === 'function'
     ? deps.fetchRadioStream
     : (...args) => globalThis.fetch(...args);
@@ -2041,15 +2046,15 @@ export function registerMobileRoutes(app, deps = {}) {
   };
 
   const loadRadioStations = async (req, { genres = [], favoritesOnly = false, hqOnly = false } = {}) => {
-    const result = await internalFeatureRequest('/config/queue-wizard/radio-preview', {
-      method: 'POST',
-      body: {
+    const filters = {
         genres: Array.isArray(genres) ? genres.map(text).filter(Boolean) : [],
         favoritesOnly: Boolean(favoritesOnly),
         hqOnly: Boolean(hqOnly),
         maxStations: 2000,
-      },
-    }).catch(() => ({ ok: false }));
+      };
+    const result = radioFeatures
+      ? { ok: true, json: await radioFeatures.preview(filters).catch(() => null) }
+      : await internalFeatureRequest('/config/queue-wizard/radio-preview', { method: 'POST', body: filters }).catch(() => ({ ok: false }));
     if (result?.ok === false || result?.json?.ok === false || !Array.isArray(result?.json?.tracks)) {
       const error = new Error('Radio catalog unavailable. Please retry.'); error.code = 'RADIO_CATALOG_UNAVAILABLE'; throw error;
     }
@@ -3006,7 +3011,9 @@ export function registerMobileRoutes(app, deps = {}) {
 
   app.get('/v1/mobile/radio/options', asyncRoute(async (req, res) => {
     if (!requireSession(req, res)) return;
-    const result = await internalFeatureRequest('/config/queue-wizard/radio-options').catch(() => ({ ok: false }));
+    const result = radioFeatures
+      ? { ok: true, json: await radioFeatures.options().catch(() => null) }
+      : await internalFeatureRequest('/config/queue-wizard/radio-options').catch(() => ({ ok: false }));
     if (result?.ok === false || result?.json?.ok === false || !Array.isArray(result?.json?.genres)) return errorResponse(res, 503, 'Radio catalog unavailable. Please retry.', 'RADIO_CATALOG_UNAVAILABLE');
     return res.json({ ok: true, genres: Array.isArray(result?.json?.genres) ? result.json.genres.map(text).filter(Boolean) : [] });
   }));
