@@ -3,7 +3,7 @@ import { readBearerToken, verifyMobileToken } from './mobile-auth.mjs';
 
 const MAX_AGE_MS = 30_000;
 const reads = new Map(Object.entries({
-  '/now-playing': ['_','t'], '/next-up': ['_','t'],
+  '/now-playing': ['_','t'], '/next-up': ['_','t'], '/peppy/last-profile': [],
   '/config/runtime': [], '/config/controller-profile': [], '/config/browse/stats': [],
   '/config/browse/artists': ['q','limit','offset'], '/config/browse/albums': ['q','artist','limit'],
   '/config/browse/artist-albums': ['artist'], '/config/browse/album-tracks': ['artist','album'],

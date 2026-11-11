@@ -35,6 +35,8 @@ The first trusted browser still requires an already-authorized controller's appr
 
 ## Controller contracts
 
+Standalone display entrypoints initialize the same paired-browser session as controllers. Legacy display animation callers use the authenticated mobile lookup when hosted by the web gateway; the original Track-Key route remains available outside that gateway. The display profile is GET-only; profile writes remain outside the browser contract.
+
 The browser gateway explicitly allows playlist previews, album-health reads, radio presets and the existing read-only radio-preview POST. POST reads require same-origin and per-session CSRF plus bounded JSON validation on both the web and API sides. Administration and unlisted mutations are not exposed. Radio favorites use the shared credential-free radio service; they do not fetch an internal Track-Key-protected route.
 
 ## Verification
@@ -42,3 +44,5 @@ The browser gateway explicitly allows playlist previews, album-health reads, rad
 Run `node --test test/controller-gateway.test.mjs test/public-web-server.test.mjs test/public-web-tls.test.mjs` and `scripts/browser-controller-integration.mjs` with a real Chromium executable. Then verify an installed signed release from separate clean browser contexts: direct TLS, fresh pairing approved through the UI, radio catalog, playlist preview, source artwork/video, and retained session after a coupled API/web restart. Never test playback mutations against production moOde without authorization.
 
 Updated: 2026-11-11
+
+When adding `LoadCredential` drop-ins, use `Type=exec` for both API and web services. This makes systemd wait for the Node exec boundary before the immutable upgrade verifier inspects process identity; `Type=simple` can expose the transient pre-exec systemd child. Do not weaken release identity verification.

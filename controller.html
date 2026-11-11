@@ -785,10 +785,10 @@
       if (npMotionCache.has(k)) return String(npMotionCache.get(k) || '');
       try {
         await ensureKey();
-        const url = `${base}/config/library-health/animated-art/lookup?artist=${encodeURIComponent(a)}&album=${encodeURIComponent(b)}`;
+        const url = `${base}${globalThis.SonuviControllerWeb ? "/v1/mobile/animated-art" : "/config/library-health/animated-art/lookup"}?artist=${encodeURIComponent(a)}&album=${encodeURIComponent(b)}`;
         const r = await fetch(url, { headers: reqHeaders(false) });
         const j = await r.json().catch(() => ({}));
-        const mp4 = String((j?.hit?.mp4) || '').trim();
+        const mp4 = String(j?.mediaUrl || j?.hit?.mp4 || '').trim();
         npMotionCache.set(k, mp4);
         return mp4;
       } catch {

@@ -48,6 +48,15 @@ try {
      assert.ok(network.some(r=>r.path==='/v1/mobile/animated-art'&&r.status===200));
      assert.ok(network.some(r=>r.path.startsWith('/v1/mobile/animated-art/media/')&&[200,206].includes(r.status)));
    }
+   if(shell==='controller-tablet.html') {
+     for(const display of ['index.html','controller.html']) {
+       console.error('STAGE display',display);await page.goto(origin+'/'+display);
+       try{await page.waitForFunction(()=>[...document.querySelectorAll('video')].some(v=>v.videoWidth>0&&!v.paused&&v.currentTime>0),null,{timeout:30000});}catch(error){console.error(JSON.stringify({display,body:(await page.locator('body').innerText()).slice(0,1000),video:await page.locator('video').evaluateAll(vs=>vs.map(v=>({src:v.getAttribute('src'),readyState:v.readyState,paused:v.paused,width:v.videoWidth}))),motionRequests:network.filter(r=>r.path.includes('animated')),state:await page.evaluate(async()=>({web:globalThis.SonuviControllerWeb,auth:!!globalThis.SonuviControllerAuth?.csrfToken,enabled:globalThis.NPArt?.motionArtEnabled(),motion:await globalThis.NPArt?.resolveMotionFor(await (await fetch('/now-playing')).json())})),requests:network.slice(-10)}));throw error;}
+       assert.equal(network.some(r=>r.path==='/config/library-health/animated-art/lookup'),false);
+     }
+     await page.goto(origin+'/'+shell);
+     await page.waitForFunction(()=>document.body.textContent.includes('Fixture Album'));
+   }
    await page.locator('#homeQuickSearch').fill('Fixture');
    await page.waitForFunction(()=>document.getElementById('homeQuickResults')?.textContent.includes('Fixture Song'));
    console.error('STAGE',shell,'album navigation');

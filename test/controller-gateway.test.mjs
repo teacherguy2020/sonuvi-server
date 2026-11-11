@@ -25,6 +25,9 @@ test('dispatch is loopback, exact-query, expiry and replay bound, never administ
  for(const value of ['/config/runtime/admin','/art/track_640.jpg?src=http://127.0.0.1/private','/art/track_640.jpg?file=../secret'])assert.equal(authorize({...req,path:value.split('?')[0],originalUrl:value,headers:{'x-sonuvi-controller-dispatch':controllerDispatchHeader({secret,target:value})}}),false);
  assert.equal(authorize({...req,headers:{'x-sonuvi-controller-dispatch':controllerDispatchHeader({secret,target,now:Date.now()-60000})}}),false);
  const native=createControllerDispatchAuthorizer({apiSecret:secret});const paired={...req,headers:{'x-sonuvi-controller-dispatch':'mobile-session',authorization:`Bearer ${createMobileSessionToken({secret,deviceId:'paired'})}`}};
+ assert.equal(native({...paired,path:'/peppy/last-profile',originalUrl:'/peppy/last-profile'}),true);
+ assert.equal(native({...paired,method:'POST',path:'/peppy/last-profile',originalUrl:'/peppy/last-profile',body:{displayMode:'moode'}}),false);
+ assert.equal(native({...paired,path:'/peppy/last-profile',originalUrl:'/peppy/last-profile?url=http://private'}),false);
  assert.equal(native(paired),true);assert.equal(native({...paired,originalUrl:'/config/runtime/admin',path:'/config/runtime/admin'}),false);
  assert.equal(native({...paired,socket:{remoteAddress:'192.0.2.3'}}),false);
  assert.equal(native({...paired,headers:{'x-sonuvi-controller-dispatch':'mobile-session'}}),false);
