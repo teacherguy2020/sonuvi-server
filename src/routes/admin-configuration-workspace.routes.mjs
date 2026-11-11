@@ -1,15 +1,16 @@
+import { readGateCTargetIdentity } from '../lib/sonuvi-gate-c-target-preflight.mjs';
 import { requireAdministratorAuthorization } from '../lib/sonuvi-admin-authority.mjs';
 import { projectNativeDlnaStatus, configurationWorkspace, exportPortableConfiguration, previewConfigurationImport, configError } from '../lib/native-configuration-workspace.mjs';
 
-export function registerConfigurationWorkspaceRoutes(app, { administratorAuthority, readConfig, writeConfig, runtimeProjectionOptions = {}, getBrowseIndexStatus, getLibraryHealthStatus, getDlnaStatus, refreshIndex, scanLibrary, checkEnvironment, getWebAccess = () => ({}) } = {}) {
+export function registerConfigurationWorkspaceRoutes(app, { administratorAuthority, readConfig, writeConfig, runtimeProjectionOptions = {}, getBrowseIndexStatus, getLibraryHealthStatus, getDlnaStatus, refreshIndex, scanLibrary, checkEnvironment, getWebAccess = () => ({}), readTargetIdentity = readGateCTargetIdentity } = {}) {
  let mutation = Promise.resolve();
  let job = { running:false, operation:null, state:'idle' };
  const authorize = async req => {
   if(!administratorAuthority||!readConfig)throw configError('administrator_api_unavailable',404);
   const token=String(req.headers.authorization||'').match(/^Bearer ([^\s]+)$/i)?.[1]||'';
   await requireAdministratorAuthorization({authority:administratorAuthority,bearerToken:token}).catch(()=>{throw configError('administrator_authorization_required',401);});
-  const identity=await administratorAuthority.administratorRecord();
-  return identity.targetIdentity;
+  // The API may verify tokens but must never read root-only administrator records.
+  return await readTargetIdentity();
  };
  const state = async targetIdentity => ({ok:true,contract:'sonuvi.admin.workspace.v1',targetIdentity,...configurationWorkspace(await readConfig(),runtimeProjectionOptions),job,webAccess:getWebAccess(),operations:{refreshIndex:typeof refreshIndex==='function',scanLibrary:typeof scanLibrary==='function',checkEnvironment:typeof checkEnvironment==='function',restart:false},...(getDlnaStatus?{dlna:projectNativeDlnaStatus(await getDlnaStatus())}: {})});
  const fail=(res,error)=>res.status(error.status||503).json({ok:false,code:error.code||'administrator_workspace_unavailable'});

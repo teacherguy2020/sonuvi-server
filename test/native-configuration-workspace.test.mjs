@@ -24,7 +24,7 @@ test('effective DLNA false and paths are correctly represented; fresh export rou
 test('administrator authorization, target isolation, preview conflict, atomic apply/readback and no media mutation',async()=>{
  let cfg=baseline(),writes=0,scans=0;
  const app=express();app.use(express.json({limit:'64kb'}));
- registerConfigurationWorkspaceRoutes(app,{administratorAuthority:{async verifyAccessToken(t){if(t!=='admin')throw Error();return {role:'administrator',administratorId:'adm_test'};},async administratorRecord(){return {targetIdentity:'target-A'};}},readConfig:async()=>structuredClone(cfg),writeConfig:async c=>{writes++;cfg=c;},runtimeProjectionOptions:{environment:{}},refreshIndex:async()=>{scans++;}});
+ registerConfigurationWorkspaceRoutes(app,{administratorAuthority:{async verifyAccessToken(t){if(t!=='admin')throw Error();return {role:'administrator',administratorId:'adm_test'};},async administratorRecord(){throw Error('root-only administrator record must not be read');}},readTargetIdentity:async()=>'target-A',readConfig:async()=>structuredClone(cfg),writeConfig:async c=>{writes++;cfg=c;},runtimeProjectionOptions:{environment:{}},refreshIndex:async()=>{scans++;}});
  const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const url=`http://127.0.0.1:${server.address().port}/v1/admin/configuration`;
  const request=async(body,token='admin')=>{const r=await fetch(url+'/operation',{method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/json'},body:JSON.stringify(body)});return {status:r.status,body:await r.json()};};
  try{

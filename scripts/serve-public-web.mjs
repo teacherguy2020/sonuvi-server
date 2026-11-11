@@ -49,6 +49,18 @@ if (certPath) {
   const server = await createPublicWebServer({ publicRoot: configuredRoot });
   server.listen(port, host, () => process.stdout.write(`Sonuvi public web server listening on ${host}:${port}\n`));servers.push(server);
 }
-function stop() { Promise.all(servers.map(server=>new Promise(resolve=>{server.close(resolve);server.closeIdleConnections?.();}))).then(()=>process.exit(0)); }
+function stop() {
+  // Bound graceful draining: SSE/proxy requests can otherwise hold systemd stop
+  // indefinitely. Force remaining HTTP connections closed before its deadline.
+  const deadline = setTimeout(() => {
+    for (const server of servers) server.closeAllConnections?.();
+    process.exit(0);
+  }, 5000);
+  deadline.unref();
+  Promise.all(servers.map(server => new Promise(resolve => {
+    server.close(resolve);
+    server.closeIdleConnections?.();
+  }))).then(() => { clearTimeout(deadline); process.exit(0); });
+}
 process.once('SIGINT', stop);
 process.once('SIGTERM', stop);

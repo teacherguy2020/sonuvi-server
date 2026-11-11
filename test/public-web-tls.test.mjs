@@ -1,3 +1,4 @@
+import net from 'node:net';
 import test from 'node:test';import assert from 'node:assert/strict';import http from 'node:http';import https from 'node:https';import fs from 'node:fs/promises';import os from 'node:os';import path from 'node:path';import {spawn,execFileSync} from 'node:child_process';import {once} from 'node:events';
 import {createControllerWebGateway} from '../src/lib/controller-web-gateway.mjs';
 const freePort=async()=>{const s=http.createServer();await new Promise(r=>s.listen(0,'127.0.0.1',r));const p=s.address().port;await new Promise(r=>s.close(r));return p;};
@@ -15,6 +16,16 @@ test('direct HTTPS validates its certificate; HTTP redirects without changing im
  const publicCA=await get(`http://127.0.0.1:${port}/sonuvi-browser-ca.crt`);assert.equal(publicCA.status,200);assert.match(publicCA.body,/BEGIN CERTIFICATE/);assert.doesNotMatch(publicCA.body,/PRIVATE KEY/);
  assert.equal((await get(origin+'/__controller/session',{ca})).status,200);
  assert.equal((await get(origin+'/config/runtime/admin',{ca})).status,404);
+ // An incomplete active HTTP request must not wedge the real service shutdown.
+ const socket=net.createConnection({host:'127.0.0.1',port});
+ socket.on('error',()=>{});t.after(()=>socket.destroy());await once(socket,'connect');
+ socket.write('GET / HTTP/1.1\r\nHost: localhost\r\n');
+ await new Promise(r=>setTimeout(r,100));
+ const exited=once(child,'exit');const start=Date.now();child.kill('SIGTERM');
+ let watchdog;try {
+  const [code,signal]=await Promise.race([exited,new Promise((_,reject)=>{watchdog=setTimeout(()=>{child.kill('SIGKILL');reject(Error('service shutdown exceeded deadline'));},8000);})]);
+  assert.equal(code,0);assert.equal(signal,null);assert(Date.now()-start<8000);
+ }finally{clearTimeout(watchdog);socket.destroy();}
 });
 test('persistent bearer grants reject public or symlinked session storage',async t=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'sonuvi-web-private-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));await fs.chmod(root,0o755);assert.throws(()=>createControllerWebGateway({sessionFile:path.join(root,'sessions')}),/private service-owned/);await fs.chmod(root,0o700);await fs.writeFile(path.join(root,'sessions'),'{}',{mode:0o644});await fs.chmod(path.join(root,'sessions'),0o644);assert.throws(()=>createControllerWebGateway({sessionFile:path.join(root,'sessions')}),/unsafe browser session/);await fs.chmod(path.join(root,'sessions'),0o600);await fs.symlink(path.join(root,'sessions'),path.join(root,'link'));assert.throws(()=>createControllerWebGateway({sessionFile:path.join(root,'link')}),/unsafe browser session/);
