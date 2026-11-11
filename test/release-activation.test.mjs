@@ -100,7 +100,7 @@ async function createFixture(t) {
   const stagedFirst = await stageReleaseArtifact({ artifactRoot: first.artifactRoot, layoutRoot });
   const stagedSecond = await stageReleaseArtifact({ artifactRoot: second.artifactRoot, layoutRoot });
   await write(layoutRoot, 'shared/config/now-playing.config.json', '{"nodes":[{"role":"api"}],"ports":{"api":3101,"ui":8101}}\n');
-  await write(layoutRoot, 'shared/data/library-browse-index.json', '{"schema":"now-playing.browse-index.v2"}\n');
+  await write(layoutRoot, 'shared/data/library-browse-index.json', '{"schema":"now-playing.browse-index.v3"}\n');
   async function pointAt(staged) {
     await fs.unlink(path.join(layoutRoot, 'current')).catch((error) => { if (error?.code !== 'ENOENT') throw error; });
     await fs.symlink(path.relative(layoutRoot, staged.releaseRoot), path.join(layoutRoot, 'current'));
@@ -151,7 +151,7 @@ async function installedFixture(t) {
     'protected/controller.json': 'fixture-controller-record',
     'data/server-identity.json': 'fixture-server-identity',
     'config/now-playing.config.json': '{"ports":{"api":3101,"ui":8101}}',
-    'data/library-browse-index.json': '{"schema":"now-playing.browse-index.v2"}',
+    'data/library-browse-index.json': '{"schema":"now-playing.browse-index.v3"}',
     'config/administrator-verifier.json': 'fixture-existing-verifier',
     'checkpoints/release-activation-state.json': JSON.stringify({ phase: 'committed', candidateReleaseId: fixture.first.releaseId }),
   };

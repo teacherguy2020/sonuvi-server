@@ -16,6 +16,10 @@ Set these in a service drop-in for `sonuvi-web.service` after provisioning an in
 - `SONUVI_CONTROLLER_SESSION_FILE=<absolute private session JSON path>`
 - `SONUVI_CONTROLLER_TRUST_LOOPBACK_PROXY=0`
 
+For systemd installs whose protected directory is root-only, use `LoadCredential=` for the leaf key, leaf certificate and public CA certificate. Set the corresponding environment paths to `/run/credentials/sonuvi-web.service/<credential-name>`. Do not make the protected enrollment directory traversable by the web account. Keep the CA signing key outside the credential mappings.
+
+With `ProtectSystem=strict`, allow only the dedicated session directory via `ReadWritePaths=/var/lib/sonuvi/data/controller-browser`. Verify certificate access and session writes under the actual service account and confinement before activation.
+
 The certificate key must be readable only by the service and administrator, outside the release public root. Keep the CA signing key root-only. The session file's parent must be a real directory, owned by the web service account, mode0700; an existing file must be a regular service-owned mode0600 file. Browser grants never enter source, public assets or browser storage. Origin changes deliberately reject old persisted sessions rather than transferring grants to another origin.
 
 HTTP8101 redirects GET/HEAD paths to the exact configured HTTPS origin. HTTP mutations are rejected. The existing loopback `/release.json` health contract remains HTTP200 so the signed native upgrade coordinator can verify the installed release. The optional `/sonuvi-browser-ca.crt` on HTTP serves only the public certificate; verify its administrator-provided SHA256 fingerprint before installing trust. No private key is downloadable.
