@@ -17,7 +17,7 @@ async function readJson(req) {
   const chunks=[];let size=0;for await (const chunk of req) {size+=chunk.length;if(size>65536)throw new Error('body too large');chunks.push(chunk);}
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
-const mobileRead = path => path === '/v1/mobile/animated-art' || /^\/v1\/mobile\/animated-art\/media\/[a-f0-9]{40}\.mp4$/.test(path);
+const mobileRead = path => path === '/v1/mobile/playlists' || /^\/v1\/mobile\/playlists\/pl_[\w-]{32}\/artwork$/.test(path) || path === '/v1/mobile/animated-art' || /^\/v1\/mobile\/animated-art\/media\/[a-f0-9]{40}\.mp4$/.test(path);
 
 /** Browser cookies grant only the explicitly listed ordinary controller operations. */
 export function createControllerWebGateway({ secret=process.env.SONUVI_CONTROLLER_WEB_SECRET, origin=process.env.SONUVI_CONTROLLER_WEB_ORIGIN, apiPort=Number(process.env.SONUVI_CONTROLLER_API_PORT||3101), allowLoopbackFixture=false, trustLoopbackProxy=process.env.SONUVI_CONTROLLER_TRUST_LOOPBACK_PROXY==='1', sessionFile=process.env.SONUVI_CONTROLLER_SESSION_FILE }={}) {
@@ -105,6 +105,14 @@ export function createControllerWebGateway({ secret=process.env.SONUVI_CONTROLLE
       }
       if(legacy||mobile){
         if(!session){send(res,401,{ok:false,error:'Controller pairing required.'});return true;}
+        if(mobile && url.pathname.startsWith('/v1/mobile/playlists')) {
+          const allowed = url.pathname === '/v1/mobile/playlists' ? ['limit','cursor'] : [];
+          const seen = new Set();
+          for(const [key,value] of url.searchParams) {
+            if(!allowed.includes(key)||seen.has(key)||value.length>2048||/[\x00-\x1f]/.test(value)||(key==='limit'&&(!/^\d+$/.test(value)||Number(value)<1||Number(value)>200))) {send(res,400,{ok:false,error:'Controller query rejected.'});return true;}
+            seen.add(key);
+          }
+        }
         if(legacy&&!validControllerTarget(url.pathname+url.search,req.method)){send(res,400,{ok:false,error:'Controller query rejected.'});return true;}
         let body;
         if(req.method==='POST'){

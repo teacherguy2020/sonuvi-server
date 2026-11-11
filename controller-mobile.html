@@ -1284,7 +1284,7 @@
         renderIpadRail('ipadRailAlbums', [], 'albums', true);
         renderIpadRail('ipadRailPodcasts', [], 'podcasts', true);
 
-        const cachedPlaylists = loadRecentCache(RECENT_PLAYLISTS_CACHE_KEY).items;
+        const cachedPlaylists = (globalThis.SonuviControllerAuth?.enabled ? {items:[]} : loadRecentCache(RECENT_PLAYLISTS_CACHE_KEY)).items;
         const cachedRadio = loadRecentCache(RECENT_RADIO_CACHE_KEY).items;
         if (cachedPlaylists.length) {
           ipadRecentItems.playlists = cachedPlaylists.slice(0, limit);
@@ -1322,6 +1322,7 @@
         ipadRecentItems.podcasts = podcasts.map((p, idx)=>({ kind:'podcast', title:String(p?.title||'(podcast)').trim(), art:String(p?.art||`${base}/art/current.jpg`), rss:String((pr.json?.items||[])[idx]?.rss||'').trim() }));
         renderIpadRail('ipadRailPodcasts', ipadRecentItems.podcasts, 'podcasts');
 
+        const artwork = globalThis.SonuviControllerAuth?.enabled ? await globalThis.SonuviControllerAuth.playlistArtwork() : null;
         const pl = await fetchJsonWithTimeout(`${base}/config/queue-wizard/playlists`, { cache:'no-store', headers:reqHeaders(false) }, 3200);
         const playlists = (pl.ok && pl.json?.ok && Array.isArray(pl.json.playlists))
           ? pl.json.playlists.slice(0, limit).map((n)=>{
@@ -1329,8 +1330,8 @@
               const safe = title.replace(/\s+/g,'_');
               return {
                 title,
-                art:`http://${runtimeMoodeHost}/imagesw/playlist-covers/${encodeURIComponent(title)}.jpg`,
-                artAlt:`http://${runtimeMoodeHost}/imagesw/playlist-covers/${encodeURIComponent(safe)}.jpg`
+                art:artwork ? artwork.get(title) || '' : `http://${runtimeMoodeHost}/imagesw/playlist-covers/${encodeURIComponent(title)}.jpg`,
+                artAlt:artwork ? '' : `http://${runtimeMoodeHost}/imagesw/playlist-covers/${encodeURIComponent(safe)}.jpg`
               };
             })
           : [];
@@ -1486,7 +1487,7 @@
         }
         if (src === 'playlists') {
           try {
-            const cachedPl = loadRecentCache(RECENT_PLAYLISTS_CACHE_KEY).items;
+            const cachedPl = (globalThis.SonuviControllerAuth?.enabled ? {items:[]} : loadRecentCache(RECENT_PLAYLISTS_CACHE_KEY)).items;
             if (Array.isArray(cachedPl) && cachedPl.length) {
               recentItems = cachedPl.slice(0, recentLimit());
               rail.innerHTML = '';
@@ -1498,6 +1499,7 @@
             }
           } catch {}
 
+          const artwork = globalThis.SonuviControllerAuth?.enabled ? await globalThis.SonuviControllerAuth.playlistArtwork() : null;
           const pl = await fetchJsonWithTimeout(`${base}/config/queue-wizard/playlists`, { cache:'no-store', headers:reqHeaders(false) }, 3200);
           const names = (pl.ok && pl.json?.ok && Array.isArray(pl.json.playlists)) ? pl.json.playlists : [];
           const cleaned = names
@@ -1522,8 +1524,8 @@
               kind:'playlist',
               playlist:n,
               title:n,
-              art:`http://${runtimeMoodeHost}/imagesw/playlist-covers/${encodeURIComponent(n)}.jpg`,
-              artAlt:`http://${runtimeMoodeHost}/imagesw/playlist-covers/${encodeURIComponent(safe)}.jpg`
+              art:artwork ? artwork.get(n) || '' : `http://${runtimeMoodeHost}/imagesw/playlist-covers/${encodeURIComponent(n)}.jpg`,
+              artAlt:artwork ? '' : `http://${runtimeMoodeHost}/imagesw/playlist-covers/${encodeURIComponent(safe)}.jpg`
             };
           });
           if (recentItems.length) saveRecentCache(RECENT_PLAYLISTS_CACHE_KEY, recentItems);

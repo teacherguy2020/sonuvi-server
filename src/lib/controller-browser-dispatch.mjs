@@ -17,9 +17,16 @@ const reads = new Map(Object.entries({
 }));
 export const isLoopbackAddress = (value) => ['127.0.0.1','::1','::ffff:127.0.0.1'].includes(String(value));
 const radioPreview = '/config/queue-wizard/radio-preview';
+const podcastEpisodes = '/podcasts/episodes/list';
 export function validControllerBody({ method = 'GET', pathname, body } = {}) {
   if (method.toUpperCase() !== 'POST') return true;
-  if (pathname !== radioPreview || !body || typeof body !== 'object' || Array.isArray(body)) return false;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return false;
+  if (pathname === podcastEpisodes) {
+    if (Object.keys(body).some(k => !['rss', 'limit'].includes(k)) || typeof body.rss !== 'string' || body.rss.length > 2048 || /[\x00-\x1f]/.test(body.rss)) return false;
+    try { const url = new URL(body.rss); if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return false; } catch { return false; }
+    return body.limit === undefined || (Number.isInteger(body.limit) && body.limit >= 1 && body.limit <= 500);
+  }
+  if (pathname !== radioPreview) return false;
   const fields = new Set(['genres', 'favoriteStations', 'favoritesOnly', 'hqOnly', 'maxStations']);
   if (Object.keys(body).some(k => !fields.has(k))) return false;
   for (const k of ['genres', 'favoriteStations']) if (body[k] !== undefined && (!Array.isArray(body[k]) || body[k].length > 2000 || body[k].some(v => typeof v !== 'string' || v.length > 2048 || /[\x00-\x1f]/.test(v)))) return false;
@@ -27,7 +34,7 @@ export function validControllerBody({ method = 'GET', pathname, body } = {}) {
   return body.maxStations === undefined || (Number.isInteger(body.maxStations) && body.maxStations >= 1 && body.maxStations <= 10000);
 }
 export function isControllerDispatchable({ method = 'GET', pathname = '' } = {}) {
-  return (method.toUpperCase() === 'GET' && reads.has(pathname)) || (method.toUpperCase() === 'POST' && pathname === radioPreview);
+  return (method.toUpperCase() === 'GET' && reads.has(pathname)) || (method.toUpperCase() === 'POST' && [radioPreview, podcastEpisodes].includes(pathname));
 }
 export function validControllerTarget(target, method = 'GET') {
   try {

@@ -2242,7 +2242,7 @@
       try {
         const cAlb = loadRecentCache(RECENT_ALBUMS_CACHE_KEY).items;
         const cPod = loadRecentCache(RECENT_PODCASTS_CACHE_KEY).items;
-        const cPl = loadRecentCache(RECENT_PLAYLISTS_CACHE_KEY).items;
+        const cPl = (globalThis.SonuviControllerAuth?.enabled ? {items:[]} : loadRecentCache(RECENT_PLAYLISTS_CACHE_KEY)).items;
         const cRa = loadRecentCache(RECENT_RADIO_CACHE_KEY).items;
         if (Array.isArray(cAlb) && cAlb.length) setIpadRecentItemsIfChanged("albums", cAlb.slice(0, limit));
         if (Array.isArray(cPod) && cPod.length) setIpadRecentItemsIfChanged("podcasts", cPod.slice(0, limit));
@@ -2278,12 +2278,13 @@
         rss: String((p == null ? void 0 : p.rss) || "").trim()
       })) : [];
       if (nextPodcasts.length && setIpadRecentItemsIfChanged("podcasts", nextPodcasts)) saveRecentCache(RECENT_PODCASTS_CACHE_KEY, ipadRecentItems.podcasts);
+      const artwork = globalThis.SonuviControllerAuth?.enabled ? await globalThis.SonuviControllerAuth.playlistArtwork() : null;
       const pl = await fetchJsonWithTimeout("".concat(base, "/recent/playlists?limit=").concat(limit), { cache: "no-store" }, 3200);
       if (pl.ok && ((_b = pl.json) == null ? void 0 : _b.ok) && Array.isArray(pl.json.items)) {
         const playlists = pl.json.items.slice(0, limit).map((x) => ({
           title: String((x == null ? void 0 : x.title) || (x == null ? void 0 : x.playlist) || "(playlist)").trim(),
-          art: String((x == null ? void 0 : x.art) || "").trim(),
-          artAlt: String((x == null ? void 0 : x.artAlt) || "").trim()
+          art: artwork ? artwork.get(String(x.title || x.playlist || "").trim()) || "" : String((x == null ? void 0 : x.art) || "").trim(),
+          artAlt: artwork ? "" : String((x == null ? void 0 : x.artAlt) || "").trim()
         }));
         const nextPlaylists = playlists.map((x) => ({ kind: "playlist", playlist: String((x == null ? void 0 : x.title) || "(playlist)").trim(), title: String((x == null ? void 0 : x.title) || "(playlist)").trim(), art: String((x == null ? void 0 : x.art) || "".concat(base, "/art/current.jpg")) }));
         if (nextPlaylists.length && setIpadRecentItemsIfChanged("playlists", nextPlaylists)) saveRecentCache(RECENT_PLAYLISTS_CACHE_KEY, ipadRecentItems.playlists);
@@ -2647,7 +2648,7 @@
       }
       if (src === "playlists") {
         try {
-          const cachedPl = loadRecentCache(RECENT_PLAYLISTS_CACHE_KEY).items;
+          const cachedPl = (globalThis.SonuviControllerAuth?.enabled ? {items:[]} : loadRecentCache(RECENT_PLAYLISTS_CACHE_KEY)).items;
           if (Array.isArray(cachedPl) && cachedPl.length) {
             recentItems = cachedPl.slice(0, recentLimit());
             rail.innerHTML = "";
@@ -2661,6 +2662,7 @@
           }
         } catch {
         }
+        const artwork = globalThis.SonuviControllerAuth?.enabled ? await globalThis.SonuviControllerAuth.playlistArtwork() : null;
         const pl = await fetchJsonWithTimeout("".concat(base, "/config/queue-wizard/playlists"), { cache: "no-store", headers: reqHeaders(false) }, 3200);
         const names = pl.ok && ((_b = pl.json) == null ? void 0 : _b.ok) && Array.isArray(pl.json.playlists) ? pl.json.playlists : [];
         const cleaned = names.map((n) => String(n || "").trim()).filter(Boolean).filter((n) => !n.toLowerCase().endsWith(".youtube")).filter((n) => !n.toLowerCase().endsWith(".youtube.json"));
@@ -2681,8 +2683,8 @@
             kind: "playlist",
             playlist: n,
             title: n,
-            art: "http://".concat(runtimeMoodeHost, "/imagesw/playlist-covers/").concat(encodeURIComponent(n), ".jpg"),
-            artAlt: "http://".concat(runtimeMoodeHost, "/imagesw/playlist-covers/").concat(encodeURIComponent(safe), ".jpg")
+            art: artwork ? artwork.get(n) || "" : "http://".concat(runtimeMoodeHost, "/imagesw/playlist-covers/").concat(encodeURIComponent(n), ".jpg"),
+            artAlt: artwork ? "" : "http://".concat(runtimeMoodeHost, "/imagesw/playlist-covers/").concat(encodeURIComponent(safe), ".jpg")
           };
         });
         recentItems = await sortPlaylistsByCoverDate(recentItems);

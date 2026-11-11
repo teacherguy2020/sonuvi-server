@@ -8,13 +8,31 @@
   const nativeFetch = globalThis.fetch.bind(globalThis);
   globalThis.fetch = async function(input, options = {}) {
     const target = new URL(typeof input === 'string' || input instanceof URL ? input : input.url, location.href);
-    if(target.origin === location.origin && /^\/(?:config\/|recent\/|art\/|v1\/mobile\/|now-playing(?:\?|$)|next-up(?:\?|$)|podcasts(?:\?|$))/.test(target.pathname)) await ready;
+    if(target.origin === location.origin && /^\/(?:config\/|recent\/|art\/|v1\/mobile\/|now-playing(?:\?|$)|next-up(?:\?|$)|podcasts(?:\/|\?|$))/.test(target.pathname)) await ready;
     const method = String(options.method || input?.method || 'GET').toUpperCase();
     if (target.origin === location.origin && !['GET','HEAD','OPTIONS'].includes(method) && auth.csrfToken) {
       const headers = new Headers(options.headers || input?.headers);headers.set('x-csrf-token',auth.csrfToken);options={...options,headers};
     }
     return nativeFetch(input,options);
   };
+  let playlistArtwork;
+  auth.playlistArtwork = () => playlistArtwork ||= (async () => {
+    await ready;
+    const covers = new Map();
+    let cursor = '';
+    do {
+      const response = await fetch('/v1/mobile/playlists?limit=200' + (cursor ? '&cursor=' + encodeURIComponent(cursor) : ''), {cache:'no-store'});
+      if (!response.ok) throw new Error('Playlist artwork unavailable');
+      const page = await response.json();
+      for (const item of page.items || []) {
+        if (/^pl_[\w-]{32}$/.test(item.id)) covers.set(String(item.name), location.origin + '/v1/mobile/playlists/' + item.id + '/artwork');
+      }
+      const next = page.nextCursor == null ? '' : String(page.nextCursor);
+      if (next === cursor) break;
+      cursor = next;
+    } while (cursor);
+    return covers;
+  })().catch(error => { playlistArtwork = null; throw error; });
   const request = (path,options={}) => fetch('/__controller/'+path,{credentials:'same-origin',cache:'no-store',...options});
   function overlay() {
     let box=document.getElementById('sonuviBrowserPairing');if(box)return box;

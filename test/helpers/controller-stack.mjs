@@ -11,6 +11,7 @@ import { createControllerDispatchAuthorizer } from '../../src/lib/controller-bro
 import { registerConfigBrowseRoutes } from '../../src/routes/config.browse.routes.mjs';
 import { registerConfigControllerProfileRoutes } from '../../src/routes/config.controller-profile.routes.mjs';
 import { registerConfigQueueWizardBasicRoutes } from '../../src/routes/config.queue-wizard-basic.routes.mjs';
+import { registerPodcastEpisodeRoutes } from '../../src/routes/podcasts-episodes.routes.mjs';
 import { registerMobileRoutes } from '../../src/routes/mobile.routes.mjs';
 import { createRadioFeatureService } from '../../src/lib/radio-feature-service.mjs';
 import { createMobileSessionToken } from '../../src/lib/mobile-auth.mjs';
@@ -46,7 +47,8 @@ export async function startControllerStack({mediaFile, tlsOrigin, persistentSess
  registerConfigControllerProfileRoutes(app,{requireTrackKey});
  registerConfigQueueWizardBasicRoutes(selectReads(['/config/queue-wizard/radio-presets','/config/queue-wizard/radio-preview','/config/queue-wizard/options','/config/queue-wizard/radio-options','/config/queue-wizard/radio-favorites']),{requireTrackKey,getBrowseIndex:browse.getBrowseIndex,radioFeatures});
  registerArtRoutes(app,artDeps);
- registerMobileRoutes(app,{enabled:true,apiSecret,trackIdSecret:'fixture-track-secret',getBrowseIndex:browse.getBrowseIndex,radioFeatures,animatedArt:{lookup:animation.lookupAnimatedArt,resolveMedia:animation.resolveAnimatedMediaFile},serveArtwork:(res,file)=>serveTrackArtwork(res,file,artDeps)});
+ registerPodcastEpisodeRoutes(app,{normUrl:v=>String(v||'').trim(),readSubs:()=>[{rss:'https://example.invalid/feed',dir:temp,mpdPrefix:'Podcasts/Fixture',mapJson:path.join(temp,'missing.json')}],fetchPodcastRSS:async()=>({items:[]})});
+ registerMobileRoutes(app,{getMobilePlaylists:async()=>[{name:'Fixture Playlist',files:[track.file]}],servePlaylistArtwork:(res)=>res.type('jpeg').send(jpeg),enabled:true,apiSecret,trackIdSecret:'fixture-track-secret',getBrowseIndex:browse.getBrowseIndex,radioFeatures,animatedArt:{lookup:animation.lookupAnimatedArt,resolveMedia:animation.resolveAnimatedMediaFile},serveArtwork:(res,file)=>serveTrackArtwork(res,file,artDeps)});
  // Transport state input only. Pairing, catalog, artwork, radio and animation use production routes/services.
  app.get('/now-playing',(_req,res)=>res.json({...track,state:'play',displayArtUrl:'/art/current.jpg',animatedArt:{source:'local',artist:track.artist,album:track.album,allow:true},elapsed:1,duration:120}));
  const api=http.createServer(app),apiPort=await listen(api);

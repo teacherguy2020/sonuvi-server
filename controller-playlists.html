@@ -119,7 +119,7 @@
     if (__embedded && __url.searchParams.get('cols') === '7') document.body.classList.add('embeddedWide');
 
     // Server-backed controller palette
-    const __npBase = (!location.port || location.port==='80' || location.port==='443')
+    const __npBase = globalThis.SonuviControllerWeb ? location.origin : (!location.port || location.port==='80' || location.port==='443')
       ? location.origin
       : `${location.protocol}//${location.hostname||'sonuvi.local'}:3101`;
     function __npApplyPalette(name, themeMode, customColors){
@@ -251,10 +251,11 @@
       await ensureKey();
       const r=await fetch(`${base}/config/queue-wizard/playlists`,{cache:'no-store',headers:{...(key?{'x-track-key':key}:{})}});
       const j=await r.json().catch(()=>({}));
+      const artwork = globalThis.SonuviControllerAuth?.enabled ? await globalThis.SonuviControllerAuth.playlistArtwork() : null;
       const names = (r.ok && j?.ok && Array.isArray(j.playlists)) ? j.playlists : [];
       playlists = names.map((n)=>{
         const name = String(n||'').trim();
-        const cov = playlistCoverUrl(name);
+        const cov = artwork ? {primary:artwork.get(name)||'', alt:''} : playlistCoverUrl(name);
         const pref = playlistCoverChoice.get(name);
         return { name, cover: pref==='alt'?cov.alt:cov.primary, coverAlt: cov.alt, count:null };
       });

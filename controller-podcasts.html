@@ -111,7 +111,7 @@
     if (__embedded && __url.searchParams.get('cols') === '7') document.body.classList.add('embeddedWide');
 
     // Server-backed controller palette
-    const __npBase = (!location.port || location.port==='80' || location.port==='443')
+    const __npBase = globalThis.SonuviControllerWeb ? location.origin : (!location.port || location.port==='80' || location.port==='443')
       ? location.origin
       : `${location.protocol}//${location.hostname||'sonuvi.local'}:3101`;
     function __npApplyPalette(name, themeMode, customColors){
