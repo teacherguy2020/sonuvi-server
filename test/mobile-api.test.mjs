@@ -2360,3 +2360,15 @@ test('mobile radio catalog failures propagate explicitly while valid empty catal
   const app=registerFixture({fetchInternalRequest:async()=>({ok:true,json:{ok:true,tracks:[]}})});
   const empty=createResponse();await app.routes.get('GET /v1/mobile/radio')(request({headers}),empty);assert.equal(empty.statusCode,200);assert.deepEqual(empty.body.items,[]);
 });
+
+
+test('catalog stats exclude downloaded podcasts while retaining music track identities', async () => {
+  const index = fixtureIndex();
+  index.tracks.push({...index.tracks[0], file:'USB/Podcasts/Show/episode.mp3', artist:'Podcast Host', albumArtist:'Podcast Host', album:'Show'});
+  const app = registerFixture({getBrowseIndex:async () => index});
+  const token = createMobileSessionToken({secret:'api-secret-for-test', deviceId:'fixture-ipad'});
+  const response = createResponse();
+  await app.routes.get('GET /v1/mobile/catalog/stats')(request({headers:{authorization:'Bearer '+token}}), response);
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.body.counts, {tracks:2, albums:1, artists:1});
+});

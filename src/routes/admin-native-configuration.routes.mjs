@@ -311,8 +311,8 @@ export function registerNativeAdministratorConfigurationRoutes(app, {
         available: browse.available || health.available,
         counts: {
           artists: browse.counts.artists,
-          albums: browse.counts.albums ?? health.counts.albums,
-          tracks: browse.counts.tracks ?? health.counts.tracks,
+          albums: browse.available ? browse.counts.albums : null,
+          tracks: browse.available ? browse.counts.tracks : null,
         },
         indexing: {
           lastSuccessfulAt: browse.builtAt || health.lastSuccessfulAt,

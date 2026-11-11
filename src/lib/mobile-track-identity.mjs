@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { isMusicLibraryTrack } from './music-library-counts.mjs';
 import { createMobileTrackId } from './mobile-auth.mjs';
 import { audioQualitySummaryForTracks, sourceAudioFromQuality } from './browse-index-quality.mjs';
 
@@ -137,6 +138,7 @@ export function buildMobileCatalog(index, { trackIdSecret } = {}) {
 
   const rows = Array.isArray(index?.tracks) ? index.tracks : [];
   const tracks = [];
+  const musicTrackIDs = new Set();
   const byTrackId = new Map();
   const byFile = new Map();
   const albumsById = new Map();
@@ -178,6 +180,7 @@ export function buildMobileCatalog(index, { trackIdSecret } = {}) {
     };
 
     tracks.push(record);
+    if (isMusicLibraryTrack(source)) musicTrackIDs.add(record.id);
     byTrackId.set(trackId, record);
     byFile.set(file, record);
 
@@ -224,9 +227,12 @@ export function buildMobileCatalog(index, { trackIdSecret } = {}) {
     .map((artist) => ({ ...artist, albumIds: Array.from(artist.albumIds).sort() }))
     .sort((a, b) => norm(a.artist).localeCompare(norm(b.artist)));
 
+  const musicTracks = tracks.filter(track => musicTrackIDs.has(track.id));
   return {
     builtAt: String(index?.builtAt || ''),
-    counts: { tracks: tracks.length, albums: albums.length, artists: artists.length },
+    counts: { tracks: musicTracks.length,
+      albums: new Set(musicTracks.map(track => track.albumId)).size,
+      artists: new Set(musicTracks.map(track => track.artistId)).size },
     tracks,
     albums,
     artists,

@@ -151,3 +151,24 @@ Errors expose no provider exception text, paths, credentials, or diagnostics. Th
 The root-owned base configuration and administrator verifier remain read-only to the API. Native writes persist only versioned portable application preferences in `data/native-configuration.json` (mode0600, within existing service-writable state). The shared startup loader, native workspace, diagnostics and web runtime reads merge that allowlisted document with the base. Identity, deployment, listeners, credentials, caches and raw configuration cannot be overridden. Malformed, oversized or symlink preference documents fail closed. Environment overrides still win. Startup-loaded features require a service restart; no new restart privilege is provided.
 
 A fresh process restart test verifies the actual loader and unchanged base/verifier; Linux regression checks include the service ownership policy. Web raw/base-configuration writes are not granted new permissions by this change.
+
+
+## Music-library counts — 2026-11-11 (source correction, not deployed)
+
+Music summary counts exclude downloaded files within `Podcast` / `Podcasts`
+directory components (including a relative root), explicit podcast records and
+remote/pseudo streams. They do not classify an ordinary song as a podcast from
+its title or an incidental substring in an artist/directory name. Both mobile
+catalog stats and read-only browse-index status expose the filtered projection.
+The full index, podcast track IDs and playback/queue lookup maps remain intact;
+no scan, deletion or identity migration is needed. When the browse index is
+unavailable, administrator status does not substitute mixed media health totals
+as music counts. A custom podcast download directory without explicit podcast
+metadata cannot be identified by this bounded path rule and remains an open
+classification limitation.
+
+Verification: dedicated count fixtures, mobile API stats, read-only index status
+and administrator route regressions. This checkout has not been packaged,
+signed, published or deployed; Pi5 and VM remain on their prior releases.
+
+Last updated: 2026-11-11 America/Chicago.

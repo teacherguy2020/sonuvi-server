@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { musicLibraryCounts } from './music-library-counts.mjs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -34,7 +35,7 @@ export function createEmptyBrowseIndex({ mpdHost = '', builtAt = new Date().toIS
 }
 
 
-function browseIndexStatus(index, { available = true, source = 'memory', refreshing = false } = {}) { const counts = index?.counts || {}; return Object.freeze({ available: Boolean(available), source: available ? source : 'unavailable', builtAt: String(index?.builtAt || '') || null, dbUpdateAt: String(index?.dbUpdateAt || '') || null, counts: { artists: Number.isFinite(Number(counts.artists)) ? Math.max(0, Number(counts.artists)) : null, albums: Number.isFinite(Number(counts.albums)) ? Math.max(0, Number(counts.albums)) : null, tracks: Number.isFinite(Number(counts.tracks)) ? Math.max(0, Number(counts.tracks)) : null }, refresh: { running: Boolean(refreshing) } }); }
+function browseIndexStatus(index, { available = true, source = 'memory', refreshing = false } = {}) { const counts = musicLibraryCounts(index?.tracks) || {}; return Object.freeze({ available: Boolean(available), source: available ? source : 'unavailable', builtAt: String(index?.builtAt || '') || null, dbUpdateAt: String(index?.dbUpdateAt || '') || null, counts: { artists: Number.isFinite(Number(counts.artists)) ? Math.max(0, Number(counts.artists)) : null, albums: Number.isFinite(Number(counts.albums)) ? Math.max(0, Number(counts.albums)) : null, tracks: Number.isFinite(Number(counts.tracks)) ? Math.max(0, Number(counts.tracks)) : null }, refresh: { running: Boolean(refreshing) } }); }
 function norm(s = '') {
   return String(s || '').trim().toLowerCase();
 }

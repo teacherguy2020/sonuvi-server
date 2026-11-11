@@ -143,3 +143,19 @@ test('browse index status observes a persisted index without contacting MPD or r
   });
   assert.equal(processCalls, 0);
 });
+
+
+test('status counts music only without rewriting the full persisted catalog', async (t) => {
+  const root = await temporaryFixtureRoot(t);
+  const indexPath = path.join(root, 'data', 'library-browse-index.json');
+  const index = syntheticBrowseIndex();
+  index.tracks.push({...index.tracks[0], id:2, file:'Podcasts/Fixture/episode.mp3', artist:'Podcast Host', albumArtist:'Podcast Host', album:'Podcast Show'});
+  index.counts.tracks = 2;
+  const original = JSON.stringify(index);
+  await fs.writeFile(indexPath, original);
+  const adapter = createBrowseIndexAdapter({statePaths:{browseIndexPath:indexPath}, capabilities:{rehearsal:false},
+    runExecFile:async () => { throw new Error('must not contact MPD'); }});
+  const status = await adapter.getBrowseIndexStatus('unused');
+  assert.deepEqual(status.counts, {artists:1, albums:1, tracks:1});
+  assert.equal(await fs.readFile(indexPath, 'utf8'), original);
+});
