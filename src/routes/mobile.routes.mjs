@@ -8,6 +8,7 @@ import { log } from '../lib/log.mjs';
 import { runtimeStatePaths } from '../lib/runtime-state-paths.mjs';
 import {
   createMobileMediaTicket,
+  createMobileAnimationTicket,
   createMobileRadioTicket,
   createMobileRefreshToken,
   createMobileSessionToken,
@@ -2382,8 +2383,9 @@ export function registerMobileRoutes(app, deps = {}) {
   });
 
   app.get('/v1/mobile/animated-art', asyncRoute(async (req, res) => {
-    if (!requireSession(req, res)) return;
-    if (!fetchInternalJson && !fetchInternalRequest) {
+    const session = requireSession(req, res);
+    if (!session) return;
+    if (!deps.animatedArt && !fetchInternalJson && !fetchInternalRequest) {
       return errorResponse(res, 503, 'mobile animated art is not configured');
     }
 
@@ -2406,15 +2408,34 @@ export function registerMobileRoutes(app, deps = {}) {
       pathname = `/config/library-health/animated-art/lookup?artist=${encodeURIComponent(artist)}&album=${encodeURIComponent(album)}&h264=1`;
     }
 
-    const result = await internalFeatureRequest(pathname);
+    const result = deps.animatedArt
+      ? { ok: true, json: await deps.animatedArt.lookup({ artist, album, appleMusicUrl, baseUrl: requestBaseUrl(req, mobileBaseUrl) }) }
+      : await internalFeatureRequest(pathname);
     if (!result?.ok) return errorResponse(res, 502, 'animated-art lookup failed');
 
-    const mediaUrl = safeAnimatedMediaUrl(req, result.json?.hit?.mp4);
+    let mediaUrl = safeAnimatedMediaUrl(req, result.json?.hit?.mp4);
+    if (deps.animatedArt && mediaUrl) {
+      const match = new URL(mediaUrl).pathname.match(/\/config\/library-health\/animated-art\/media\/([a-f0-9]{40}\.mp4)$/);
+      if (match) {
+        const ticket = createMobileAnimationTicket({ secret: apiSecret, deviceId: session.deviceId, name: match[1] });
+        mediaUrl = `${requestBaseUrl(req, mobileBaseUrl)}/v1/mobile/animated-art/media/${match[1]}?ticket=${encodeURIComponent(ticket)}`;
+      }
+    }
     return res.json({
       ok: true,
       hasMotion: Boolean(mediaUrl),
       mediaUrl,
     });
+  }));
+
+  app.get('/v1/mobile/animated-art/media/:name', asyncRoute(async (req, res) => {
+    const name = text(req.params?.name);
+    const ticket = verifyMobileToken(text(req.query?.ticket), { secret: apiSecret, scope: 'mobile-animation' });
+    if (!(ticket && ticket.name === name) && !requireSession(req, res)) return;
+    const file = await deps.animatedArt?.resolveMedia(name);
+    if (!file) return errorResponse(res, 404, 'animation not found');
+    res.set('Cache-Control', 'private, no-store');
+    return serveFileWithRange(req, res, file, 'video/mp4');
   }));
 
   // Fresh-install-only administrative bridge. It is inert for established

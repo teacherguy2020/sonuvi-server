@@ -29,6 +29,8 @@ export function registerAllConfigRoutes(app, deps) {
   });
 
   registerConfigQueueWizardBasicRoutes(app, {
+    getBrowseIndex: deps.getBrowseIndex,
+    radioFeatures: deps.radioFeatures,
     requireTrackKey: deps.requireTrackKey,
   });
 
@@ -129,6 +131,7 @@ export function registerAllConfigRoutes(app, deps) {
   });
 
   registerConfigBrowseRoutes(app, {
+    getBrowseIndex: deps.getBrowseIndex,
     requireTrackKey: deps.requireTrackKey,
   });
 

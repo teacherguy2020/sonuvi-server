@@ -23,6 +23,7 @@
     if (provided) return provided.replace(/\/+$/, '');
     if (String(root.NP_API_BASE || '').trim()) return String(root.NP_API_BASE).trim().replace(/\/+$/, '');
 
+    if (globalThis.SonuviControllerWeb) return location.origin;
     const protocol = location.protocol || 'http:';
     const host = location.hostname || 'sonuvi.local';
     const port = String(location.port || '');
@@ -186,6 +187,7 @@
   }
 
   async function runtimeKey(base = '') {
+    if (globalThis.SonuviControllerAuth?.enabled) { await globalThis.SonuviControllerAuth.ready; return ''; }
     if (motionCache.runtimeKey) return motionCache.runtimeKey;
     if (motionCache.runtimeKeyPromise) return motionCache.runtimeKeyPromise;
     const api = apiBase(base);
@@ -223,10 +225,10 @@
       try {
         const keyHeader = await runtimeKey(api);
         const headers = keyHeader ? { 'x-track-key': keyHeader } : {};
-        const url = `${api}/config/library-health/animated-art/lookup?artist=${encodeURIComponent(a)}&album=${encodeURIComponent(b)}`;
+        const url = `${api}${globalThis.SonuviControllerWeb ? "/v1/mobile/animated-art" : "/config/library-health/animated-art/lookup"}?artist=${encodeURIComponent(a)}&album=${encodeURIComponent(b)}`;
         const r = await fetch(url, { headers, cache: 'no-store' });
         const j = await r.json().catch(() => ({}));
-        const mp4 = String(j?.hit?.mp4 || '').trim();
+        const mp4 = String(j?.mediaUrl || j?.hit?.mp4 || '').trim();
         if (mp4) {
           motionCache.local.set(key, { state: 'ready', value: mp4 });
           return mp4;
@@ -254,11 +256,11 @@
         const api = apiBase(base);
         const keyHeader = await runtimeKey(api);
         const headers = keyHeader ? { 'x-track-key': keyHeader } : {};
-        const endpoint = `${api}/config/library-health/animated-art/radio-lookup?url=${encodeURIComponent(normalized)}`;
+        const endpoint = `${api}${globalThis.SonuviControllerWeb ? "/v1/mobile/animated-art" : "/config/library-health/animated-art/radio-lookup"}?url=${encodeURIComponent(normalized)}`;
         const r = await fetch(endpoint, { headers, cache: 'no-store' });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const j = await r.json().catch(() => ({}));
-        const mp4 = String(j?.hit?.mp4 || '').trim();
+        const mp4 = String(j?.mediaUrl || j?.hit?.mp4 || '').trim();
         if (mp4) {
           motionCache.apple.set(normalized, { state: 'ready', value: mp4 });
           return mp4;

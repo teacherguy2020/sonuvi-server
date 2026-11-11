@@ -1,28 +1,68 @@
 #!/usr/bin/env node
-/* Runnable local harness: production public-web gateway + actual controller HTML. */
+// Real Chrome + HTTPS proxy + production web gateway, pairing store, catalog/art/media routes.
+// No page interception, autoapproval route, or invented route responses for the corrected features.
 import assert from 'node:assert/strict';
-import http from 'node:http';
-import fs from 'node:fs';
+import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import express from 'express';
+import http from 'node:http';
+import https from 'node:https';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { chromium } from 'playwright';
-import { buildPublicWebRoot } from '../src/lib/public-web-root.mjs';
-import { createPublicWebServer } from '../src/lib/public-web-server.mjs';
-import { verifyControllerDispatch } from '../src/lib/controller-browser-dispatch.mjs';
-const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'); const secret='fixture-controller-secret';
-const listen=(server)=>new Promise((resolve)=>server.listen(0,'127.0.0.1',()=>resolve(server.address().port)));
-const close=(server)=>new Promise((resolve)=>server.close(resolve));
-const app=express(); app.use(express.json());
-const dispatch=(req,res,next)=>verifyControllerDispatch({secret,header:req.get('x-sonuvi-controller-dispatch'),method:req.method,pathname:req.path})?next():res.status(403).json({ok:false,error:'dispatch denied'});
-app.post('/v1/mobile/pairing/presentations',dispatch,(_req,res)=>res.json({ok:true,presentationId:'present_fixture',challenge:'fixture-challenge',pollToken:'fixture-poll',baseUrl:'http://127.0.0.1'}));
-app.get('/v1/mobile/pairing/presentations/present_fixture/complete',dispatch,(req,res)=>req.get('x-mobile-pairing-poll-token')==='fixture-poll'?res.json({ok:true,status:'approved'}):res.status(401).json({status:'waiting'}));
-app.get('/config/browse/albums',dispatch,(_req,res)=>res.json({ok:true,albums:[{album:'Fixture Album',artist:'Fixture Artist',file:'Music/fixture.flac'}]}));
-app.get('/config/browse/artists',dispatch,(_req,res)=>res.json({ok:true,artists:['Fixture Artist']}));
-app.get('/config/browse/artist-albums',dispatch,(_req,res)=>res.json({ok:true,albums:[{album:'Fixture Album',artist:'Fixture Artist'}]}));
-app.get('/now-playing',dispatch,(_req,res)=>res.json({title:'Fixture Song',artist:'Fixture Artist',album:'Fixture Album'}));
-app.get('/art/track_640.jpg',dispatch,(_req,res)=>res.type('image/jpeg').send(Buffer.from([0xff,0xd8,0xff,0xd9])));
-const api=http.createServer(app); const apiPort=await listen(api); const temp=await fs.promises.mkdtemp(path.join(os.tmpdir(),'sonuvi-browser-')); const publicRoot=path.join(temp,'public'); await buildPublicWebRoot({sourceRoot:root,outputRoot:publicRoot});
-const web=await createPublicWebServer({publicRoot,controllerSecret:secret,apiPort,allowLoopbackFixture:true}); const webPort=await listen(web); const url='http://127.0.0.1:'+webPort;
-try { const browser=await chromium.launch({headless:true,executablePath:process.env.SONUVI_BROWSER_EXECUTABLE||undefined}); const page=await browser.newPage(); await page.goto(url+'/controller-tablet.html'); await page.getByRole('button',{name:'Start trusted-device pairing'}).click(); await page.waitForTimeout(1800); await page.waitForFunction(()=>!document.getElementById('sonuviBrowserPairing')); await page.waitForFunction(()=>document.body.textContent.includes('Fixture Album')); assert.match(await page.content(),/Fixture Album/); assert.match(await page.content(),/Albums/); await browser.close(); console.log('browser controller harness: PASS '+url); } finally { await close(web); await close(api); await fs.promises.rm(temp,{recursive:true,force:true}); }
+import { startControllerStack, listen, close } from '../test/helpers/controller-stack.mjs';
+const exec=promisify(execFile),temp=await fs.mkdtemp(path.join(os.tmpdir(),'sonuvi-chrome-'));
+let browser,stack,proxy;
+const observations=[];
+try {
+ await exec('openssl',['req','-x509','-newkey','rsa:2048','-nodes','-keyout',path.join(temp,'key.pem'),'-out',path.join(temp,'cert.pem'),'-days','1','-subj','/CN=localhost','-addext','subjectAltName=DNS:localhost,IP:127.0.0.1']);
+ const video=path.join(temp,'motion.mp4');
+ await exec('ffmpeg',['-hide_banner','-loglevel','error','-f','lavfi','-i','testsrc2=size=96x96:rate=12','-t','2','-an','-c:v','libx264','-pix_fmt','yuv420p','-movflags','+faststart',video]);
+ proxy=https.createServer({key:await fs.readFile(path.join(temp,'key.pem')),cert:await fs.readFile(path.join(temp,'cert.pem'))},(req,res)=>{
+   const up=http.request({host:'127.0.0.1',port:stack.webPort,path:req.url,method:req.method,headers:{...req.headers,'x-forwarded-proto':'https'}},r=>{res.writeHead(r.statusCode,r.headers);r.pipe(res);});
+   up.on('error',()=>{res.writeHead(502);res.end();});req.pipe(up);
+ });
+ const port=await listen(proxy),origin=`https://127.0.0.1:${port}`;
+ stack=await startControllerStack({mediaFile:video,tlsOrigin:origin});
+ browser=await chromium.launch({headless:true,executablePath:process.env.SONUVI_BROWSER_EXECUTABLE||undefined});
+ for(const shell of ['controller-tablet.html','controller-mobile.html']) {
+   const context=await browser.newContext({ignoreHTTPSErrors:true,viewport:{width:1280,height:900}});const page=await context.newPage();page.setDefaultTimeout(15000);console.error("STAGE",shell,"navigate");
+   const network=[],errors=[];
+   page.on('response',r=>{const u=new URL(r.url());if(u.origin===origin)network.push({path:u.pathname,status:r.status()});});
+   page.on('pageerror',e=>{errors.push(e.message);console.error('PAGE ERROR',shell,e.message);});
+   const recentResponse=page.waitForResponse(r=>new URL(r.url()).pathname==='/recent/albums'&&r.status()===200);
+   await page.goto(origin+'/'+shell);
+   const pairResponse=page.waitForResponse(r=>r.url()===origin+'/__controller/pairings'&&r.request().method()==='POST');
+   await page.getByRole('button',{name:'Start trusted-device pairing'}).click();
+   const created=await pairResponse;assert.equal(created.status(),201);const pairing=await created.json();
+   await page.locator('#sonuviPairCode').waitFor();assert.equal(await page.locator('#sonuviPairCode').textContent(),pairing.verificationCode);
+   await stack.approve(pairing.presentationId,pairing.verificationCode);
+   await page.waitForFunction(()=>globalThis.SonuviControllerAuth?.csrfToken);
+   await page.waitForFunction(()=>document.body.textContent.includes('Fixture Album'));
+   const cookies=await context.cookies();const session=cookies.find(c=>c.name==='sonuvi_controller');assert.ok(session?.httpOnly&&session?.secure&&session.sameSite==='Strict');
+   console.error("STAGE",shell,"paired");
+   await recentResponse;
+   assert.ok(network.some(r=>r.path==='/recent/albums'&&r.status===200));
+   if(shell==='controller-tablet.html') {
+     await page.waitForFunction(()=>{const v=document.getElementById('npArtMotion');return v&&v.videoWidth>0&&!v.paused&&v.currentTime>0;},{},{timeout:30000});
+     assert.ok(network.some(r=>r.path==='/v1/mobile/animated-art'&&r.status===200));
+     assert.ok(network.some(r=>r.path.startsWith('/v1/mobile/animated-art/media/')&&[200,206].includes(r.status)));
+   }
+   await page.locator('#homeQuickSearch').fill('Fixture');
+   await page.waitForFunction(()=>document.getElementById('homeQuickResults')?.textContent.includes('Fixture Song'));
+   console.error('STAGE',shell,'album navigation');
+   await page.goto(origin+'/controller-albums.html');
+   await page.waitForFunction(()=>document.body.textContent.includes('Fixture Album'));
+   await page.waitForFunction(()=>Array.from(document.images).some(i=>i.src.includes('/art/track_640.jpg')&&i.complete&&i.naturalWidth>0));
+   assert.ok(network.some(r=>r.path==='/config/browse/albums'&&r.status===200));
+   await page.goto(origin+'/controller-artists.html');
+   await page.waitForFunction(()=>document.body.textContent.includes('Fixture Artist'));
+   assert.ok(network.some(r=>r.path==='/config/browse/artists'&&r.status===200));
+   const query=await page.evaluate(async()=>{const r=await fetch('/config/browse/albums?q=Fixture');return {status:r.status,body:await r.json()};});assert.equal(query.status,200);assert.equal(query.body.albums.length,1);
+   assert.equal(network.some(r=>r.path==='/config/runtime/admin'),false);
+   if(process.env.SONUVI_BROWSER_EVIDENCE)await page.screenshot({path:path.join(process.env.SONUVI_BROWSER_EVIDENCE,shell+'.png')});
+   observations.push({shell,paired:true,catalogNavigation:true,decodedArtwork:true,animatedPlayback:shell==='controller-tablet.html',errors,requests:network});
+   await context.close();
+ }
+ console.log(JSON.stringify({result:'PASS',transport:'real TLS via trusted loopback proxy',authentication:'real P-256 presentation, trusted approval and HttpOnly cookie',observations},null,2));
+} finally {if(browser)await browser.close();if(proxy)await close(proxy);if(stack)await stack.close();await fs.rm(temp,{recursive:true,force:true});}

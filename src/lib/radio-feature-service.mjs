@@ -1,3 +1,4 @@
+import { normalizeGenreLabel } from './radio-genre-label.mjs';
 import { filterRadioCatalog } from './moode-radio-catalog.mjs';
 import { radioDisplayName } from './radio-display.mjs';
 
@@ -10,7 +11,7 @@ export function createRadioFeatureService({ readRadioCatalog } = {}) {
   const options = async () => {
     const genres = new Map();
     for (const row of await catalog()) for (const raw of String(row?.genre || '').split(/[;,|/]/)) {
-      const label = raw.trim();
+      const label = normalizeGenreLabel(raw);
       if (label && !genres.has(label.toLowerCase())) genres.set(label.toLowerCase(), label);
     }
     return { ok: true, genres: [...genres.values()].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })) };

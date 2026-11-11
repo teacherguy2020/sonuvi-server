@@ -1,9 +1,10 @@
+import { normalizeGenreLabel } from '../lib/radio-genre-label.mjs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { MPD_HOST, MOODE_SSH_HOST, MOODE_SSH, MPD_PLAYLIST_DIR } from '../config.mjs';
-import { getBrowseIndex } from '../lib/browse-index.mjs';
+import { getBrowseIndex as defaultGetBrowseIndex } from '../lib/browse-index.mjs';
 import { radioDisplayName } from '../lib/radio-display.mjs';
 import { isPodcastPlaylist } from '../lib/playlist-classification.mjs';
 import { runtimeStatePaths } from '../lib/runtime-state-paths.mjs';
@@ -253,20 +254,6 @@ async function resolveIheartLivePage(rawUrl = '', fallbackName = '') {
   };
 }
 
-function normalizeGenreLabel(v = '') {
-  const raw = String(v || '').trim();
-  if (!raw) return '';
-  const lower = raw.toLowerCase();
-  const keepUpper = new Set(['r&b', 'edm', 'dj', 'am', 'fm']);
-  return lower
-    .split(/\s+/)
-    .map((w) => {
-      if (keepUpper.has(w)) return w.toUpperCase();
-      if (w.length <= 2) return w.toUpperCase();
-      return w.charAt(0).toUpperCase() + w.slice(1);
-    })
-    .join(' ');
-}
 
 function isGenericStationName(v = '') {
   const s = String(v || '').trim().toLowerCase();
@@ -452,7 +439,7 @@ async function saveMoodeRadioLogo({ stationName, faviconUrl }) {
 }
 
 export function registerConfigQueueWizardBasicRoutes(app, deps) {
-  const { requireTrackKey, readRadioCatalog = readMoodeRadioCatalog } = deps;
+  const { requireTrackKey, readRadioCatalog = readMoodeRadioCatalog, getBrowseIndex = defaultGetBrowseIndex } = deps;
   const radioFeatures = deps.radioFeatures || createRadioFeatureService({ readRadioCatalog });
   const catalogUnavailable = res => res.status(503).json({ ok: false, code: 'RADIO_CATALOG_UNAVAILABLE', error: 'Radio catalog unavailable. Check the moOde connection and retry.' });
 

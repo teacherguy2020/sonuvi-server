@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { installRuntimeShutdown } from './src/lib/runtime-shutdown.mjs';
+import { lookupAnimatedArt, resolveAnimatedMediaFile } from './src/routes/config.library-health-animated-art.routes.mjs';
 /**
  * moode-nowplaying-api.mjs -- moOde Now-Playing API (Pi4)
  *
@@ -259,7 +261,7 @@ import { execFileStrict } from './src/lib/exec.mjs';
 import { createRuntimeCapabilities, rehearsalReadOnlyMiddleware } from './src/lib/runtime-capabilities.mjs';
 import { publicRuntimeReleaseIdentity, resolveRuntimePublicWebRoot, resolveRuntimeReleaseIdentity } from './src/lib/release-runtime.mjs';
 import { hasConfiguredTrackKey, isAuthorizedTrackKey } from './src/lib/track-key-auth.mjs';
-import { isControllerDispatchable, verifyControllerDispatch } from './src/lib/controller-browser-dispatch.mjs';
+import { createControllerDispatchAuthorizer } from './src/lib/controller-browser-dispatch.mjs';
 import { radioDisplayName, radioStationNameForFile } from './src/lib/radio-display.mjs';
 import {
   isAirplayCurrentSong,
@@ -428,14 +430,7 @@ async function stopPibuzEventsForShutdown(signal) {
   return pibuzShutdownPromise;
 }
 
-for (const signal of ['SIGTERM', 'SIGINT']) {
-  process.once(signal, () => {
-    Promise.all([stopPibuzEventsForShutdown(signal), stopRuntimeForShutdown(signal)]).then(
-      () => process.exit(0),
-      () => process.exit(1),
-    );
-  });
-}
+installRuntimeShutdown({ cleanup: signal => Promise.all([stopPibuzEventsForShutdown(signal), stopRuntimeForShutdown(signal)]) });
 
 const qobuzConnectController = createQobuzConnectController({
   sshUser: MOODE_SSH_USER,
@@ -2537,11 +2532,9 @@ function extractYear(str) {
   return m ? m[1] : '';
 }
 
+const authorizeControllerDispatch = createControllerDispatchAuthorizer({ secret: process.env.SONUVI_CONTROLLER_WEB_SECRET, apiSecret: MOBILE_API_SECRET });
 function requireTrackKey(req, res) {
-  const controllerSecret = String(process.env.SONUVI_CONTROLLER_WEB_SECRET || '').trim();
-  const controllerPath = String(req.path || req.originalUrl || '').split('?', 1)[0];
-  if (isControllerDispatchable({ method: req.method, pathname: controllerPath })
-    && verifyControllerDispatch({ secret: controllerSecret, header: req.headers['x-sonuvi-controller-dispatch'], method: req.method, pathname: controllerPath })) return true;
+  if (authorizeControllerDispatch(req)) return true;
   if (!hasConfiguredTrackKey(TRACK_KEY)) {
     // Do not silently run an immutable release with its privileged endpoints
     // unauthenticated. Legacy checkouts retain their historical open behavior
@@ -9243,6 +9236,7 @@ const dlnaRuntime = createDlnaRuntime({
   },
   log,
 });
+stopRuntimeForShutdown = () => dlnaRuntime.stop();
 const startDlnaRuntime = () => dlnaRuntime.start();
 
 
@@ -9254,6 +9248,7 @@ registerMobileRoutes(app, {
   mobileBaseUrl: MOBILE_PUBLIC_BASE_URL,
   mobileTrackCacheDir: MOBILE_TRACK_CACHE_DIR,
   transcodeTracks: MOBILE_TRANSCODE_TRACKS,
+  animatedArt: { lookup: lookupAnimatedArt, resolveMedia: resolveAnimatedMediaFile },
   administratorAuthority: firstAdministratorAuthority,
   dlnaMediaServer,
   administratorStateRoot: RUNTIME_STATE_PATHS.stateRoot,
@@ -9722,6 +9717,7 @@ if (!RUNTIME_CAPABILITIES.rehearsal) {
 }
 
 const configRouteHandles = registerAllConfigRoutes(app, {
+  getBrowseIndex: (...args) => getBrowseIndex(...args),
   requireTrackKey,
   log,
   radioFeatures,

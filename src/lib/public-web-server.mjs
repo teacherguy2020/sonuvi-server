@@ -62,6 +62,11 @@ export async function createPublicWebServer({ publicRoot, ...gatewayOptions } = 
 
   const controllerGateway = createControllerWebGateway(gatewayOptions);
   return http.createServer(async (request, response) => {
+    if (request.url === '/__controller/config.js' && request.method === 'GET') {
+      response.writeHead(200, { 'content-type': 'text/javascript', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+      response.end('globalThis.SonuviControllerWeb = true;');
+      return;
+    }
     if (await controllerGateway(request, response)) return;
     if (!['GET', 'HEAD'].includes(String(request.method || 'GET').toUpperCase())) {
       sendStatus(response, 405);

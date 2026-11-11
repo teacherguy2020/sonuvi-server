@@ -1,6 +1,9 @@
 <!doctype html>
 <html lang="en">
 <head>
+<script src="/__controller/config.js"></script>
+<script src="scripts/controller-browser-auth.js"></script>
+
   <script src="scripts/runtime-auth.js?v=20261024-h2"></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
@@ -206,16 +209,17 @@
       } catch {}
     })();
 
-    const base = (!location.port || location.port==='80' || location.port==='443')
+    const base = globalThis.SonuviControllerWeb ? location.origin : ((!location.port || location.port==='80' || location.port==='443')
       ? location.origin
-      : `${location.protocol}//${location.hostname||'sonuvi.local'}:3101`;
+      : `${location.protocol}//${location.hostname||'sonuvi.local'}:3101`);
     const STATE_KEY='np.controller.podcasts.menu.v1';
     let key='';
     let state={view:'grid',sort:'az'};
     let shows=[];
     let modalCtx={rss:'',title:'',imageUrl:'',episodes:[]};
 
-    async function ensureKey(){ if(key) return key; const r=await fetch(`${base}/config/runtime`,{cache:'no-store'}); const j=await r.json().catch(()=>({})); key=String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim(); return key; }
+    async function ensureKey(){
+      if (globalThis.SonuviControllerAuth?.enabled) { await globalThis.SonuviControllerAuth.ready; return ""; } if(key) return key; const r=await fetch(`${base}/config/runtime`,{cache:'no-store'}); const j=await r.json().catch(()=>({})); key=String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim(); return key; }
     function h(){ return {...(key?{'x-track-key':key}:{})}; }
 
     function syncMenu(){

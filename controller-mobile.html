@@ -1,8 +1,10 @@
 <!doctype html>
 <html lang="en">
 <head>
+<script src="/__controller/config.js"></script>
+<script src="scripts/controller-browser-auth.js"></script>
+
   <script src="scripts/runtime-auth.js?v=20261024-h2"></script>
-  <script src="scripts/controller-browser-auth.js?v=20261110-browser1"></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#000000" />
@@ -764,11 +766,14 @@
       r.style.setProperty('--quick-line', cSecondary || t.line || '#2a3a58');
       r.style.setProperty('--quick-bg-menu', t.quickBgMenu || 'rgba(10,16,28,.94)');
     }
-    const base = location.origin;
+    const base = globalThis.SonuviControllerWeb ? location.origin : ((!location.port || location.port==='80' || location.port==='443')
+      ? location.origin
+      : `${location.protocol}//${location.hostname||'sonuvi.local'}:3101`);
     let runtimeTrackKey='';
     let runtimeMoodeHost='moode.local';
     let quickIndex=[];
     async function ensureKey(){
+      if (globalThis.SonuviControllerAuth?.enabled) { await globalThis.SonuviControllerAuth.ready; return ""; }
       if (runtimeTrackKey) return runtimeTrackKey;
       try {
         const r=await fetch(`${base}/config/runtime`,{cache:'no-store'});
@@ -1148,6 +1153,14 @@
     }
 
     async function getRecentAlbumsForRail(){
+      if (globalThis.SonuviControllerWeb) {
+        await globalThis.SonuviControllerAuth.ready;
+        const response = await fetch(`${base}/recent/albums?limit=60`, { cache: 'no-store' });
+        if (!response.ok) throw new Error('Recent albums unavailable');
+        const payload = await response.json();
+        return (payload.items || []).map(row => ({ album: row.album, artist: row.artist,
+          sampleFile: row.file, folder: row.folder, thumbUrl: row.art, addedTs: row.maxId }));
+      }
       const now = Date.now();
 
       if (!Array.isArray(recentAlbumsCache.albums) || !recentAlbumsCache.albums.length) {
