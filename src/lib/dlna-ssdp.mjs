@@ -4,12 +4,18 @@ import {
   CONNECTION_MANAGER_TYPE,
   CONTENT_DIRECTORY_TYPE,
   DLNA_DEVICE_TYPE,
+  isPrivateLanAddress,
 } from './dlna-media-server.mjs';
 
 const SSDP_GROUP = '239.255.255.250';
 const SSDP_PORT = 1900;
 const SSDP_MAX_AGE_SECONDS = 1800;
 const SSDP_ALIVE_INTERVAL_MS = 15 * 60 * 1000;
+function validSsdpEndpoint(udn, baseUrl, localAddress) {
+  try { const url = new URL(String(baseUrl || '')); return /^uuid:[0-9a-f-]{36}$/i.test(String(udn || '')) && isPrivateLanAddress(localAddress) && url.protocol === 'http:' && url.hostname === String(localAddress || '').trim() && isPrivateLanAddress(url.hostname) && /^[1-9]\d{0,4}$/.test(url.port) && Number(url.port) <= 65535; }
+  catch { return false; }
+}
+
 
 export function parseSsdpSearchTarget(request) {
   if (!/^M-SEARCH \*/i.test(request) || !/(?:^|\r?\n)MAN:\s*"ssdp:discover"/i.test(request)) return '';
@@ -56,7 +62,7 @@ export function ssdpAliveAnnouncements({ udn, baseUrl }) {
  * :1900 but do not deliver SSDP multicast to it until it joins the group.
  */
 export async function startDlnaSsdpResponder({ udn, baseUrl, localAddress, log = console } = {}) {
-  if (!String(udn || '').startsWith('uuid:') || !/^http:\/\/\d+\.\d+\.\d+\.\d+:\d+$/.test(String(baseUrl || '')) || !localAddress) {
+  if (!validSsdpEndpoint(udn, baseUrl, localAddress)) {
     throw new Error('DLNA SSDP requires a UDN, private LAN media URL, and LAN interface');
   }
   const socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });

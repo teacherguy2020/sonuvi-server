@@ -119,6 +119,13 @@ export const MOBILE_API_SECRET = String(process.env.MOBILE_API_SECRET || '').tri
 export const MOBILE_TRACK_ID_SECRET = String(process.env.MOBILE_TRACK_ID_SECRET || '').trim();
 export const MOBILE_API_ENROLLMENT_CODE = String(process.env.MOBILE_API_ENROLLMENT_CODE || '').trim();
 export const MOBILE_PUBLIC_BASE_URL = String(process.env.MOBILE_PUBLIC_BASE_URL || '').trim();
+// DLNA is opt-in and isolated from the authenticated API listener. A valid
+// private-LAN interface and dedicated port must be selected explicitly.
+export const ENABLE_DLNA_MEDIA_SERVER = process.env.ENABLE_DLNA_MEDIA_SERVER != null
+  ? /^(1|true|yes|on)$/i.test(String(process.env.ENABLE_DLNA_MEDIA_SERVER).trim())
+  : Boolean(MASTER_CONFIG?.features?.dlnaMediaServer);
+export const DLNA_LAN_ADDRESS = String(process.env.DLNA_LAN_ADDRESS || '').trim();
+export const DLNA_PORT = Number(process.env.DLNA_PORT || '3102');
 export const MOBILE_TRACK_CACHE_DIR = RUNTIME_STATE_PATHS.mobileTrackCacheDir;
 export const MOBILE_TRANSCODE_TRACKS =
   process.env.MOBILE_TRANSCODE_TRACKS != null

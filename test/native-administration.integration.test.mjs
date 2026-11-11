@@ -169,10 +169,10 @@ test('enrolled P-256 proof issues a short-lived session that authorizes all nati
   assert.deepEqual(dlna.body, {
     ok: true,
     contract: 'sonuvi.admin.dlna.v1',
-    status: 'unavailable',
-    installed: false,
+    status: 'disabled',
+    installed: true,
     enabled: false,
-    reason: 'not_installed_in_gate_c',
+    reason: 'operator_configuration_required',
   });
 
   const controllerToken = createMobileSessionToken({ secret: 'ordinary-controller-secret', deviceId: 'controller-device-0123456789' });

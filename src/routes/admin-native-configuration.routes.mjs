@@ -89,7 +89,7 @@ function nativeConfigurationCapabilities(config, writeAvailable = false) {
   return Object.freeze({
     configuration: { read: true, write: writeAvailable },
     library: { status: true, scan: false, refresh: false },
-    dlna: { status: true, installed: false },
+    dlna: { status: true, installed: true },
     features: {
       podcasts: features.podcasts === true,
       ratings: features.ratings === true,
@@ -209,6 +209,7 @@ export function registerNativeAdministratorConfigurationRoutes(app, {
   getServerIdentity = () => ({}),
   getBrowseIndexStatus = async () => ({}),
   getLibraryHealthStatus = async () => ({}),
+  getDlnaStatus = async () => ({ installed: true, enabled: false, status: 'disabled', reason: 'operator_configuration_required' }),
 } = {}) {
   const available = administratorAuthority
     && typeof administratorAuthority.verifyAccessToken === 'function'
@@ -321,13 +322,7 @@ export function registerNativeAdministratorConfigurationRoutes(app, {
 
   app.get('/v1/admin/dlna', async (req, res) => {
     if (!(await authorize(req, res))) return;
-    return res.json({
-      ok: true,
-      contract: NATIVE_ADMIN_DLNA_CONTRACT,
-      status: 'unavailable',
-      installed: false,
-      enabled: false,
-      reason: 'not_installed_in_gate_c',
-    });
+    const status = await getDlnaStatus().catch(() => null);
+    return res.json({ ok: true, contract: NATIVE_ADMIN_DLNA_CONTRACT, installed: status?.installed === true, enabled: status?.enabled === true, status: ['enabled', 'disabled', 'unavailable'].includes(text(status?.status)) ? text(status.status) : 'unavailable', reason: text(status?.reason, 'status_unavailable'), ...(status?.deviceDescriptionUrl ? { deviceDescriptionUrl: text(status.deviceDescriptionUrl) } : {}) });
   });
 }

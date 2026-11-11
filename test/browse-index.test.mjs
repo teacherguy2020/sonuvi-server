@@ -111,12 +111,12 @@ test('production browse adapter retains MPD freshness and index-build behavior',
   });
 
   const index = await adapter.getBrowseIndex('production-mpd.example');
-  assert.equal(index.schema, 'now-playing.browse-index.v2');
+  assert.equal(index.schema, 'now-playing.browse-index.v3');
   assert.equal(index.tracks.length, 1);
   assert.deepEqual(calls.map((entry) => entry.command), ['mpc', 'mpc']);
   assert.equal(calls[0].args.includes('stats'), true);
   assert.equal(calls[1].args.includes('listall'), true);
-  assert.equal(JSON.parse(await fs.readFile(indexPath, 'utf8')).schema, 'now-playing.browse-index.v2');
+  assert.equal(JSON.parse(await fs.readFile(indexPath, 'utf8')).schema, 'now-playing.browse-index.v3');
 });
 
 test('browse index status observes a persisted index without contacting MPD or rebuilding it', async (t) => {

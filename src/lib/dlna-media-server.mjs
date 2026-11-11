@@ -36,8 +36,8 @@ function mimeFor(file) { return MIME_TYPES[path.extname(String(file || '')).toLo
 function contained(root, candidate) { const relative = path.relative(root, candidate); return Boolean(relative) && !path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`); }
 function duration(seconds) { const value = Number(seconds); if (!Number.isFinite(value) || value < 0) return ''; const h = Math.floor(value / 3600); const m = Math.floor((value % 3600) / 60); const s = Math.floor(value % 60); return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`; }
 
-function privateIpv4(value) { const parts = String(value || '').split('.').map(Number); return parts.length === 4 && parts.every((part) => Number.isInteger(part) && part >= 0 && part <= 255) && (parts[0] === 10 || (parts[0] === 192 && parts[1] === 168) || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31)); }
-export function selectLanAddress({ preferred = '', interfaces = os.networkInterfaces() } = {}) { if (privateIpv4(preferred)) return String(preferred); for (const values of Object.values(interfaces || {})) for (const item of values || []) if (item?.family === 'IPv4' && !item.internal && privateIpv4(item.address)) return item.address; return ''; }
+export function isPrivateLanAddress(value) { const parts = String(value || '').split('.').map(Number); return parts.length === 4 && parts.every((part) => Number.isInteger(part) && part >= 0 && part <= 255) && (parts[0] === 10 || (parts[0] === 192 && parts[1] === 168) || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31)); }
+export function selectLanAddress({ preferred = '', interfaces = os.networkInterfaces() } = {}) { if (isPrivateLanAddress(preferred)) return String(preferred); for (const values of Object.values(interfaces || {})) for (const item of values || []) if (item?.family === 'IPv4' && !item.internal && isPrivateLanAddress(item.address)) return item.address; return ''; }
 export async function persistentUdn(identityPath, fsApi = fs) { try { const existing = JSON.parse(await fsApi.readFile(identityPath, 'utf8')); if (/^uuid:[0-9a-f-]{36}$/i.test(String(existing?.udn || ''))) return existing.udn; } catch {} const udn = `uuid:${crypto.randomUUID()}`; await fsApi.mkdir(path.dirname(identityPath), { recursive: true }); const temporary = `${identityPath}.${process.pid}.${Date.now()}.tmp`; await fsApi.writeFile(temporary, `${JSON.stringify({ contract: 'sonuvi.dlna-identity.v1', udn })}\n`, { mode: 0o600 }); await fsApi.rename(temporary, identityPath); return udn; }
 
 function soapAction(request) { const header = String(request.headers?.soapaction || '').replace(/["']/g, '').trim().split('#').pop(); return header || (String(request.body || '').match(/<u:([A-Za-z0-9_]+)/) || [])[1] || ''; }
@@ -127,6 +127,46 @@ export function createDlnaMediaServer({ getBrowseIndex, resolveFile, readArtwork
   async function metadata(objectId) { if (objectId === '0') return { kind: 'container', id: '0', parentId: '-1', title: 'Sonuvi Music Library', class: 'object.container' }; const file = decodeId(objectId, 'track'); if (file) { const data = await catalog(); const track = data.tracks.find((item) => item.file === file); return track ? trackItem(track) : null; } const roots = await children('0'); const rootItem = roots.find((item) => item.id === objectId); if (rootItem) return rootItem; const prefix = objectId.split(':')[0]; const value = decodeId(objectId, prefix); if (!value) return null; return { kind: 'container', id: objectId, parentId: prefix === 'album' ? 'albums' : `${prefix}s`, title: value, class: prefix === 'artist' ? 'object.container.person.musicArtist' : prefix === 'genre' ? 'object.container.genre.musicGenre' : 'object.container.album.musicAlbum' }; }
 function register(app, express) { if (!enabled) return; const observeSoap = (service) => (req, res, next) => { res.once('finish', () => log.info?.('[dlna] SOAP', { service, action: soapAction(req) || 'Unknown', status: res.statusCode })); next(); }; app.get('/dlna/device.xml', (_req, res) => res.type('application/xml').send(`<?xml version="1.0"?><root xmlns="urn:schemas-upnp-org:device-1-0"><specVersion><major>1</major><minor>0</minor></specVersion><device><deviceType>${DLNA_DEVICE_TYPE}</deviceType><friendlyName>Sonuvi Music Library</friendlyName><manufacturer>Sonuvi</manufacturer><modelName>Sonuvi Server</modelName><iconList><icon><mimetype>${DLNA_DEVICE_ICON.mimeType}</mimetype><width>${DLNA_DEVICE_ICON.width}</width><height>${DLNA_DEVICE_ICON.height}</height><depth>${DLNA_DEVICE_ICON.depth}</depth><url>${DLNA_DEVICE_ICON.url}</url></icon></iconList><UDN>${udn}</UDN><serviceList><service><serviceType>${CONTENT_DIRECTORY_TYPE}</serviceType><serviceId>urn:upnp-org:serviceId:ContentDirectory</serviceId><SCPDURL>/dlna/content-directory.xml</SCPDURL><controlURL>/dlna/content-directory/control</controlURL><eventSubURL></eventSubURL></service><service><serviceType>${CONNECTION_MANAGER_TYPE}</serviceType><serviceId>urn:upnp-org:serviceId:ConnectionManager</serviceId><SCPDURL>/dlna/connection-manager.xml</SCPDURL><controlURL>/dlna/connection-manager/control</controlURL><eventSubURL></eventSubURL></service></serviceList></device></root>`)); app.get('/dlna/content-directory.xml', (_req, res) => res.type('application/xml').send(scpd(CONTENT_DIRECTORY_SCPD))); app.get('/dlna/connection-manager.xml', (_req, res) => res.type('application/xml').send(scpd(CONNECTION_MANAGER_SCPD))); app.post('/dlna/content-directory/control', observeSoap('ContentDirectory'), express.text({ type: ['text/xml', 'application/soap+xml'], limit: '1mb' }), async (req, res) => { const action = soapAction(req); try { if (action === 'Browse') { const objectId = soapArgument(req.body, 'ObjectID') || '0'; const flag = soapArgument(req.body, 'BrowseFlag'); const all = flag === 'BrowseMetadata' ? [await metadata(objectId)].filter(Boolean) : await children(objectId); const start = Math.max(0, Number(soapArgument(req.body, 'StartingIndex')) || 0); const requested = Math.max(0, Number(soapArgument(req.body, 'RequestedCount')) || 0); const selected = all.slice(start, requested ? start + requested : undefined); return res.type('text/xml').send(envelope(CONTENT_DIRECTORY_TYPE, 'Browse', { Result: didl(selected), NumberReturned: selected.length, TotalMatches: all.length, UpdateID: Date.parse((await catalog()).index?.builtAt || '') || 0 })); } if (action === 'GetSearchCapabilities') return res.type('text/xml').send(envelope(CONTENT_DIRECTORY_TYPE, action, { SearchCaps: '' })); if (action === 'GetSortCapabilities') return res.type('text/xml').send(envelope(CONTENT_DIRECTORY_TYPE, action, { SortCaps: '' })); if (action === 'GetSystemUpdateID') return res.type('text/xml').send(envelope(CONTENT_DIRECTORY_TYPE, action, { Id: Date.now() })); return res.status(500).type('text/xml').send(fault(401, 'Invalid Action')); } catch (error) { log.warn?.('[dlna] content browse failed', error?.message || error); return res.status(500).type('text/xml').send(fault(501, 'Action Failed')); } }); app.post('/dlna/connection-manager/control', observeSoap('ConnectionManager'), express.text({ type: ['text/xml', 'application/soap+xml'], limit: '1mb' }), (req, res) => { const action = soapAction(req); const source = Object.values(MIME_TYPES).map((mime) => `http-get:*:${mime}:*`).join(','); if (action === 'GetProtocolInfo') return res.type('text/xml').send(envelope(CONNECTION_MANAGER_TYPE, action, { Source: source, Sink: '' })); if (action === 'GetCurrentConnectionIDs') return res.type('text/xml').send(envelope(CONNECTION_MANAGER_TYPE, action, { ConnectionIDs: '0' })); if (action === 'GetCurrentConnectionInfo') { if (soapArgument(req.body, 'ConnectionID') !== '0') return res.status(500).type('text/xml').send(fault(706, 'No Such Connection')); return res.type('text/xml').send(envelope(CONNECTION_MANAGER_TYPE, action, { RcsID: '-1', AVTransportID: '-1', ProtocolInfo: source, PeerConnectionManager: '', PeerConnectionID: '-1', Direction: 'Output', Status: 'OK' })); } return res.status(500).type('text/xml').send(fault(401, 'Invalid Action')); }); app.all('/dlna/media/:trackId', async (req, res) => { const file = decodeId(req.params.trackId, 'track'); const data = await catalog(); if (!file || !data.tracks.some((track) => track.file === file)) return res.sendStatus(404); const local = String(await resolveFile(file) || ''); if (!local || !contained(root, path.resolve(local)) || !mimeFor(file)) return res.sendStatus(404); let stat; try { stat = await fsApi.stat(local); } catch { return res.sendStatus(404); } if (!stat.isFile()) return res.sendStatus(404); let start = 0; let end = stat.size - 1; let status = 200; const range = String(req.headers.range || ''); if (range) { const match = range.match(/^bytes=(\d*)-(\d*)$/); if (!match) return res.status(416).set('Content-Range', `bytes */${stat.size}`).end(); start = match[1] ? Number(match[1]) : Math.max(0, stat.size - Number(match[2] || 0)); end = match[2] ? Number(match[2]) : end; if (!Number.isInteger(start) || !Number.isInteger(end) || start > end || start >= stat.size) return res.status(416).set('Content-Range', `bytes */${stat.size}`).end(); end = Math.min(end, stat.size - 1); status = 206; } res.status(status).set({ 'Content-Type': mimeFor(file), 'Accept-Ranges': 'bytes', 'Content-Length': String(end - start + 1), ...(status === 206 ? { 'Content-Range': `bytes ${start}-${end}/${stat.size}` } : {}) }); if (req.method === 'HEAD') return res.end(); createReadStream(local, { start, end }).on('error', () => { if (!res.headersSent) res.sendStatus(500); else res.destroy(); }).pipe(res); }); }
   // The legacy compact control registration below remains responsible for the
+  let realRootPromise = null;
+  async function safeMedia(req, res) {
+    if (!['GET', 'HEAD'].includes(req.method)) return res.status(405).set('Allow', 'GET, HEAD').end();
+    const file = decodeId(req.params.trackId, 'track');
+    const data = await catalog();
+    if (!file || !data.tracks.some((track) => track.file === file) || !mimeFor(file)) return res.sendStatus(404);
+    const local = String(await resolveFile(file) || '');
+    if (!local || !contained(root, path.resolve(local))) return res.sendStatus(404);
+    let realRoot; let realLocal; let stat;
+    try {
+      realRootPromise ||= fsApi.realpath(root);
+      [realRoot, realLocal] = await Promise.all([realRootPromise, fsApi.realpath(local)]);
+      if (!contained(realRoot, realLocal)) return res.sendStatus(404);
+      stat = await fsApi.stat(realLocal);
+    } catch { return res.sendStatus(404); }
+    if (!stat.isFile()) return res.sendStatus(404);
+    let start = 0; let end = stat.size - 1; let status = 200;
+    const range = String(req.headers.range || '');
+    if (range) {
+      const match = range.match(/^bytes=(\d*)-(\d*)$/);
+      if (!match || (!match[1] && !match[2])) return res.status(416).set('Content-Range', `bytes */${stat.size}`).end();
+      if (match[1]) start = Number(match[1]);
+      else {
+        const suffix = Number(match[2]);
+        if (!Number.isSafeInteger(suffix) || suffix <= 0) return res.status(416).set('Content-Range', `bytes */${stat.size}`).end();
+        start = Math.max(0, stat.size - suffix);
+      }
+      if (match[2] && match[1]) end = Number(match[2]);
+      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start > end || start >= stat.size) return res.status(416).set('Content-Range', `bytes */${stat.size}`).end();
+      end = Math.min(end, stat.size - 1); status = 206;
+    }
+    res.status(status).set({
+      'Content-Type': mimeFor(file), 'Accept-Ranges': 'bytes', 'Content-Length': String(end - start + 1),
+      ...(status === 206 ? { 'Content-Range': `bytes ${start}-${end}/${stat.size}` } : {}),
+    });
+    if (req.method === 'HEAD') return res.end();
+    createReadStream(realLocal, { start, end }).on('error', () => {
+      if (!res.headersSent) res.sendStatus(500); else res.destroy();
+    }).pipe(res);
+  }
   // advertised services. Register this asynchronous Browse handler first so
   // track metadata can await bounded artwork resolution without affecting the
   // existing actions.
@@ -175,11 +215,12 @@ function register(app, express) { if (!enabled) return; const observeSoap = (ser
       });
       return req.method === 'HEAD' ? res.end() : res.send(artwork.body);
     });
+    app.all('/dlna/media/:trackId', safeMedia);
     register(app, express);
   }
   async function initialize() { if (!udn) udn = await persistentUdn(identityPath, fsApi); return udn; }
   async function capabilities() {
-    const identity = await initialize();
+    const identity = enabled ? await initialize() : null;
     return Object.freeze({
       supported: true,
       enabled,

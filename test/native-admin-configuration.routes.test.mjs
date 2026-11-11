@@ -150,7 +150,7 @@ test('administrator configuration is a sanitized projection with explicit editab
     { id: 'moodeSshHost', editable: false, source: 'environment' },
   ]);
   assert.deepEqual(res.body.capabilities.configuration, { read: true, write: false });
-  assert.equal(res.body.capabilities.dlna.installed, false);
+  assert.equal(res.body.capabilities.dlna.installed, true);
   const serialized = JSON.stringify(res.body);
   for (const secret of Object.values(sentinels)) assert.equal(serialized.includes(secret), false);
   assert.equal(serialized.includes('native-admin-pushover-user-secret'), false);
@@ -243,10 +243,10 @@ test('administrator library and DLNA endpoints return bounded current status', a
   assert.deepEqual(dlna.body, {
     ok: true,
     contract: 'sonuvi.admin.dlna.v1',
-    status: 'unavailable',
-    installed: false,
+    status: 'disabled',
+    installed: true,
     enabled: false,
-    reason: 'not_installed_in_gate_c',
+    reason: 'operator_configuration_required',
   });
 });
 

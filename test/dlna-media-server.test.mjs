@@ -198,6 +198,18 @@ test('DLNA browse and media routes expose only indexed read-only files', async (
     assert.equal(media.headers.get('content-range'), 'bytes 1-3/6');
     assert.equal(await media.text(), 'bcd');
     assert.equal((await fetch(`${base}/dlna/media/${encodeURIComponent('track:Li4vZXRjL3Bhc3N3ZA')}`)).status, 404);
+    const suffix = await fetch(`${base}/dlna/media/${encodeURIComponent(trackId)}`, { headers: { Range: 'bytes=-2' } });
+    assert.equal(suffix.status, 206);
+    assert.equal(suffix.headers.get('content-range'), 'bytes 4-5/6');
+    assert.equal(await suffix.text(), 'ef');
+    const openEnded = await fetch(`${base}/dlna/media/${encodeURIComponent(trackId)}`, { headers: { Range: 'bytes=4-' } });
+    assert.equal(await openEnded.text(), 'ef');
+    const head = await fetch(`${base}/dlna/media/${encodeURIComponent(trackId)}`, { method: 'HEAD', headers: { Range: 'bytes=1-3' } });
+    assert.equal(head.status, 206);
+    assert.equal(head.headers.get('content-length'), '3');
+    assert.equal(await head.text(), '');
+    assert.equal((await fetch(`${base}/dlna/media/${encodeURIComponent(trackId)}`, { method: 'POST' })).status, 405);
+    assert.equal((await fetch(`${base}/dlna/media/${encodeURIComponent(trackId)}`, { headers: { Range: 'bytes=-0' } })).status, 416);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await fs.rm(root, { recursive: true, force: true });
