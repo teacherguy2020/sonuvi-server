@@ -145,3 +145,9 @@ Gate C does not package the native DLNA MediaServer. This endpoint reports that 
 | 503 | `administrator_library_status_unavailable` | A status provider could not produce its bounded response. |
 
 Errors expose no provider exception text, paths, credentials, or diagnostics. This is source-only: a future signed Server release and separately approved installation are required before an existing Gate C Server exposes these endpoints.
+
+### Immutable-install preference persistence
+
+The root-owned base configuration and administrator verifier remain read-only to the API. Native writes persist only versioned portable application preferences in `data/native-configuration.json` (mode0600, within existing service-writable state). The shared startup loader, native workspace, diagnostics and web runtime reads merge that allowlisted document with the base. Identity, deployment, listeners, credentials, caches and raw configuration cannot be overridden. Malformed, oversized or symlink preference documents fail closed. Environment overrides still win. Startup-loaded features require a service restart; no new restart privilege is provided.
+
+A fresh process restart test verifies the actual loader and unchanged base/verifier; Linux regression checks include the service ownership policy. Web raw/base-configuration writes are not granted new permissions by this change.

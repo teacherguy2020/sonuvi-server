@@ -1,3 +1,4 @@
+import { readEffectiveRuntimeConfig, writeNativeRuntimeConfig } from './src/lib/native-configuration-store.mjs';
 #!/usr/bin/env node
 import { startLibraryHealthScan, waitForLibraryHealthScan } from './src/routes/config.library-health-read.routes.mjs';
 import { runtimeDiagnostics as nativeRuntimeDiagnostics } from './src/lib/config-runtime-diagnostics.mjs';
@@ -257,7 +258,6 @@ import {
   RUNTIME_STATE_PATHS
 } from './src/config.mjs';
 import { log } from './src/lib/log.mjs';
-import { writeJsonAtomically } from './src/lib/atomic-file.mjs';
 import { handleMobileJsonError } from './src/lib/mobile-http.mjs';
 import { execFileStrict } from './src/lib/exec.mjs';
 import { createRuntimeCapabilities, rehearsalReadOnlyMiddleware } from './src/lib/runtime-capabilities.mjs';
@@ -4692,7 +4692,7 @@ async function resolveArtistAlias(artistRaw) {
   const artist = String(artistRaw || '').trim();
   if (!artist) return '';
   try {
-    const cfg = JSON.parse(await fsp.readFile(RUNTIME_CONFIG_PATH, 'utf8'));
+    const cfg = readEffectiveRuntimeConfig(RUNTIME_CONFIG_PATH);
     const aliases = cfg?.alexa?.artistAliases || {};
     const want = normalizeAliasKey(artist);
     for (const [k, v] of Object.entries(aliases)) {
@@ -4708,7 +4708,7 @@ async function resolveAlbumAlias(albumRaw) {
   const album = String(albumRaw || '').trim();
   if (!album) return '';
   try {
-    const cfg = JSON.parse(await fsp.readFile(RUNTIME_CONFIG_PATH, 'utf8'));
+    const cfg = readEffectiveRuntimeConfig(RUNTIME_CONFIG_PATH);
     const aliases = cfg?.alexa?.albumAliases || {};
     const want = normalizeAliasKey(album);
     for (const [k, v] of Object.entries(aliases)) {
@@ -4724,7 +4724,7 @@ async function resolvePlaylistAlias(playlistRaw) {
   const playlist = String(playlistRaw || '').trim();
   if (!playlist) return '';
   try {
-    const cfg = JSON.parse(await fsp.readFile(RUNTIME_CONFIG_PATH, 'utf8'));
+    const cfg = readEffectiveRuntimeConfig(RUNTIME_CONFIG_PATH);
     const aliases = cfg?.alexa?.playlistAliases || {};
     const want = normalizeAliasKey(playlist);
     for (const [k, v] of Object.entries(aliases)) {
@@ -9331,7 +9331,7 @@ registerMobileRoutes(app, {
   getFavoriteForFile: async (file) => isFavoriteInPlaylist(file),
   ratingsEnabled: async () => {
     try {
-      const cfg = JSON.parse(await fsp.readFile(RUNTIME_CONFIG_PATH, 'utf8'));
+      const cfg = readEffectiveRuntimeConfig(RUNTIME_CONFIG_PATH);
       return Boolean(cfg?.features?.ratings ?? true);
     } catch {
       return true;
@@ -9425,8 +9425,8 @@ registerMobileRoutes(app, {
 
 registerNativeAdministratorConfigurationRoutes(app, {
   administratorAuthority: firstAdministratorAuthority,
-  readConfig: async () => JSON.parse(await fsp.readFile(RUNTIME_CONFIG_PATH, 'utf8')),
-  writeConfig: async (value) => writeJsonAtomically(RUNTIME_CONFIG_PATH, value),
+  readConfig: async () => readEffectiveRuntimeConfig(RUNTIME_CONFIG_PATH),
+  writeConfig: async (value) => writeNativeRuntimeConfig(value),
   runtimeProjectionOptions: {
     environment: process.env,
     apnsCredentials: {
@@ -9446,7 +9446,7 @@ registerNativeAdministratorConfigurationRoutes(app, {
     startLibraryHealthScan({ getRatingForFile, mpdStickerGetSong });
     await waitForLibraryHealthScan();
   },
-  checkEnvironment: async () => nativeRuntimeDiagnostics(JSON.parse(await fsp.readFile(RUNTIME_CONFIG_PATH, 'utf8')), { execFileP }),
+  checkEnvironment: async () => nativeRuntimeDiagnostics(readEffectiveRuntimeConfig(RUNTIME_CONFIG_PATH), { execFileP }),
   getWebAccess: () => ({
     address: process.env.SONUVI_CONTROLLER_WEB_ORIGIN || null,
     discovery: 'not-configured-by-native-api',

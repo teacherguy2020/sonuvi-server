@@ -1,3 +1,4 @@
+import { readEffectiveRuntimeConfig } from '../lib/native-configuration-store.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { lookup as dnsLookup } from 'node:dns/promises';
@@ -222,7 +223,7 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
     };
   }
 
-  const readConfig = async () => JSON.parse(await fs.readFile(configPath, 'utf8'));
+  const readConfig = async () => readEffectiveRuntimeConfig(configPath);
 
   // Compatibility route for existing browser surfaces. It remains readable
   // without a track key, but now returns only a literal public projection.
@@ -837,7 +838,7 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
     try {
       let cfg = {};
       try {
-        cfg = JSON.parse(await fs.readFile(configPath, 'utf8'));
+        cfg = readEffectiveRuntimeConfig(configPath);
       } catch {}
       const sshHost = String(cfg?.moode?.sshHost || cfg?.mpd?.host || MOODE_SSH_HOST || MPD_HOST || '').trim();
       const sshUser = String(cfg?.moode?.sshUser || MOODE_SSH_USER || 'moode').trim();
@@ -860,7 +861,7 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
 
       let cfg = {};
       try {
-        cfg = JSON.parse(await fs.readFile(configPath, 'utf8'));
+        cfg = readEffectiveRuntimeConfig(configPath);
       } catch {}
 
       const controlsEnabled = Boolean(cfg?.features?.mpdscribbleControl ?? false);
@@ -926,7 +927,7 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
 
       let current = {};
       try {
-        current = JSON.parse(await fs.readFile(configPath, 'utf8'));
+        current = readEffectiveRuntimeConfig(configPath);
       } catch {
         return res.status(503).json({ ok: false, error: 'Existing configuration unavailable; nothing was written' });
       }
@@ -973,7 +974,7 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
   app.get('/config/moode/display/status', async (req, res) => {
     try {
       if (!requireTrackKey(req, res)) return;
-      const cfg = JSON.parse(await fs.readFile(configPath, 'utf8'));
+      const cfg = readEffectiveRuntimeConfig(configPath);
       const sshHost = String(cfg?.moode?.sshHost || cfg?.mpd?.host || MOODE_SSH_HOST || MPD_HOST || '').trim();
       const sshUser = String(cfg?.moode?.sshUser || MOODE_SSH_USER || 'moode').trim();
       if (!sshHost) return res.status(400).json({ ok: false, error: 'moode.sshHost or mpd.host is required in config' });
@@ -991,7 +992,7 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
   app.get('/config/moode/peppymeter/status', async (req, res) => {
     try {
       if (!requireTrackKey(req, res)) return;
-      const cfg = JSON.parse(await fs.readFile(configPath, 'utf8'));
+      const cfg = readEffectiveRuntimeConfig(configPath);
       const sshHost = String(cfg?.moode?.sshHost || cfg?.mpd?.host || MOODE_SSH_HOST || MPD_HOST || '').trim();
       const sshUser = String(cfg?.moode?.sshUser || MOODE_SSH_USER || 'moode').trim();
       if (!sshHost) return res.status(400).json({ ok: false, error: 'moode.sshHost or mpd.host is required in config' });
@@ -1017,7 +1018,7 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
   app.post('/config/moode/peppymeter/start', async (req, res) => {
     try {
       if (!requireTrackKey(req, res)) return;
-      const cfg = JSON.parse(await fs.readFile(configPath, 'utf8'));
+      const cfg = readEffectiveRuntimeConfig(configPath);
       const sshHost = String(cfg?.moode?.sshHost || cfg?.mpd?.host || MOODE_SSH_HOST || MPD_HOST || '').trim();
       const sshUser = String(cfg?.moode?.sshUser || MOODE_SSH_USER || 'moode').trim();
       if (!sshHost) return res.status(400).json({ ok: false, error: 'moode.sshHost or mpd.host is required in config' });
@@ -1050,7 +1051,7 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
   app.get('/config/moode/peppyalsa/status', async (req, res) => {
     try {
       if (!requireTrackKey(req, res)) return;
-      const cfg = JSON.parse(await fs.readFile(configPath, 'utf8'));
+      const cfg = readEffectiveRuntimeConfig(configPath);
       const sshHost = String(cfg?.moode?.sshHost || cfg?.mpd?.host || MOODE_SSH_HOST || MPD_HOST || '').trim();
       const sshUser = String(cfg?.moode?.sshUser || MOODE_SSH_USER || 'moode').trim();
       if (!sshHost) return res.status(400).json({ ok: false, error: 'moode.sshHost or mpd.host is required in config' });
@@ -1070,7 +1071,7 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
   app.post('/config/moode/peppyalsa/ensure', async (req, res) => {
     try {
       if (!requireTrackKey(req, res)) return;
-      const cfg = JSON.parse(await fs.readFile(configPath, 'utf8'));
+      const cfg = readEffectiveRuntimeConfig(configPath);
       const sshHost = String(cfg?.moode?.sshHost || cfg?.mpd?.host || MOODE_SSH_HOST || MPD_HOST || '').trim();
       const sshUser = String(cfg?.moode?.sshUser || MOODE_SSH_USER || 'moode').trim();
       if (!sshHost) return res.status(400).json({ ok: false, error: 'moode.sshHost or mpd.host is required in config' });
@@ -1108,7 +1109,7 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
         return res.status(400).json({ ok: false, error: 'mode must be peppy or webui' });
       }
 
-      const cfg = JSON.parse(await fs.readFile(configPath, 'utf8'));
+      const cfg = readEffectiveRuntimeConfig(configPath);
       const moodeBaseRaw = String(cfg?.moode?.baseUrl || '').trim();
       const mpdHost = String(cfg?.mpd?.host || MPD_HOST || 'moode.local').trim();
       const moodeBase = normalizeMoodeBaseUrl(moodeBaseRaw, mpdHost);
@@ -1160,7 +1161,7 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
   app.post('/config/moode/native-peppy', async (req, res) => {
     try {
       if (!requireTrackKey(req, res)) return;
-      const cfg = JSON.parse(await fs.readFile(configPath, 'utf8'));
+      const cfg = readEffectiveRuntimeConfig(configPath);
       const moodeBaseRaw = String(cfg?.moode?.baseUrl || '').trim();
       const mpdHost = String(cfg?.mpd?.host || MPD_HOST || 'moode.local').trim();
       const moodeBase = normalizeMoodeBaseUrl(moodeBaseRaw, mpdHost);
@@ -1209,7 +1210,7 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
         return res.status(400).json({ ok: false, error: 'target must be nowplaying or webui' });
       }
 
-      const cfg = JSON.parse(await fs.readFile(configPath, 'utf8'));
+      const cfg = readEffectiveRuntimeConfig(configPath);
       const sshHost = String(cfg?.moode?.sshHost || cfg?.mpd?.host || MOODE_SSH_HOST || MPD_HOST || '').trim();
       const sshUser = String(cfg?.moode?.sshUser || MOODE_SSH_USER || 'moode').trim();
       if (!sshHost) return res.status(400).json({ ok: false, error: 'moode.sshHost or mpd.host is required in config' });
@@ -1238,7 +1239,7 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
   app.get('/config/moode/browser-url/status', async (req, res) => {
     try {
       if (!requireTrackKey(req, res)) return;
-      const cfg = JSON.parse(await fs.readFile(configPath, 'utf8'));
+      const cfg = readEffectiveRuntimeConfig(configPath);
       const sshHost = String(cfg?.moode?.sshHost || cfg?.mpd?.host || MOODE_SSH_HOST || MPD_HOST || '').trim();
       const sshUser = String(cfg?.moode?.sshUser || MOODE_SSH_USER || 'moode').trim();
       if (!sshHost) return res.status(400).json({ ok: false, error: 'moode.sshHost or mpd.host is required in config' });
@@ -1263,7 +1264,7 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
         return res.status(400).json({ ok: false, error: 'url must start with http:// or https://' });
       }
 
-      const cfg = JSON.parse(await fs.readFile(configPath, 'utf8'));
+      const cfg = readEffectiveRuntimeConfig(configPath);
       const sshHost = String(cfg?.moode?.sshHost || cfg?.mpd?.host || MOODE_SSH_HOST || MPD_HOST || '').trim();
       const sshUser = String(cfg?.moode?.sshUser || MOODE_SSH_USER || 'moode').trim();
       if (!sshHost) return res.status(400).json({ ok: false, error: 'moode.sshHost or mpd.host is required in config' });
@@ -1302,7 +1303,7 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
     try {
       if (!requireTrackKey(req, res)) return;
 
-      const cfg = JSON.parse(await fs.readFile(configPath, 'utf8'));
+      const cfg = readEffectiveRuntimeConfig(configPath);
       const sshHost = String(cfg?.moode?.sshHost || cfg?.mpd?.host || MOODE_SSH_HOST || MPD_HOST || '').trim();
       const sshUser = String(cfg?.moode?.sshUser || MOODE_SSH_USER || 'moode').trim();
       if (!sshHost) return res.status(400).json({ ok: false, error: 'moode.sshHost or mpd.host is required in config' });
@@ -1333,7 +1334,7 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
     try {
       if (!requireTrackKey(req, res)) return;
 
-      const cfg = JSON.parse(await fs.readFile(configPath, 'utf8'));
+      const cfg = readEffectiveRuntimeConfig(configPath);
       const sshHost = String(cfg?.moode?.sshHost || cfg?.mpd?.host || MOODE_SSH_HOST || MPD_HOST || '').trim();
       const sshUser = String(cfg?.moode?.sshUser || MOODE_SSH_USER || 'moode').trim();
       if (!sshHost) return res.status(400).json({ ok: false, error: 'moode.sshHost or mpd.host is required in config' });
@@ -1359,7 +1360,7 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
     try {
       if (!requireTrackKey(req, res)) return;
 
-      const cfg = JSON.parse(await fs.readFile(configPath, 'utf8'));
+      const cfg = readEffectiveRuntimeConfig(configPath);
       const sshHost = String(cfg?.moode?.sshHost || cfg?.mpd?.host || MOODE_SSH_HOST || MPD_HOST || '').trim();
       const sshUser = String(cfg?.moode?.sshUser || MOODE_SSH_USER || 'moode').trim();
       if (!sshHost) return res.status(400).json({ ok: false, error: 'moode.sshHost or mpd.host is required in config' });
@@ -1416,7 +1417,7 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
     try {
       if (!requireTrackKey(req, res)) return;
 
-      const cfg = JSON.parse(await fs.readFile(configPath, 'utf8'));
+      const cfg = readEffectiveRuntimeConfig(configPath);
       const sshHost = String(cfg?.moode?.sshHost || cfg?.mpd?.host || MOODE_SSH_HOST || MPD_HOST || '').trim();
       const sshUser = String(cfg?.moode?.sshUser || MOODE_SSH_USER || 'moode').trim();
       if (!sshHost) return res.status(400).json({ ok: false, error: 'moode.sshHost or mpd.host is required in config' });
@@ -1442,7 +1443,7 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
     try {
       if (!requireTrackKey(req, res)) return;
 
-      const cfg = JSON.parse(await fs.readFile(configPath, 'utf8'));
+      const cfg = readEffectiveRuntimeConfig(configPath);
       const sshHost = String(cfg?.moode?.sshHost || cfg?.mpd?.host || MOODE_SSH_HOST || MPD_HOST || '').trim();
       const sshUser = String(cfg?.moode?.sshUser || MOODE_SSH_USER || 'moode').trim();
       if (!sshHost) return res.status(400).json({ ok: false, error: 'moode.sshHost or mpd.host is required in config' });
@@ -1467,7 +1468,7 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
   app.post('/config/moode/library-update', async (req, res) => {
     try {
       if (!requireTrackKey(req, res)) return;
-      const cfg = JSON.parse(await fs.readFile(configPath, 'utf8'));
+      const cfg = readEffectiveRuntimeConfig(configPath);
       const host = String(cfg?.mpd?.host || MOODE_SSH_HOST || MPD_HOST || 'moode.local').trim();
       const port = Number(cfg?.mpd?.port || 6600) || 6600;
       const { stdout, stderr } = await execFileP('mpc', ['-h', host, '-p', String(port), 'update']);
@@ -1503,7 +1504,7 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
   app.post('/config/moode/reboot', async (req, res) => {
     try {
       if (!requireTrackKey(req, res)) return;
-      const cfg = JSON.parse(await fs.readFile(configPath, 'utf8'));
+      const cfg = readEffectiveRuntimeConfig(configPath);
       const moodeBaseRaw = String(cfg?.moode?.baseUrl || '').trim();
       const mpdHost = String(cfg?.mpd?.host || MOODE_SSH_HOST || MPD_HOST || 'moode.local').trim();
       const moodeBase = normalizeMoodeBaseUrl(moodeBaseRaw, mpdHost);
