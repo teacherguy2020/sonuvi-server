@@ -131,6 +131,7 @@ export function registerAllConfigRoutes(app, deps) {
   });
 
   registerConfigBrowseRoutes(app, {
+    radioFeatures: deps.radioFeatures,
     getBrowseIndex: deps.getBrowseIndex,
     requireTrackKey: deps.requireTrackKey,
   });

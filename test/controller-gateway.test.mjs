@@ -59,3 +59,29 @@ test('real attestation/approval, catalog data, scoped media tickets and cookie C
  assert.equal((await request('/__controller/logout',{method:'POST',headers:{...headers,origin:s.url,'x-csrf-token':session.csrfToken}})).status,200);
  assert.equal((await request('/config/browse/albums',{headers})).status,401);
 });
+
+test('LAN browser read contracts and fresh-browser approval survive web restart without exposing administration',async t=>{
+ const s=await startControllerStack({persistentSessions:true});t.after(()=>s.close());
+ const pair=async()=>{const r=await fetch(s.url+'/__controller/pairings',{method:'POST',headers:{origin:s.url}});assert.equal(r.status,201);return {body:await r.json(),cookie:r.headers.getSetCookie()[0].split(';')[0]};};
+ const complete=async p=>{const r=await fetch(s.url+'/__controller/pairings/'+p.body.presentationId+'/complete',{headers:{cookie:p.cookie}});assert.equal(r.status,200);return {body:await r.json(),cookie:r.headers.getSetCookie()[0].split(';')[0]};};
+ const first=await pair();await s.approve(first.body.presentationId,first.body.verificationCode);const trusted=await complete(first);
+ const headers={origin:s.url,cookie:trusted.cookie,'content-type':'application/json','x-csrf-token':trusted.body.csrfToken};
+ const preview=body=>fetch(s.url+'/config/queue-wizard/radio-preview',{method:'POST',headers,body:JSON.stringify(body)});
+ assert.equal((await preview({genres:['Jazz'],favoritesOnly:true,maxStations:4000})).status,200);
+ assert.equal((await (await preview({genres:['Jazz']})).json()).tracks[0].stationName,'Jazz Radio');
+ assert.equal((await preview({genres:['Jazz'],command:'play'})).status,400);
+ assert.equal((await fetch(s.url+'/config/queue-wizard/radio-preview',{method:'POST',headers:{...headers,'x-csrf-token':''},body:'{}'})).status,403);
+ assert.equal((await fetch(s.url+'/config/queue-wizard/apply',{method:'POST',headers,body:'{}'})).status,405);
+ const recent=await (await fetch(s.url+'/recent/radio-favorites',{headers})).json();assert.equal(recent.items[0].title,'Jazz Radio');
+ const fresh=await pair();
+ assert.equal((await fetch(s.url+'/__controller/pairings/pending')).status,401);
+ const pending=await (await fetch(s.url+'/__controller/pairings/pending',{headers})).json();assert.ok(pending.items.some(x=>x.presentationId===fresh.body.presentationId));assert.equal(pending.items[0].verificationCode,undefined);
+ const endpoint=s.url+'/__controller/pairings/'+fresh.body.presentationId+'/approve';
+ assert.equal((await fetch(endpoint,{method:'POST',headers:{...headers,'x-csrf-token':''},body:JSON.stringify({verificationCode:fresh.body.verificationCode})})).status,403);
+ assert.equal((await fetch(endpoint,{method:'POST',headers,body:JSON.stringify({verificationCode:'wrong'})})).ok,false);
+ assert.equal((await fetch(endpoint,{method:'POST',headers,body:JSON.stringify({verificationCode:fresh.body.verificationCode})})).status,200);
+ const second=await complete(fresh);assert.equal(second.body.accessToken,undefined);
+ await s.restartWeb();
+ const resumed=await fetch(s.url+'/config/browse/albums',{headers:{cookie:second.cookie}});assert.equal(resumed.status,200);assert.equal((await resumed.json()).albums[0].album,'Fixture Album');
+ assert.equal((await fetch(s.url+'/config/runtime/admin',{headers:{cookie:second.cookie}})).status,404);
+});

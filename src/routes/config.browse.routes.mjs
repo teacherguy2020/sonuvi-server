@@ -76,11 +76,11 @@ async function refreshRecentPodcastsCache() {
   return recentPodcastsCache.inflight;
 }
 
-async function refreshRecentRadioCache() {
+async function refreshRecentRadioCache(radioFeatures) {
   if (recentRadioCache.inflight) return recentRadioCache.inflight;
   recentRadioCache.inflight = (async () => {
     try {
-      const resp = await localApi('/config/queue-wizard/radio-favorites', { timeoutMs: 7000 });
+      const resp = radioFeatures ? {ok:true,json:await radioFeatures.favorites()} : await localApi('/config/queue-wizard/radio-favorites', { timeoutMs: 7000 });
       if (!resp.ok || resp?.json?.ok !== true || !Array.isArray(resp.json.favorites)) throw new RadioCatalogUnavailableError();
       const rows = resp.json.favorites;
       const items = rows.map((x) => {
@@ -137,7 +137,7 @@ async function refreshRecentPlaylistsCache() {
 }
 
 export function registerConfigBrowseRoutes(app, deps) {
-  const { requireTrackKey, getBrowseIndex = defaultGetBrowseIndex } = deps;
+  const { requireTrackKey, radioFeatures, getBrowseIndex = defaultGetBrowseIndex } = deps;
 
   // Warm browse index in background shortly after API startup (non-blocking).
   if (deps.warmCaches !== false) setTimeout(() => {
@@ -150,7 +150,7 @@ export function registerConfigBrowseRoutes(app, deps) {
     refreshRecentAlbumsFastCache().catch(() => null);
     refreshRecentPodcastsCache().catch(() => null);
     refreshRecentPlaylistsCache().catch(() => null);
-    refreshRecentRadioCache().catch(() => null);
+    refreshRecentRadioCache(radioFeatures).catch(() => null);
   }, 2200);
 
   app.get('/recent/albums', async (req, res) => {
@@ -228,7 +228,7 @@ export function registerConfigBrowseRoutes(app, deps) {
     try {
       const limit = Math.max(1, Math.min(60, Number(req.query?.limit || 18) || 18));
       const fresh = Array.isArray(recentRadioCache.items) && recentRadioCache.items.length && (Date.now() - Number(recentRadioCache.ts || 0)) < 5 * 60 * 1000;
-      if (!fresh) await refreshRecentRadioCache();
+      if (!fresh) await refreshRecentRadioCache(radioFeatures);
       const items = (recentRadioCache.items || []).slice(0, limit);
       return res.json({ ok: true, count: items.length, items, source: 'radio-cache' });
     } catch (e) {

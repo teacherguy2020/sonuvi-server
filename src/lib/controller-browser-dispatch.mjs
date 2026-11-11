@@ -7,24 +7,35 @@ const reads = new Map(Object.entries({
   '/config/runtime': [], '/config/controller-profile': [], '/config/browse/stats': [],
   '/config/browse/artists': ['q','limit','offset'], '/config/browse/albums': ['q','artist','limit'],
   '/config/browse/artist-albums': ['artist'], '/config/browse/album-tracks': ['artist','album'],
+  '/config/library-health/albums': [], '/config/queue-wizard/playlist-preview': ['playlist'],
   '/config/queue-wizard/options': [], '/config/queue-wizard/playlists': [],
-  '/config/queue-wizard/radio-favorites': [], '/config/queue-wizard/radio-options': [],
+  '/config/queue-wizard/radio-presets': [], '/config/queue-wizard/radio-favorites': [], '/config/queue-wizard/radio-options': [],
   '/recent/albums': ['limit'], '/recent/playlists': ['limit'], '/recent/podcasts': ['limit'],
   '/recent/radio-favorites': ['limit'], '/podcasts': [],
   '/art/current.jpg': ['v','_','t'], '/art/current_bg_640_blur.jpg': ['v','_','t'],
   '/art/track_640.jpg': ['file','v','_','t'], '/art/radio-logo.jpg': ['name','file','v','_','t'],
 }));
 export const isLoopbackAddress = (value) => ['127.0.0.1','::1','::ffff:127.0.0.1'].includes(String(value));
-export function isControllerDispatchable({ method = 'GET', pathname = '' } = {}) {
-  return method.toUpperCase() === 'GET' && reads.has(pathname);
+const radioPreview = '/config/queue-wizard/radio-preview';
+export function validControllerBody({ method = 'GET', pathname, body } = {}) {
+  if (method.toUpperCase() !== 'POST') return true;
+  if (pathname !== radioPreview || !body || typeof body !== 'object' || Array.isArray(body)) return false;
+  const fields = new Set(['genres', 'favoriteStations', 'favoritesOnly', 'hqOnly', 'maxStations']);
+  if (Object.keys(body).some(k => !fields.has(k))) return false;
+  for (const k of ['genres', 'favoriteStations']) if (body[k] !== undefined && (!Array.isArray(body[k]) || body[k].length > 2000 || body[k].some(v => typeof v !== 'string' || v.length > 2048 || /[\x00-\x1f]/.test(v)))) return false;
+  for (const k of ['favoritesOnly', 'hqOnly']) if (body[k] !== undefined && typeof body[k] !== 'boolean') return false;
+  return body.maxStations === undefined || (Number.isInteger(body.maxStations) && body.maxStations >= 1 && body.maxStations <= 10000);
 }
-export function validControllerTarget(target) {
+export function isControllerDispatchable({ method = 'GET', pathname = '' } = {}) {
+  return (method.toUpperCase() === 'GET' && reads.has(pathname)) || (method.toUpperCase() === 'POST' && pathname === radioPreview);
+}
+export function validControllerTarget(target, method = 'GET') {
   try {
     const url = new URL(target, 'http://controller.invalid');
-    if (!target.startsWith('/') || target.startsWith('//') || url.origin !== 'http://controller.invalid' || url.hash || !reads.has(url.pathname)) return false;
+    if (!target.startsWith('/') || target.startsWith('//') || url.origin !== 'http://controller.invalid' || url.hash || !isControllerDispatchable({method, pathname:url.pathname})) return false;
     const seen = new Set();
     for (const [key,value] of url.searchParams) {
-      if (seen.has(key) || !reads.get(url.pathname).includes(key) || value.length > 2048 || /[\x00-\x1f\\]/.test(value)) return false;
+      if (seen.has(key) || !(reads.get(url.pathname)||[]).includes(key) || value.length > 2048 || /[\x00-\x1f\\]/.test(value)) return false;
       seen.add(key);
       if (['limit','offset'].includes(key) && (!/^\d+$/.test(value) || Number(value) > 10000)) return false;
       if (key === 'file' && (value.startsWith('/') || value.split('/').some(v => v === '..' || v === '.'))) return false;
@@ -54,10 +65,11 @@ export function createControllerDispatchAuthorizer({ secret, apiSecret } = {}) {
     const now = Date.now();
     for (const [key,expires] of used) if (expires < now) used.delete(key);
     const header = String(req.headers?.['x-sonuvi-controller-dispatch'] || '');
-    if (!isLoopbackAddress(req.socket?.remoteAddress) || !isControllerDispatchable({method:req.method,pathname:req.path || target?.split('?')[0]}) || !validControllerTarget(target)) return false;
+    if (!isLoopbackAddress(req.socket?.remoteAddress) || !isControllerDispatchable({method:req.method,pathname:req.path || target?.split('?')[0]}) || !validControllerTarget(target, req.method) || !validControllerBody({method:req.method, pathname:req.path || target?.split('?')[0], body:req.body})) return false;
     // Fresh installations reuse the existing paired-controller grant; no additional
     // shared secret or administrator credential has to be provisioned to the web service.
     if (header === 'mobile-session') return Boolean(verifyMobileToken(readBearerToken(req), { secret: apiSecret, scope: 'mobile-api', now }));
+    if (req.method !== 'GET') return false;
     if (used.has(header) || used.size >= 10000 || !verifyControllerDispatch({secret,header,method:req.method,target,now})) return false;
     used.set(header, now+MAX_AGE_MS); return true;
   };

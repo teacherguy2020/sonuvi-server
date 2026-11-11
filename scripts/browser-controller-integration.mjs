@@ -58,10 +58,16 @@ try {
    await page.goto(origin+'/controller-artists.html');
    await page.waitForFunction(()=>document.body.textContent.includes('Fixture Artist'));
    assert.ok(network.some(r=>r.path==='/config/browse/artists'&&r.status===200));
+   await page.goto(origin+'/controller-radio.html');
+   try{await page.waitForFunction(()=>document.body.textContent.includes('Jazz Radio'));}catch(error){console.error(JSON.stringify({radioText:(await page.locator('body').innerText()).slice(0,1000),radioNetwork:network.filter(x=>x.path.includes('radio'))}));throw error;}
+   assert.ok(network.some(r=>r.path==='/config/queue-wizard/radio-preview'&&r.status===200));
+   const secondContext=await browser.newContext({ignoreHTTPSErrors:true});const freshPage=await secondContext.newPage();
+   await freshPage.goto(origin+'/'+shell);const freshResponse=freshPage.waitForResponse(r=>r.url()===origin+'/__controller/pairings'&&r.request().method()==='POST');await freshPage.getByRole('button',{name:'Start trusted-device pairing'}).click();const freshPair=await (await freshResponse).json();
+   await page.getByRole('button',{name:'Pair a browser',exact:true}).click();await page.getByRole('textbox',{name:'Verification code'}).fill(freshPair.verificationCode);await page.getByRole('button',{name:'Approve browser',exact:true}).click();await freshPage.waitForFunction(()=>globalThis.SonuviControllerAuth?.csrfToken);await secondContext.close();
    const query=await page.evaluate(async()=>{const r=await fetch('/config/browse/albums?q=Fixture');return {status:r.status,body:await r.json()};});assert.equal(query.status,200);assert.equal(query.body.albums.length,1);
    assert.equal(network.some(r=>r.path==='/config/runtime/admin'),false);
    if(process.env.SONUVI_BROWSER_EVIDENCE)await page.screenshot({path:path.join(process.env.SONUVI_BROWSER_EVIDENCE,shell+'.png')});
-   observations.push({shell,paired:true,catalogNavigation:true,decodedArtwork:true,animatedPlayback:shell==='controller-tablet.html',errors,requests:network});
+   observations.push({shell,paired:true,freshBrowserApprovedInUI:true,radioCatalog:true,catalogNavigation:true,decodedArtwork:true,animatedPlayback:shell==='controller-tablet.html',errors,requests:network});
    await context.close();
  }
  console.log(JSON.stringify({result:'PASS',transport:'real TLS via trusted loopback proxy',authentication:'real P-256 presentation, trusted approval and HttpOnly cookie',observations},null,2));

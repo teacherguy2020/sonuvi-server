@@ -20,7 +20,7 @@ import { createPublicWebServer } from '../../src/lib/public-web-server.mjs';
 import { runtimeStatePaths } from '../../src/lib/runtime-state-paths.mjs';
 export const listen = s => new Promise((resolve,reject)=>{s.once('error',reject);s.listen(0,'127.0.0.1',()=>resolve(s.address().port));});
 export const close = s => new Promise(resolve=>{s.close(resolve);s.closeAllConnections?.();});
-export async function startControllerStack({mediaFile, tlsOrigin}={}) {
+export async function startControllerStack({mediaFile, tlsOrigin, persistentSessions=false}={}) {
  const temp=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'sonuvi-controller-')));
  const previousState=process.env.SONUVI_STATE_ROOT;process.env.SONUVI_STATE_ROOT=temp;
  const paths=runtimeStatePaths();
@@ -41,18 +41,20 @@ export async function startControllerStack({mediaFile, tlsOrigin}={}) {
  const requireTrackKey=(req,res)=>{if(authorize(req))return true;res.status(403).json({error:'legacy credential is absent'});return false;};
  const artDeps={MOODE_BASE_URL:'http://127.0.0.1:1',normalizeArtKey:()=>track.file,artPath640ForKey:()=>imagePath,artPathBgForKey:()=>imagePath,updateArtCacheIfNeeded:async()=>{},safeIsFile:fsSync.existsSync,fetchCurrentSong:async()=>track,fetchCurrentStatus:async()=>({state:'play'}),resolveBestArtForCurrentSong:async()=>'/coverart.php/'+track.file};
  const radioFeatures=createRadioFeatureService({readRadioCatalog:async()=>[{name:'Jazz Radio',station:'https://example.invalid/jazz',genre:'jazz;edm;r&b',type:'f'},{name:'Other',station:'https://example.invalid/other',genre:'rock',type:'r'}]});
- const selectReads = names => ({get(route,handler){if(names.includes(route))app.get(route,handler);},post(){}});
- registerConfigBrowseRoutes(selectReads(['/recent/albums','/config/browse/stats','/config/browse/artists','/config/browse/albums','/config/browse/artist-albums','/config/browse/album-tracks']),{requireTrackKey,getBrowseIndex:browse.getBrowseIndex,warmCaches:false});
+ const selectReads = names => ({get(route,handler){if(names.includes(route))app.get(route,handler);},post(route,handler){if(names.includes(route))app.post(route,handler);}});
+ registerConfigBrowseRoutes(selectReads(['/recent/radio-favorites','/recent/albums','/config/browse/stats','/config/browse/artists','/config/browse/albums','/config/browse/artist-albums','/config/browse/album-tracks']),{requireTrackKey,getBrowseIndex:browse.getBrowseIndex,warmCaches:false,radioFeatures});
  registerConfigControllerProfileRoutes(app,{requireTrackKey});
- registerConfigQueueWizardBasicRoutes(selectReads(['/config/queue-wizard/options','/config/queue-wizard/radio-options','/config/queue-wizard/radio-favorites']),{requireTrackKey,getBrowseIndex:browse.getBrowseIndex,radioFeatures});
+ registerConfigQueueWizardBasicRoutes(selectReads(['/config/queue-wizard/radio-presets','/config/queue-wizard/radio-preview','/config/queue-wizard/options','/config/queue-wizard/radio-options','/config/queue-wizard/radio-favorites']),{requireTrackKey,getBrowseIndex:browse.getBrowseIndex,radioFeatures});
  registerArtRoutes(app,artDeps);
  registerMobileRoutes(app,{enabled:true,apiSecret,trackIdSecret:'fixture-track-secret',getBrowseIndex:browse.getBrowseIndex,radioFeatures,animatedArt:{lookup:animation.lookupAnimatedArt,resolveMedia:animation.resolveAnimatedMediaFile},serveArtwork:(res,file)=>serveTrackArtwork(res,file,artDeps)});
  // Transport state input only. Pairing, catalog, artwork, radio and animation use production routes/services.
  app.get('/now-playing',(_req,res)=>res.json({...track,state:'play',displayArtUrl:'/art/current.jpg',animatedArt:{source:'local',artist:track.artist,album:track.album,allow:true},elapsed:1,duration:120}));
  const api=http.createServer(app),apiPort=await listen(api);
  const publicRoot=path.join(temp,'public');await buildPublicWebRoot({sourceRoot:path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..'),outputRoot:publicRoot});
- const web=await createPublicWebServer({publicRoot,secret:'',apiPort,allowLoopbackFixture:!tlsOrigin,origin:tlsOrigin,trustLoopbackProxy:!!tlsOrigin});const webPort=await listen(web);
+ const sessionDir=path.join(temp,'private-web');await fs.mkdir(sessionDir,{mode:0o700});
+ const webOptions={publicRoot,secret:'',apiPort,allowLoopbackFixture:!tlsOrigin,origin:tlsOrigin,trustLoopbackProxy:!!tlsOrigin,sessionFile:persistentSessions?path.join(sessionDir,'sessions.json'):undefined};
+ let web=await createPublicWebServer(webOptions);const webPort=await listen(web);
  const trustedToken=createMobileSessionToken({secret:apiSecret,deviceId:'already-trusted-fixture-controller'});
  const approve=async(id,code)=>{const headers={authorization:`Bearer ${trustedToken}`,'content-type':'application/json'};const inspect=await fetch(`http://127.0.0.1:${apiPort}/v1/mobile/pairing/presentations/${id}`,{headers});const p=await inspect.json();if(p.status!=='waiting'||p.verificationCode!==code)throw new Error('real attestation/code mismatch');const approved=await fetch(`http://127.0.0.1:${apiPort}/v1/mobile/pairing/presentations/${id}/approve`,{method:'POST',headers,body:JSON.stringify({verificationCode:code})});if(!approved.ok)throw new Error('real approval failed');};
- return {temp,paths,track,mediaName,secret,apiSecret,trustedToken,apiPort,webPort,web,api,url:`http://127.0.0.1:${webPort}`,approve,async close(){await close(web);await close(api);if(previousState===undefined)delete process.env.SONUVI_STATE_ROOT;else process.env.SONUVI_STATE_ROOT=previousState;await fs.rm(temp,{recursive:true,force:true});}};
+ return {temp,paths,track,mediaName,secret,apiSecret,trustedToken,apiPort,webPort,web,api,async restartWeb(){await close(web);web=await createPublicWebServer(webOptions);await new Promise(resolve=>web.listen(webPort,'127.0.0.1',resolve));},url:`http://127.0.0.1:${webPort}`,approve,async close(){await close(web);await close(api);if(previousState===undefined)delete process.env.SONUVI_STATE_ROOT;else process.env.SONUVI_STATE_ROOT=previousState;await fs.rm(temp,{recursive:true,force:true});}};
 }
