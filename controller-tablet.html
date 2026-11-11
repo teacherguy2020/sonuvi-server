@@ -3001,7 +3001,7 @@
     }
   }
   async function sendPlaybackDirect(action) {
-    if (npQobuzActive) return false;
+    if (globalThis.SonuviControllerWeb || npQobuzActive) return false;
     const a = String(action || "").toLowerCase();
     const map = { prev: "previous", previous: "previous", next: "next", play: "play", pause: "pause", toggle: "toggle_play_pause", stop: "stop" };
     const cmd = map[a];
@@ -4075,6 +4075,34 @@
     if (!act) return;
     const isFastTransport = act === "prev" || act === "next" || act === "play" || act === "pause" || act === "toggle";
     btn.disabled = true;
+    if (globalThis.SonuviControllerWeb && (isFastTransport || act === "shuffle" || act === "repeat")) {
+      // Paired HTTPS controllers use only the authenticated same-origin server.
+      // Confirm actual success instead of treating an opaque moOde fetch as success.
+      let status = document.getElementById("npTransportStatus");
+      if (!status) {
+        status = document.createElement("span");
+        status.id = "npTransportStatus";
+        status.setAttribute("role", "status");
+        npCtrlsEl.appendChild(status);
+      }
+      status.textContent = "";
+      btn.classList.add("loading");
+      try {
+        const out = await sendPlaybackChecked(act === "shuffle" ? "shufflequeue" : act);
+        if (!out.ok) {
+          status.textContent = out.status === 401 ? "Pair this browser again to control playback." : "Playback command failed. Please try again.";
+        } else {
+          btn.classList.add("confirm");
+          setTimeout(() => btn.classList.remove("confirm"), 420);
+          if (act === "shuffle") window.dispatchEvent(new CustomEvent("np-live-queue-changed"));
+        }
+        await refreshNowPlayingCard().catch(() => null);
+      } finally {
+        btn.classList.remove("loading");
+        btn.disabled = false;
+      }
+      return;
+    }
     if (isFastTransport) {
       btn.classList.add("loading");
       if (act === "play" || act === "pause" || act === "toggle") {

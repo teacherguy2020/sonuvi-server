@@ -18,9 +18,21 @@ const reads = new Map(Object.entries({
 export const isLoopbackAddress = (value) => ['127.0.0.1','::1','::ffff:127.0.0.1'].includes(String(value));
 const radioPreview = '/config/queue-wizard/radio-preview';
 const podcastEpisodes = '/podcasts/episodes/list';
+const playback = '/config/diagnostics/playback';
+const transportActions = new Set(['play', 'pause', 'toggle', 'next', 'prev', 'previous', 'stop', 'shuffle', 'shufflequeue', 'undoshuffle', 'repeat']);
+function validPlaybackBody(body) {
+  if (typeof body.action !== 'string') return false;
+  const only = fields => Object.keys(body).every(key => fields.includes(key));
+  if (transportActions.has(body.action)) return only(['action']);
+  if (body.action === 'repeat-mode') return only(['action', 'mode']) && ['off', 'all', 'one'].includes(body.mode);
+  if (body.action === 'seekpct') return only(['action', 'percent']) && Number.isFinite(body.percent) && body.percent >= 0 && body.percent <= 100;
+  if (body.action === 'seekrel') return only(['action', 'seconds']) && Number.isInteger(body.seconds) && body.seconds !== 0 && Math.abs(body.seconds) <= 600;
+  return false;
+}
 export function validControllerBody({ method = 'GET', pathname, body } = {}) {
   if (method.toUpperCase() !== 'POST') return true;
   if (!body || typeof body !== 'object' || Array.isArray(body)) return false;
+  if (pathname === playback) return validPlaybackBody(body);
   if (pathname === podcastEpisodes) {
     if (Object.keys(body).some(k => !['rss', 'limit'].includes(k)) || typeof body.rss !== 'string' || body.rss.length > 2048 || /[\x00-\x1f]/.test(body.rss)) return false;
     try { const url = new URL(body.rss); if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return false; } catch { return false; }
@@ -34,7 +46,7 @@ export function validControllerBody({ method = 'GET', pathname, body } = {}) {
   return body.maxStations === undefined || (Number.isInteger(body.maxStations) && body.maxStations >= 1 && body.maxStations <= 10000);
 }
 export function isControllerDispatchable({ method = 'GET', pathname = '' } = {}) {
-  return (method.toUpperCase() === 'GET' && reads.has(pathname)) || (method.toUpperCase() === 'POST' && [radioPreview, podcastEpisodes].includes(pathname));
+  return (method.toUpperCase() === 'GET' && reads.has(pathname)) || (method.toUpperCase() === 'POST' && [radioPreview, podcastEpisodes, playback].includes(pathname));
 }
 export function validControllerTarget(target, method = 'GET') {
   try {
