@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import test from 'node:test';
 
 import { registerMobileRoutes } from '../src/routes/mobile.routes.mjs';
-import { createMobileRefreshToken, createMobileSessionToken, createPersistentControllerRefreshToken, verifyMobileToken } from '../src/lib/mobile-auth.mjs';
+import { createMobileRefreshToken, createMobileSessionToken, createPersistentControllerRefreshToken, createPersistentMobileRefreshToken, verifyMobileToken } from '../src/lib/mobile-auth.mjs';
 import { MOBILE_HOME_ROW_IDS } from '../src/lib/mobile-home-rows.mjs';
 
 function createApp() {
@@ -164,7 +165,7 @@ test('mobile session refresh silently replaces an expired access token', async (
   assert.equal(invalid.statusCode, 401);
 });
 
-test('persistent controller refresh is renewal-only while normal refresh credentials still expire', async () => {
+test('durable mobile and controller refresh credentials exchange only for expiring API bearers', async () => {
   const app = registerFixture();
   const enrolled = createResponse();
   await app.routes.get('POST /v1/mobile/session')?.(request({
@@ -218,6 +219,12 @@ test('persistent controller refresh is renewal-only while normal refresh credent
     secret: 'api-secret-for-test',
     scope: 'controller-web-refresh',
   }));
+  const durableMobile = createPersistentMobileRefreshToken({ secret: 'api-secret-for-test', deviceId: 'ipad-browser' });
+  assert.ok(verifyMobileToken(durableMobile, { secret: 'api-secret-for-test', scope: 'mobile-refresh', now: Date.now() + (2 * 365 * 24 * 60 * 60 * 1_000) }));
+  const header = Buffer.from(JSON.stringify({ typ: 'now-playing-mobile', v: 1, alg: 'HS256' })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify({ scope: 'mobile-api', deviceId: 'ipad-browser', iat: Math.floor(Date.now() / 1000), persistent: true, jti: 'persistent-access-must-fail' })).toString('base64url');
+  const invalidPersistentAccess = header+'.'+payload+'.'+crypto.createHmac('sha256', 'api-secret-for-test').update(header+'.'+payload).digest('base64url');
+  assert.equal(verifyMobileToken(invalidPersistentAccess, { secret: 'api-secret-for-test', scope: 'mobile-api' }), null);
 });
 
 test('mobile session refresh rejects expired refresh tokens and ordinary routes reject expired access tokens', async () => {
@@ -246,6 +253,17 @@ test('mobile session refresh rejects expired refresh tokens and ordinary routes 
     headers: { authorization: `Bearer ${expiredAccessToken}` },
   }), ordinaryResponse);
   assert.equal(ordinaryResponse.statusCode, 401);
+});
+
+test('mobile session refresh accepts a valid legacy access token only with migration intent', async () => {
+  const app = registerFixture();
+  const legacyToken = createMobileSessionToken({ secret: 'api-secret-for-test', deviceId: 'legacy-valid-iphone' });
+  const migrated = createResponse();
+  await app.routes.get('POST /v1/mobile/session/refresh')?.(request({
+    headers: { authorization: `Bearer ${legacyToken}`, 'x-mobile-session-migration': '1' },
+  }), migrated);
+  assert.equal(migrated.statusCode, 200);
+  assert.equal(verifyMobileToken(migrated.body.refreshToken, { secret: 'api-secret-for-test', scope: 'mobile-refresh' }).deviceId, 'legacy-valid-iphone');
 });
 
 test('mobile session refresh migrates a legacy expired access token once', async () => {

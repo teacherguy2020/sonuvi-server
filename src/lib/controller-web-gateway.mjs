@@ -72,6 +72,10 @@ export function createControllerWebGateway({ secret=process.env.SONUVI_CONTROLLE
     else {headers.authorization=`Bearer ${session.accessToken}`;headers['x-mobile-session-migration']='1';}
     const up=await api('POST','/v1/mobile/session/refresh',{headers});
     let body={};try{body=await up.json();}catch{}
+    // Logout may have removed this grant while its renewal was in flight. A
+    // late renewal must not restore it, authenticate the pending request, or
+    // cause a fresh controller cookie to be emitted.
+    if(sessions.get(id)!==session)return null;
     if(up.status===401){sessions.delete(id);persist();return null;}
     if(!up.ok)throw new Error('controller renewal unavailable');
     installRefresh(session,body);return session;
@@ -139,7 +143,10 @@ export function createControllerWebGateway({ secret=process.env.SONUVI_CONTROLLE
         const tokenExpiry=expiresAt(body.expiresAt);
         if(!Number.isFinite(tokenExpiry)||tokenExpiry<=now())throw new Error('invalid session expiry');
         const sessionId=random(),csrf=random();const established={csrf,accessToken:body.accessToken,accessExpiresAt:tokenExpiry,refreshToken:body.refreshToken};sessions.set(sessionId,established);
-        try{if(!await ensureAccess(sessionId,established,{force:true}))throw new Error('pairing grant was revoked');}catch(error){sessions.delete(sessionId);persist();throw error;}
+        // The pairing completion grant already carries a valid durable mobile
+        // refresh credential. Do not convert it immediately: an upstream
+        // outage during that redundant call must not discard an approved
+        // browser grant. Normal lazy renewal handles later access expiry.
         pairings.delete(match[1]);persist();
         send(res,200,{ok:true,status:'approved',csrfToken:csrf,expiresAt:established.accessExpiresAt},{'set-cookie':[controllerCookie(sessionId,secure),setCookie('sonuvi_controller_pairing','',secure,0)]});return true;
       }

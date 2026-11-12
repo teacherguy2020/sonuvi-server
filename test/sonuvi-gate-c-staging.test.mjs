@@ -27,7 +27,7 @@ async function fixture(t) {
   return root;
 }
 
-function signedRequest({ artifactSha256 = crypto.createHash('sha256').update(artifact).digest('hex') } = {}) {
+function signedRequest({ artifactSha256 = crypto.createHash('sha256').update(artifact).digest('hex'), issuedAt = new Date(), expiresAt = new Date(issuedAt.getTime() + (7 * 24 * 60 * 60 * 1000)) } = {}) {
   const pair = crypto.generateKeyPairSync('ed25519');
   const payload = {
     contract: GATE_C_RELEASE_METADATA_CONTRACT,
@@ -36,8 +36,8 @@ function signedRequest({ artifactSha256 = crypto.createHash('sha256').update(art
     target: { os: 'linux', architecture: 'arm64' },
     artifact: { format: GATE_C_RELEASE_TRANSFER_FORMAT, sha256: artifactSha256, bytes: artifact.length },
     bootstrap: { version: 1, sha256: 'b'.repeat(64) },
-    issuedAt: '2026-11-05T00:00:00.000Z',
-    expiresAt: '2026-11-12T00:00:00.000Z',
+    issuedAt: issuedAt.toISOString(),
+    expiresAt: expiresAt.toISOString(),
   };
   return {
     request: {
@@ -95,6 +95,22 @@ test('staging fails before extraction for a digest mismatch or unapproved reques
   await assert.rejects(stageGateCReleaseArchive({ request, archive: stream(), trustedAnchors: anchors, paths, extractArchive: async () => { extracted = true; }, readMachineIdentity: async () => machineIdentity, verifyTargetCompatibility: async () => ({ supported: true }) }), /digest/);
   assert.equal(extracted, false);
   assert.throws(() => normalizeGateCStageRequest({ ...request, path: '/tmp/evil' }), /unsupported/);
+});
+
+test('staging rejects an expired signed envelope before consuming archive bytes', async (t) => {
+  const root = await fixture(t);
+  const { request, anchors } = signedRequest({ issuedAt: new Date(Date.now() - (8 * 24 * 60 * 60 * 1000)), expiresAt: new Date(Date.now() - 1_000) });
+  const paths = { uploadRoot: path.join(root, 'uploads'), releaseRoot: path.join(root, 'releases'), attemptRoot: path.join(root, 'attempts') };
+  let read = false;
+  await assert.rejects(stageGateCReleaseArchive({
+    request,
+    archive: (async function* blocked() { read = true; yield artifact; }()),
+    trustedAnchors: anchors,
+    paths,
+    readMachineIdentity: async () => machineIdentity,
+    verifyTargetCompatibility: async () => ({ supported: true }),
+  }), /expired/);
+  assert.equal(read, false);
 });
 
 test('staging rejects a changed preflight identity before consuming archive bytes', async (t) => {

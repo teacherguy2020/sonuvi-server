@@ -80,9 +80,10 @@ export function createPersistentMobileRefreshToken({ secret, deviceId, now } = {
 }
 
 /**
- * A durable credential is deliberately limited to the browser-controller
- * renewal endpoint. It is never an API bearer, media ticket, or general
- * replacement for expiring mobile refresh tokens.
+ * A durable credential identifies the browser-controller renewal pathway. It
+ * is never directly accepted as an API bearer, media ticket, or administrator
+ * credential. Like the durable mobile-refresh credential, it can be exchanged
+ * at the renewal endpoint for the same short-lived mobile API bearer.
  */
 export function createPersistentControllerRefreshToken({ secret, deviceId, now } = {}) {
   const normalizedDeviceId = String(deviceId || '').trim();

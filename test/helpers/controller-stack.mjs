@@ -21,7 +21,7 @@ import { createPublicWebServer } from '../../src/lib/public-web-server.mjs';
 import { runtimeStatePaths } from '../../src/lib/runtime-state-paths.mjs';
 export const listen = s => new Promise((resolve,reject)=>{s.once('error',reject);s.listen(0,'127.0.0.1',()=>resolve(s.address().port));});
 export const close = s => new Promise(resolve=>{s.close(resolve);s.closeAllConnections?.();});
-export async function startControllerStack({mediaFile, tlsOrigin, persistentSessions=false, onPlayback}={}) {
+export async function startControllerStack({mediaFile, tlsOrigin, persistentSessions=false, onPlayback, onSessionRefresh}={}) {
  const temp=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'sonuvi-controller-')));
  const previousState=process.env.SONUVI_STATE_ROOT;process.env.SONUVI_STATE_ROOT=temp;
  const paths=runtimeStatePaths();
@@ -48,6 +48,7 @@ export async function startControllerStack({mediaFile, tlsOrigin, persistentSess
  registerConfigQueueWizardBasicRoutes(selectReads(['/config/queue-wizard/radio-presets','/config/queue-wizard/radio-preview','/config/queue-wizard/options','/config/queue-wizard/radio-options','/config/queue-wizard/radio-favorites']),{requireTrackKey,getBrowseIndex:browse.getBrowseIndex,radioFeatures});
  registerArtRoutes(app,artDeps);
  registerPodcastEpisodeRoutes(app,{normUrl:v=>String(v||'').trim(),readSubs:()=>[{rss:'https://example.invalid/feed',dir:temp,mpdPrefix:'Podcasts/Fixture',mapJson:path.join(temp,'missing.json')}],fetchPodcastRSS:async()=>({items:[]})});
+ if (onSessionRefresh) app.post('/v1/mobile/session/refresh', (req,res,next) => onSessionRefresh(req,res,next));
  registerMobileRoutes(app,{getMobilePlaylists:async()=>[{name:'Fixture Playlist',files:[track.file]}],servePlaylistArtwork:(res)=>res.type('jpeg').send(jpeg),enabled:true,apiSecret,trackIdSecret:'fixture-track-secret',getBrowseIndex:browse.getBrowseIndex,radioFeatures,animatedArt:{lookup:animation.lookupAnimatedArt,resolveMedia:animation.resolveAnimatedMediaFile},serveArtwork:(res,file)=>serveTrackArtwork(res,file,artDeps)});
  if (onPlayback) app.post('/config/diagnostics/playback', (req,res) => { if (!requireTrackKey(req,res)) return; onPlayback(req.body); res.json({ok:true,action:req.body.action}); });
  // Transport state input only. Pairing, catalog, artwork, radio and animation use production routes/services.

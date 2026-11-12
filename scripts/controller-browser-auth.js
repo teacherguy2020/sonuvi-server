@@ -4,7 +4,7 @@
   let complete;
   const ready = new Promise(resolve => { complete = resolve; });
   const auth = globalThis.SonuviControllerAuth = { ready, enabled: true, csrfToken: '' };
-  let timer;
+  let timer, readyResolved = false, approvalShown = false;
   const nativeFetch = globalThis.fetch.bind(globalThis);
   globalThis.fetch = async function(input, options = {}) {
     const target = new URL(typeof input === 'string' || input instanceof URL ? input : input.url, location.href);
@@ -37,8 +37,14 @@
   function overlay() {
     let box=document.getElementById('sonuviBrowserPairing');if(box)return box;
     box=document.createElement('section');box.id='sonuviBrowserPairing';box.style.cssText='position:fixed;inset:0;z-index:99999;display:grid;place-items:center;background:#07101df2;color:white;font:16px system-ui;text-align:center';
-    box.innerHTML='<div style="max-width:400px"><h2>Pair this controller</h2><p id="sonuviPairStatus">Checking secure access…</p><img id="sonuviPairQr" alt="Pairing QR code" style="display:none;width:260px"><p id="sonuviPairCode"></p><button id="sonuviPairStart">Start trusted-device pairing</button><p>On an already paired browser, choose “Pair a browser” and enter the code shown here. You can also scan with a compatible trusted Sonuvi controller.</p></div>';
+    box.innerHTML='<div style="max-width:400px"><h2>Pair this controller</h2><p id="sonuviPairStatus">Checking secure access…</p><img id="sonuviPairQr" alt="Pairing QR code" style="display:none;width:260px"><p id="sonuviPairCode"></p><button id="sonuviPairStart">Start trusted-device pairing</button><button id="sonuviSessionRetry" style="display:none">Retry connection</button><p>On an already paired browser, choose “Pair a browser” and enter the code shown here. You can also scan with a compatible trusted Sonuvi controller.</p></div>';
     document.body.append(box);box.querySelector('button').onclick=start;return box;
+  }
+  function transientSessionFailure(message) {
+    const box=overlay();
+    box.querySelector('#sonuviPairStatus').textContent=message;
+    box.querySelector('#sonuviPairStart').style.display='none';
+    const retry=box.querySelector('#sonuviSessionRetry');retry.style.display='inline-block';retry.onclick=checkSession;
   }
   async function poll(id) {
     try {
@@ -46,7 +52,7 @@
       if(r.ok&&j.status==='approved'){location.reload();return;}
       if(!r.ok||['expired','rejected','cancelled','completed'].includes(j.status)){overlay().querySelector('#sonuviPairStatus').textContent=j.error||'Pairing ended. Start again.';return;}
       timer=setTimeout(()=>poll(id),1000);
-    }catch{overlay().querySelector('#sonuviPairStatus').textContent='Connection lost. Retrying the approved pairing…';timer=setTimeout(()=>poll(id),2000);}
+    }catch{overlay().querySelector('#sonuviPairStatus').textContent='Connection lost while checking pairing approval. Retrying…';timer=setTimeout(()=>poll(id),2000);}
   }
   async function start() {
     clearTimeout(timer);const box=overlay(),status=box.querySelector('#sonuviPairStatus');
@@ -59,7 +65,8 @@
     }catch(error){status.textContent=error.message;}
   }
   function browserApproval() {
-    if(window.top!==window.self)return;
+    if(approvalShown||window.top!==window.self)return;
+    approvalShown=true;
     const button=document.createElement('button');button.textContent='Pair a browser';button.style.cssText='position:fixed;right:12px;bottom:12px;z-index:9999;padding:8px 12px;border-radius:8px';document.body.append(button);
     button.onclick=async()=>{
       const dialog=document.createElement('dialog');dialog.style.cssText='max-width:520px;color:inherit;background:#142235;color:white;border:1px solid #65758a;border-radius:12px;padding:24px';
@@ -78,8 +85,17 @@
     };
   }
   async function checkSession(){
-    try{const r=await request('session'),j=await r.json();if(r.ok&&j.authenticated){auth.csrfToken=j.csrfToken;complete(true);browserApproval();return;}overlay().querySelector('#sonuviPairStatus').textContent=j.error||'Trusted-device approval is required.';}
-    catch{overlay().querySelector('#sonuviPairStatus').textContent='Controller service is temporarily unavailable. Retry shortly; do not pair again unless this browser grant was revoked or browser data was cleared.';}
+    try{
+      const r=await request('session');let j={};try{j=await r.json();}catch{}
+      if(r.ok&&j.authenticated){
+        auth.csrfToken=j.csrfToken;
+        if(!readyResolved){readyResolved=true;complete(true);}
+        document.getElementById('sonuviBrowserPairing')?.remove();
+        browserApproval();return;
+      }
+      if(r.status>=500){transientSessionFailure(j.error||'Controller service is temporarily unavailable. Retry the connection; do not pair again unless this browser grant was revoked or browser data was cleared.');return;}
+      const box=overlay();box.querySelector('#sonuviPairStart').style.display='inline-block';box.querySelector('#sonuviSessionRetry').style.display='none';box.querySelector('#sonuviPairStatus').textContent=j.error||'Trusted-device approval is required.';
+    }catch{transientSessionFailure('Controller service is temporarily unavailable. Retry the connection; do not pair again unless this browser grant was revoked or browser data was cleared.');}
   }
   document.addEventListener('DOMContentLoaded',checkSession);
 })();

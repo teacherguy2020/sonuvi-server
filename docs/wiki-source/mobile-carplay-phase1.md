@@ -83,9 +83,12 @@ refresh credential.
 An approved ordinary browser controller has a separate, tightly restricted
 renewal contract. Its browser receives only an opaque HttpOnly, same-site
 cookie. The associated durable controller-refresh credential remains in the
-private server session file and can issue only fresh 12-hour controller access
-bearers; it is not accepted as a mobile API bearer, ticket, administrator
-credential, pairing approval, or general non-expiring token.
+private server session file and is not directly accepted as a mobile API
+bearer, ticket, administrator credential, pairing approval, or general
+non-expiring token. Like the native durable refresh credential, it exchanges
+through the renewal endpoint for the same short-lived 12-hour mobile API
+bearer; the gateway keeps that bearer private and limits browser operations to
+the controller allowlist.
 
 The server reissues the cookie during ordinary same-origin use within browser
 cookie retention limits and silently renews the short-lived access bearer.

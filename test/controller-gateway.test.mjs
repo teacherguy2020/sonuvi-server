@@ -105,6 +105,37 @@ test('LAN browser read contracts and fresh-browser approval survive web restart 
  assert.equal((await fetch(s.url+'/config/runtime/admin',{headers:{cookie:second.cookie}})).status,404);
 });
 
+test('completed pairing survives a transient renewal outage without another pairing',async t=>{
+ let renewals=0;
+ const s=await startControllerStack({persistentSessions:true,onSessionRefresh:(_req,res)=>{renewals++;res.status(503).json({ok:false,error:'temporary outage'});}});t.after(()=>s.close());
+ const created=await fetch(s.url+'/__controller/pairings',{method:'POST',headers:{origin:s.url}});const pairing=await created.json();const pairingCookie=created.headers.getSetCookie()[0].split(';')[0];
+ await s.approve(pairing.presentationId,pairing.verificationCode);
+ const completed=await fetch(s.url+'/__controller/pairings/'+pairing.presentationId+'/complete',{headers:{cookie:pairingCookie}});assert.equal(completed.status,200);const session=await completed.json();const cookie=completed.headers.getSetCookie()[0].split(';')[0];
+ assert.equal(renewals,0);
+ const refresh=await fetch(s.url+'/__controller/refresh',{method:'POST',headers:{cookie,origin:s.url,'x-csrf-token':session.csrfToken}});assert.equal(refresh.status,502);assert.equal(renewals,1);
+ assert.equal((await fetch(s.url+'/config/browse/albums',{headers:{cookie}})).status,200);
+ await s.restartWeb();
+ assert.equal((await fetch(s.url+'/config/browse/albums',{headers:{cookie}})).status,200);
+});
+
+test('logout wins against an in-flight renewal and remains logged out after restart',async t=>{
+ let clock=1_800_000_000_000, releaseRenewal, renewalStarted;
+ const started=new Promise(resolve=>{renewalStarted=resolve;});
+ const temp=await fs.mkdtemp(path.join(os.tmpdir(),'sonuvi-controller-logout-race-'));const sessionFile=path.join(temp,'sessions.json');const sessionId='c'.repeat(43);
+ await fs.writeFile(sessionFile,JSON.stringify({origin:'',sessions:[[sessionId,{csrf:'csrf',accessToken:'expired-access',accessExpiresAt:clock-1,refreshToken:'persistent-controller-refresh'}]]}),{mode:0o600});
+ const api=http.createServer((req,res)=>{if(req.method==='POST'&&req.url==='/v1/mobile/session/refresh'){req.resume();renewalStarted();releaseRenewal=()=>{res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({accessToken:'late-access',refreshToken:'persistent-controller-refresh',expiresAt:new Date(clock+12*60*60*1000).toISOString()}));};return;}res.writeHead(404);res.end();});
+ await listen(api);t.after(async()=>{await close(api);await fs.rm(temp,{recursive:true,force:true});});
+ const createWeb=()=>{const gateway=createControllerWebGateway({apiPort:api.address().port,allowLoopbackFixture:true,sessionFile,now:()=>clock});return http.createServer((req,res)=>gateway(req,res));};
+ let web=createWeb();await listen(web);t.after(()=>close(web));
+ const origin='http://127.0.0.1:'+web.address().port;const headers={cookie:'sonuvi_controller='+sessionId};
+ const waiting=fetch(origin+'/__controller/session',{headers});await started;
+ const logout=await fetch(origin+'/__controller/logout',{method:'POST',headers:{...headers,origin,'x-csrf-token':'csrf'}});assert.equal(logout.status,200);
+ releaseRenewal();const result=await waiting;assert.equal(result.status,200);assert.equal((await result.json()).authenticated,false);assert.equal(result.headers.get('set-cookie'),null);
+ assert.equal(JSON.parse(await fs.readFile(sessionFile,'utf8')).sessions.length,0);
+ await close(web);web=createWeb();await new Promise(resolve=>web.listen(0,'127.0.0.1',resolve));
+ const restarted=await fetch('http://127.0.0.1:'+web.address().port+'/__controller/session',{headers});assert.equal(restarted.status,200);assert.equal((await restarted.json()).authenticated,false);
+});
+
 test('persistent browser grants silently renew past access, browser and yearly legacy limits',async t=>{
  let clock=1_800_000_000_000,renewals=0;
  const temp=await fs.mkdtemp(path.join(os.tmpdir(),'sonuvi-persistent-controller-'));const sessionFile=path.join(temp,'sessions.json');
