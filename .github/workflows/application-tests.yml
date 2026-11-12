@@ -1,0 +1,43 @@
+name: Server Application Tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - 'ci/application-tests-*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: application-tests-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Application test suite
+    runs-on: ubuntu-24.04
+    container: node:22-bookworm
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Verify test container prerequisites
+        run: |
+          test "$(id -u)" -eq 0
+          command -v runuser
+          runuser -u node -g root -- sh -c 'test "$(id -u)" -ne 0 && test "$(id -g)" -eq 0'
+          python3 --version
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run Node application tests
+        run: runuser -u node -g root -- npm test
+
+      - name: Run pure-Python Vibe planner tests
+        run: runuser -u node -g root -- npm run test:vibe-planner

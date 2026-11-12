@@ -16,6 +16,7 @@ const manifest = Buffer.from('{"contract":"sonuvi.release-manifest.v1"}\n');
 const machineIdentity = '0123456789abcdef0123456789abcdef';
 const targetIdentity = deriveGateCTargetIdentity(machineIdentity);
 const attemptId = 'boot_release_stage_fixture_20261106';
+const signedFixtureNow = Date.now();
 
 async function fixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'sonuvi-gate-c-stage-'));
@@ -27,7 +28,11 @@ async function fixture(t) {
   return root;
 }
 
-function signedRequest({ artifactSha256 = crypto.createHash('sha256').update(artifact).digest('hex') } = {}) {
+function signedRequest({
+  artifactSha256 = crypto.createHash('sha256').update(artifact).digest('hex'),
+  issuedAt = new Date(signedFixtureNow - 1_000).toISOString(),
+  expiresAt = new Date(signedFixtureNow + 60 * 60 * 1_000).toISOString(),
+} = {}) {
   const pair = crypto.generateKeyPairSync('ed25519');
   const payload = {
     contract: GATE_C_RELEASE_METADATA_CONTRACT,
@@ -36,8 +41,8 @@ function signedRequest({ artifactSha256 = crypto.createHash('sha256').update(art
     target: { os: 'linux', architecture: 'arm64' },
     artifact: { format: GATE_C_RELEASE_TRANSFER_FORMAT, sha256: artifactSha256, bytes: artifact.length },
     bootstrap: { version: 1, sha256: 'b'.repeat(64) },
-    issuedAt: '2026-11-05T00:00:00.000Z',
-    expiresAt: '2026-11-12T00:00:00.000Z',
+    issuedAt,
+    expiresAt,
   };
   return {
     request: {
@@ -110,5 +115,24 @@ test('staging rejects a changed preflight identity before consuming archive byte
     readMachineIdentity: async () => 'fedcba9876543210fedcba9876543210',
     verifyTargetCompatibility: async () => ({ supported: true }),
   }), /stage_target_mismatch/);
+  assert.equal(read, false);
+});
+
+test('staging rejects an expired signed envelope before consuming archive bytes', async (t) => {
+  const root = await fixture(t);
+  const { request, anchors } = signedRequest({
+    issuedAt: new Date(signedFixtureNow - 2 * 60 * 60 * 1_000).toISOString(),
+    expiresAt: new Date(signedFixtureNow - 60 * 60 * 1_000).toISOString(),
+  });
+  const paths = { uploadRoot: path.join(root, 'uploads'), releaseRoot: path.join(root, 'releases'), attemptRoot: path.join(root, 'attempts') };
+  let read = false;
+  await assert.rejects(stageGateCReleaseArchive({
+    request,
+    archive: (async function* blocked() { read = true; yield artifact; }()),
+    trustedAnchors: anchors,
+    paths,
+    readMachineIdentity: async () => machineIdentity,
+    verifyTargetCompatibility: async () => ({ supported: true }),
+  }), /expired/);
   assert.equal(read, false);
 });
