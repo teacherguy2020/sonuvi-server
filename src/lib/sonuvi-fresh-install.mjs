@@ -46,6 +46,7 @@ export async function initializeFreshMobileEnvironment({ stateRoot } = {}) {
   try { await fs.lstat(file); throw new Error('fresh mobile environment already exists'); } catch (error) { if (error?.code !== 'ENOENT') throw error; }
   const lines = [
     'MOBILE_API_ENABLED=1',
+    'SONUVI_LOCAL_HTTPS_ENABLED=1',
     `MOBILE_API_SECRET=${crypto.randomBytes(32).toString('base64url')}`,
     `MOBILE_TRACK_ID_SECRET=${crypto.randomBytes(32).toString('base64url')}`,
   ];

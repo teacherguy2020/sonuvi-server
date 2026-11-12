@@ -1,9 +1,9 @@
-/* Same-origin controller pairing. Only HttpOnly cookies cross the browser boundary. */
+/* Same-origin Sonuvi login; pairing remains optional. Device tokens stay on the Server. */
 (() => {
   if (!globalThis.SonuviControllerWeb) return;
   let complete;
   const ready = new Promise(resolve => { complete = resolve; });
-  const auth = globalThis.SonuviControllerAuth = { ready, enabled: true, csrfToken: '' };
+  const auth = globalThis.SonuviControllerAuth = { ready, enabled: true, csrfToken: '', role: 'controller' };
   let timer, readyResolved = false, approvalShown = false;
   const nativeFetch = globalThis.fetch.bind(globalThis);
   globalThis.fetch = async function(input, options = {}) {
@@ -37,13 +37,27 @@
   function overlay() {
     let box=document.getElementById('sonuviBrowserPairing');if(box)return box;
     box=document.createElement('section');box.id='sonuviBrowserPairing';box.style.cssText='position:fixed;inset:0;z-index:99999;display:grid;place-items:center;background:#07101df2;color:white;font:16px system-ui;text-align:center';
-    box.innerHTML='<div style="max-width:400px"><h2>Pair this controller</h2><p id="sonuviPairStatus">Checking secure access…</p><img id="sonuviPairQr" alt="Pairing QR code" style="display:none;width:260px"><p id="sonuviPairCode"></p><button id="sonuviPairStart">Start trusted-device pairing</button><button id="sonuviSessionRetry" style="display:none">Retry connection</button><p>On an already paired browser, choose “Pair a browser” and enter the code shown here. You can also scan with a compatible trusted Sonuvi controller.</p></div>';
-    document.body.append(box);box.querySelector('button').onclick=start;return box;
+    box.innerHTML='<div style="max-width:400px;padding:24px"><h2>Sign in to Sonuvi</h2><p id="sonuviPairStatus">Checking secure access…</p><form id="sonuviLoginForm"><p><label>Username<br><input id="sonuviLoginUsername" name="username" autocomplete="username" maxlength="128" required></label></p><p><label>Password<br><input id="sonuviLoginPassword" name="password" type="password" autocomplete="current-password" maxlength="1024" required></label></p><button id="sonuviLoginSubmit" type="submit">Sign in</button></form><p>Use your Sonuvi account, not your Pi or SSH password. For a new Server, complete ownership setup in Sonuvi iOS or use verified host recovery.</p><img id="sonuviPairQr" alt="Pairing QR code" style="display:none;width:260px"><p id="sonuviPairCode"></p><button id="sonuviPairStart" type="button">Use trusted-device approval instead</button><button id="sonuviSessionRetry" style="display:none">Retry connection</button></div>';
+    document.body.append(box);box.querySelector('#sonuviPairStart').onclick=start;
+    box.querySelector('#sonuviLoginForm').onsubmit=signIn;return box;
+  }
+  async function signIn(event) {
+    event.preventDefault();clearTimeout(timer);
+    const box=overlay(),button=box.querySelector('#sonuviLoginSubmit'),password=box.querySelector('#sonuviLoginPassword');
+    button.disabled=true;box.querySelector('#sonuviPairStatus').textContent='Signing in…';
+    try {
+      const r=await request('login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:box.querySelector('#sonuviLoginUsername').value.trim(),password:password.value})});
+      const j=await r.json();password.value='';
+      if(!r.ok)throw Error(j.error||'Sign-in was not accepted.');
+      await checkSession();
+    } catch(error) {box.querySelector('#sonuviPairStatus').textContent=error.message;}
+    finally {password.value='';button.disabled=false;}
   }
   function transientSessionFailure(message) {
     const box=overlay();
     box.querySelector('#sonuviPairStatus').textContent=message;
     box.querySelector('#sonuviPairStart').style.display='none';
+    box.querySelector('#sonuviLoginForm').style.display='none';
     const retry=box.querySelector('#sonuviSessionRetry');retry.style.display='inline-block';retry.onclick=checkSession;
   }
   async function poll(id) {
@@ -68,6 +82,19 @@
     if(approvalShown||window.top!==window.self)return;
     approvalShown=true;
     const button=document.createElement('button');button.textContent='Pair a browser';button.style.cssText='position:fixed;right:12px;bottom:12px;z-index:9999;padding:8px 12px;border-radius:8px';document.body.append(button);
+    const logout=document.createElement('button');logout.textContent='Sign out';logout.style.cssText='position:fixed;left:12px;bottom:12px;z-index:9999;padding:8px 12px;border-radius:8px';document.body.append(logout);
+    logout.onclick=async()=>{logout.disabled=true;try{const r=await request('logout',{method:'POST'});const j=await r.json();if(!r.ok)throw Error(j.error||'Sign-out failed.');if(j.warning)alert(j.warning);location.reload();}catch(error){logout.textContent=error.message;logout.disabled=false;}};
+    if(auth.role==='administrator'){
+      const devices=document.createElement('button');devices.textContent='Manage devices';devices.style.cssText='position:fixed;left:110px;bottom:12px;z-index:9999;padding:8px 12px;border-radius:8px';document.body.append(devices);
+      devices.onclick=async()=>{
+        const dialog=document.createElement('dialog');dialog.style.cssText='max-width:520px;background:#142235;color:white;padding:24px;border-radius:12px';
+        const title=document.createElement('h2');title.textContent='Authorized Sonuvi devices';dialog.append(title);
+        const rows=document.createElement('div');dialog.append(rows);
+        const close=document.createElement('button');close.textContent='Close';close.onclick=()=>{dialog.close();dialog.remove();};dialog.append(close);document.body.append(dialog);dialog.showModal();
+        const load=async()=>{rows.replaceChildren();try{const response=await request('devices');const result=await response.json();if(!response.ok)throw Error(result.error||'Device management unavailable.');for(const item of result.devices||[]){const row=document.createElement('p');const label=document.createElement('span');label.textContent=(item.label||'Sonuvi device')+' — '+item.role+' — '+item.status+' ';row.append(label);if(item.status==='active'){const revoke=document.createElement('button');revoke.textContent='Revoke access';revoke.onclick=async()=>{if(!confirm('Revoke access for '+(item.label||'this device')+'?'))return;revoke.disabled=true;try{const r=await request('devices/'+encodeURIComponent(item.deviceId),{method:'DELETE'});if(!r.ok)throw Error('Revocation was not confirmed.');await load();}catch(error){revoke.textContent=error.message;revoke.disabled=false;}};row.append(revoke);}rows.append(row);}}catch(error){rows.textContent=error.message;}};
+        await load();
+      };
+    }
     button.onclick=async()=>{
       const dialog=document.createElement('dialog');dialog.style.cssText='max-width:520px;color:inherit;background:#142235;color:white;border:1px solid #65758a;border-radius:12px;padding:24px';
       const heading=document.createElement('h2');heading.textContent='Approve a new browser';dialog.append(heading);
@@ -89,12 +116,13 @@
       const r=await request('session');let j={};try{j=await r.json();}catch{}
       if(r.ok&&j.authenticated){
         auth.csrfToken=j.csrfToken;
+        auth.role=j.role==='administrator'?'administrator':'controller';
         if(!readyResolved){readyResolved=true;complete(true);}
         document.getElementById('sonuviBrowserPairing')?.remove();
         browserApproval();return;
       }
       if(r.status>=500){transientSessionFailure(j.error||'Controller service is temporarily unavailable. Retry the connection; do not pair again unless this browser grant was revoked or browser data was cleared.');return;}
-      const box=overlay();box.querySelector('#sonuviPairStart').style.display='inline-block';box.querySelector('#sonuviSessionRetry').style.display='none';box.querySelector('#sonuviPairStatus').textContent=j.error||'Trusted-device approval is required.';
+      const box=overlay();box.querySelector('#sonuviLoginForm').style.display='block';box.querySelector('#sonuviPairStart').style.display='inline-block';box.querySelector('#sonuviSessionRetry').style.display='none';box.querySelector('#sonuviPairStatus').textContent=j.error||'Enter your Sonuvi username and password. QR scanning is optional.';
     }catch{transientSessionFailure('Controller service is temporarily unavailable. Retry the connection; do not pair again unless this browser grant was revoked or browser data was cleared.');}
   }
   document.addEventListener('DOMContentLoaded',checkSession);

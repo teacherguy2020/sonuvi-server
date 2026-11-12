@@ -6,6 +6,8 @@ import path from 'node:path';
 
 import { activateFirstRelease } from './sonuvi-first-release.mjs';
 import { AdministratorAuthority } from './sonuvi-admin-authority.mjs';
+import { provisionLocalTLS } from './sonuvi-local-tls.mjs';
+import { localTLSMaintenance } from './sonuvi-local-tls-maintenance.mjs';
 import { appendBootstrapAttemptEvent, writeBootstrapAttemptProgress } from './sonuvi-bootstrap-progress.mjs';
 import { FreshInstallClassification, appendFreshInstallJournal, classifyFreshInstallHost, initializeFreshHostLayout, initializeFreshMobileEnvironment, provisionFreshSystemdUnits, renderFreshSystemdUnits, writeFreshInstallState } from './sonuvi-fresh-install.mjs';
 import { makeTreeReadOnly, verifyReleaseArtifact } from './release-artifact.mjs';
@@ -20,6 +22,12 @@ export const TARGET_SERVICE_ACCOUNT = 'sonuvi';
 // storage is listed explicitly rather than relying on a recursive ownership
 // change, so protected siblings under the shared state root remain root-only.
 export const TARGET_WRITABLE_STATE_DIRECTORIES = Object.freeze(['data', 'cache', 'logs', 'empty-library', 'empty-library/podcasts']);
+
+export async function provisionFixedLocalTLS({ stateRoot, serverId } = {}) {
+  const {stdout} = await execFile('/usr/bin/id',['-g',TARGET_SERVICE_ACCOUNT],{timeout:10000});
+  if (!/^\d+\s*$/.test(stdout)) throw new Error('service_group_unavailable');
+  return provisionLocalTLS({stateRoot,serverId,serviceGID:Number(stdout.trim())});
+}
 
 function text(value) { return String(value ?? '').trim(); }
 function releaseId(value) { const id = text(value); if (!/^sonuvi-[a-f0-9]{64}$/.test(id)) throw new Error('release ID is invalid'); return id; }
@@ -139,7 +147,7 @@ export async function verifyFixedTargetPrerequisites({ manifest, runtime = proce
  * only: release source, service names, paths, commands, and environment are
  * fixed by this module. It is deliberately not a network service.
  */
-export async function runFixedTargetInstallation({ request, paths = TARGET_PATHS, platform = process.platform, architecture = process.arch, uid = typeof process.getuid === 'function' ? process.getuid() : null, systemd = createFixedSystemd(), serviceAccount = createFixedServiceAccount(), ownership = provisionWritableStateOwnership, configurationAccess = provisionServiceReadableConfiguration, activationStateAccess = provisionServiceReadableActivationState, verifyArtifact = verifyReleaseArtifact, verifyPrerequisites = verifyFixedTargetPrerequisites, health = null, administratorAuthorityFactory = (stateRoot) => new AdministratorAuthority({ stateRoot }) } = {}) {
+export async function runFixedTargetInstallation({ request, paths = TARGET_PATHS, platform = process.platform, architecture = process.arch, uid = typeof process.getuid === 'function' ? process.getuid() : null, systemd = createFixedSystemd(), serviceAccount = createFixedServiceAccount(), ownership = provisionWritableStateOwnership, configurationAccess = provisionServiceReadableConfiguration, activationStateAccess = provisionServiceReadableActivationState, verifyArtifact = verifyReleaseArtifact, verifyPrerequisites = verifyFixedTargetPrerequisites, health = null, localTLS = provisionFixedLocalTLS, tlsMaintenance = null, administratorAuthorityFactory = (stateRoot) => new AdministratorAuthority({ stateRoot }) } = {}) {
   const input = validateRequest(request);
   if (!nodeCompatible()) throw new Error('node_runtime_unsupported');
   const configuredPaths = {
@@ -148,6 +156,7 @@ export async function runFixedTargetInstallation({ request, paths = TARGET_PATHS
     bootstrapAttemptRoot: paths?.bootstrapAttemptRoot || path.join(path.dirname(paths?.bootstrapReleaseRoot || TARGET_PATHS.bootstrapReleaseRoot), 'attempts'),
   };
   const roots = Object.fromEntries(Object.entries(configuredPaths).map(([key, value]) => [key, absolute(value, key)]));
+  const renewal = tlsMaintenance || localTLSMaintenance({unitRoot:roots.unitRoot});
   const source = path.join(roots.bootstrapReleaseRoot, input.releaseId);
   if (!await exists(source)) throw new Error('verified_release_not_staged');
   const preflight = await classifyFreshInstallHost({ layoutRoot: roots.layoutRoot, stateRoot: roots.stateRoot, platform, architecture, hasSystemd: true, uid, availableBytes: await availableBytes(path.dirname(roots.stateRoot)) });
@@ -190,6 +199,7 @@ export async function runFixedTargetInstallation({ request, paths = TARGET_PATHS
     const administratorAuthority = administratorAuthorityFactory(roots.stateRoot);
     if (!administratorAuthority || typeof administratorAuthority.provisionSigningMaterial !== 'function') throw new Error('administrator authority provisioning is unavailable');
     await administratorAuthority.provisionSigningMaterial();
+    await localTLS({stateRoot:roots.stateRoot,serverId:(await administratorAuthority.ownership()).serverId});
     await ownership({ stateRoot: roots.stateRoot });
     await configurationAccess({ stateRoot: roots.stateRoot });
     await progress(stage, 'passed');
@@ -202,11 +212,11 @@ export async function runFixedTargetInstallation({ request, paths = TARGET_PATHS
     const [apiTemplate, webTemplate] = await Promise.all([fs.readFile(path.join(destination, 'ops/systemd/sonuvi-api.service.in'), 'utf8'), fs.readFile(path.join(destination, 'ops/systemd/sonuvi-web.service.in'), 'utf8')]);
     const units = renderFreshSystemdUnits({ apiTemplate, webTemplate, releaseId: input.releaseId });
     const adapter = {
-      prepare: async () => { await provisionFreshSystemdUnits({ unitRoot: roots.unitRoot, units }); await systemd.daemonReload(); },
-      restart: async () => { await activationStateAccess({ stateRoot: roots.stateRoot }); for (const unit of TARGET_UNITS) await systemd.enableAndStart(unit); },
+      prepare: async () => { await provisionFreshSystemdUnits({ unitRoot: roots.unitRoot, units }); await renewal.prepare(); await systemd.daemonReload(); },
+      restart: async () => { await activationStateAccess({ stateRoot: roots.stateRoot }); for (const unit of TARGET_UNITS) await systemd.enableAndStart(unit); await renewal.start(); },
       verify: async ({ service, expectedReleaseId }) => ({ releaseId: (await systemd.isHealthy(`sonuvi-${service}.service`)) ? expectedReleaseId : null }),
       health: async ({ service }) => health ? health({ service }) : systemd.isHealthy(`sonuvi-${service}.service`),
-      rollback: async () => { for (const unit of [...TARGET_UNITS].reverse()) await systemd.disableAndStop(unit); },
+      rollback: async () => { try { await renewal.stop(); } finally { for (const unit of [...TARGET_UNITS].reverse()) await systemd.disableAndStop(unit); } },
       makeActivationStateReadable: async () => activationStateAccess({ stateRoot: roots.stateRoot }),
     };
     stage = 'checkpoint';

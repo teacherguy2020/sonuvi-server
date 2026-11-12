@@ -5,6 +5,7 @@ import http from 'node:http';
 import { X509Certificate } from 'node:crypto';
 
 import { createPublicWebServer, resolvePublicWebListenHost } from '../src/lib/public-web-server.mjs';
+import { createLocalBrowserRuntime, LOCAL_BROWSER_PORT } from '../src/lib/sonuvi-local-browser.mjs';
 
 function option(name) {
   const index = process.argv.indexOf(name);
@@ -23,6 +24,12 @@ const certPath = String(process.env.SONUVI_WEB_TLS_CERT || '').trim();
 const keyPath = String(process.env.SONUVI_WEB_TLS_KEY || '').trim();
 if (Boolean(certPath) !== Boolean(keyPath)) throw new Error('TLS certificate and key must both be configured');
 const servers = [];
+if (process.env.SONUVI_LOCAL_HTTPS_ENABLED === '1') {
+  const local = await createLocalBrowserRuntime({publicRoot:configuredRoot,stateRoot:process.env.SONUVI_STATE_ROOT || '/var/lib/sonuvi',
+    onReloadError:()=>process.stderr.write('Local browser TLS renewal unavailable; trust was not changed.\n')});
+  await new Promise((resolve,reject)=>{local.server.once('error',reject);local.server.listen(LOCAL_BROWSER_PORT,host,resolve);});
+  servers.push(local.server);
+}
 if (certPath) {
   if (![certPath,keyPath].every(path.isAbsolute)) throw new Error('TLS paths must be absolute protected paths');
   const origin = new URL(process.env.SONUVI_CONTROLLER_WEB_ORIGIN || '');

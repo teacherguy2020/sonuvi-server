@@ -73,6 +73,8 @@ const RELEASE_RUNTIME_SCRIPTS = new Set([
   'scripts/sonuvi-debian-node-bootstrap.sh',
   'scripts/sonuvi-target-installer.mjs',
   'scripts/lastfm-authorize.mjs',
+  'scripts/sonuvi-local-tls-renew.mjs',
+  'scripts/sonuvi-owner-recovery.mjs',
   'scripts/promote-staged-release.mjs',
   'scripts/serve-public-web.mjs',
   'scripts/verify-current-release.mjs',
@@ -703,7 +705,7 @@ function defaultManifestRequirements() {
 function externalRuntimeDependencies() {
   return {
     executables: [
-      'node', 'python3', 'mpc', 'ffmpeg', 'ffprobe', 'metaflac', 'curl', 'ssh', 'scp',
+      'node', 'python3', 'mpc', 'ffmpeg', 'ffprobe', 'metaflac', 'curl', 'ssh', 'scp', 'openssl', 'avahi-publish-service', 'avahi-publish-address',
     ],
     pythonPackages: ['python-mpd2', 'requests', 'mutagen'],
     hostServicesAndAccess: [

@@ -35,7 +35,8 @@ New APIs (mobile API must be enabled):
 
 Legacy non-shared-state source checkouts retain their previous behavior;
 device-management/logout APIs report unavailable without a registry. Existing
-browser logout UI is not yet wired to the new revocation endpoint. Unmigrated
+browser logout revokes its own grant (using refresh proof if access expired),
+and reports when upstream revocation cannot be confirmed. Unmigrated
 devices are not enumerable until their first renewal. Legacy credentials are
 still replayable until their specific grant is revoked; legacy compatibility
 must not be described as proof-bound session rotation.
@@ -85,13 +86,62 @@ in-flight login races, root revocation, rate limits, transport/origin rejection,
 lost-key recovery, identity preservation and replay rejection. These are local
 fixtures, not host deployment acceptance.
 
-## Approved target, not implemented here yet
+## Current: fresh-install native LAN HTTPS and browser login
 
-iOS Bonjour/direct login and automatic
-post-install enrollment; TV discovery and local secure destination handoff;
-browser login and administrator device UI; native integration of fixed host
-recovery and first-account configuration. Root signer, installer host-key
-pinning, release verification, privilege checks and ownership remain boundaries.
+Fresh privileged activation provisions a unique P-256 TLS authority bound to
+the existing stable Server ID. Root private keys remain under root-only
+`protected/local-tls/authority`; a root:sonuvi/0640 atomic leaf bundle lives at
+`config/local-tls.json`. Native port 8443 accepts only the exact local Host,
+same-origin requests and existing `/v1/` routes. It does not expose legacy
+Track-Key routes. Per-Server `.local` names and `_sonuvi._tcp` advertisements
+use standard Avahi; advertisements are hints, never enrollment evidence.
+
+The fixed root renewal unit issues 90-day leaf certificates and preserves the
+enrolled root; a daily timer renews with a 30-day margin. Listeners reload only
+validated bundles with unchanged identity/anchor. Root expiry/replacement
+requires explicit re-enrollment, not a silent new trust root. IPv4 Ethernet/Wi-Fi
+LAN advertisement is implemented; IPv6-only LAN acceptance remains open.
+
+Privileged `/v1/auth/configure` returns public `sonuvi.local-tls-trust.v1`
+material over the existing pinned SSH channel. Identical credential retries
+are idempotent. The installing phone obtains its own administrator login grant
+over that channel and verifies local HTTPS before handoff. Old signed packages
+without this contract cannot complete the new native installer flow.
+
+Browser login uses `/__controller/login-status`, `/__controller/login`, and a
+private HttpOnly/Secure/SameSite=Strict cookie; no bearer or refresh token is
+returned to page JavaScript. Existing session renewal/persistence remains.
+`/__controller/devices` lists/revokes devices through Server-checked admin
+authorization, with CSRF validation for mutations. Loading a web page confers
+no authority. The private-browser fallback runs separately on port 8444 and
+requires explicit browser root trust; native pinning does not grant Safari
+trust. Never bypass a certificate warning or submit passwords over HTTP.
+
+## Approved public browser path and remaining integration
+
+Public per-Server HTTPS under a Sonuvi-controlled domain is the preferred
+Safari path, not mandatory private CA installation. Standard ACME DNS-01
+allows issuance with no inbound port forwarding. The existing public TLS
+listener accepts protected certificate/key files; no production DNS/issuance
+service has been built, contacted or deployed by this change.
+
+The future service must allocate opaque non-reassigned names, bind DNS/ACME
+updates to the Server's enrolled identity, accept CSRs (never private keys),
+publish private LAN A/AAAA answers, and support automated ARI-aware renewal.
+No Sonuvi/cloud account, password, device bearer, playback, or native login
+depends on it. Certificate replacement must validate chain/name/key before
+atomic activation; native offline trust is independent. Exact service endpoint,
+domain ownership, provider credentials and production deployment are external
+dependencies, not invented defaults. DNS rebinding filters may block public
+names resolving to private IPs; offer the explicit local-browser fallback and
+native LAN operation without weakening TLS. One home router accepted an
+independent public test name returning a private address; that is not proof
+of all routers or the future Sonuvi service.
+
+TV discovery/local secure handoff, native fixed host recovery UI, public
+certificate renewal/service integration and four-journey physical acceptance
+remain to be completed. Root signer, installer host-key pinning, signed release
+verification, sudo and immutable activation remain unchanged boundaries.
 
 Universal Links are not operational: the audited iOS entitlement lacks
 associated-domains and the public Sonuvi AASA URL returned 404. A practical
@@ -106,3 +156,9 @@ Route tests cover logout, blocked refresh/migration replay, controller denial at
 admin routes and unaffected second-device renewal. Full source tests and Linux
 ownership fixture results are recorded in the task evidence, not inferred from
 deployment history. No physical-client or four-journey acceptance is claimed.
+
+2026-11-12 local TLS/web regression: 773 tests, 762 passed, 7 skipped, 4 macOS
+chown fixture failures also present on baseline. Those four passed in a
+read-only, network-disabled Linux container. Subsequent focused TLS/browser
+integration: 9/9 passed, including real TLS handshake, hostname/Host rejection,
+explicit private browser root trust, session restart and independent revocation.

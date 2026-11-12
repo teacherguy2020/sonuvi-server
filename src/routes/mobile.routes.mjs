@@ -2681,8 +2681,11 @@ export function registerMobileRoutes(app, deps = {}) {
 
   app.post('/v1/mobile/session/logout', asyncRoute(async (req, res) => {
     if (!sessionRegistry) return errorResponse(res, 503, 'device revocation is unavailable');
-    const session = requireSession(req, res);
-    if (!session) return;
+    const refresh = text(req?.headers?.['x-mobile-refresh-token']);
+    const session = verifyMobileToken(readBearerToken(req), {secret:apiSecret,scope:'mobile-api'})
+      || verifyMobileToken(refresh,{secret:apiSecret,scope:'mobile-refresh'})
+      || verifyMobileToken(refresh,{secret:apiSecret,scope:'controller-web-refresh'});
+    if (!session) return errorResponse(res,401,'device session is missing or revoked');
     sessionRegistry.revoke(session.deviceId);
     return res.json({ ok: true });
   }));

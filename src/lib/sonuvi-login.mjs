@@ -106,7 +106,13 @@ export class SonuviLogin {
       const currentOwner = await this.authority.verifyRootAccessToken(administratorToken);
       if (currentOwner?.administratorId !== claims.administratorId || owner.administratorId !== claims.administratorId || !owner.claimed) throw new LoginError('ownership_proof_required', 401);
       const existing = this.read();
-      if (existing && !replace) throw new LoginError('login_already_configured', 409);
+      if (existing && !replace) {
+        // A lost configure response is safe to retry only for the identical
+        // owner, authority generation and credential. Never silently replace.
+        if (existing.administratorId === claims.administratorId && existing.authorityGeneration === owner.authorityGeneration && existing.username === username &&
+            crypto.timingSafeEqual(await this.derive(password, existing.salt), Buffer.from(existing.hash, 'hex'))) return { configured: true };
+        throw new LoginError('login_already_configured', 409);
+      }
       // Revoke before committing a replacement: interruption cannot leave a
       // changed password while older administrator sessions remain usable.
       if (existing) this.registry.revokeAdministrator(existing.administratorId);
@@ -162,7 +168,7 @@ export class SonuviLogin {
 }
 
 /** Transport/origin checks apply before passwords or ownership proofs are used. */
-export function registerLoginRoutes(app, { login, canonicalOrigin = '' } = {}) {
+export function registerLoginRoutes(app, { login, canonicalOrigin = '', localTrust = async () => null } = {}) {
   if (!login) return;
   const route = handler => async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
@@ -187,6 +193,9 @@ export function registerLoginRoutes(app, { login, canonicalOrigin = '' } = {}) {
   app.post('/v1/auth/configure', route(async (req, res) => {
     const body = req.body || {};
     if (Object.keys(body).some(key => !['username', 'password', 'replace'].includes(key)) || (body.replace !== undefined && typeof body.replace !== 'boolean')) throw new LoginError('login_request_invalid');
-    return res.json({ ok: true, ...(await login.configure({ ...body, administratorToken: readBearerToken(req) })) });
+    const configured = await login.configure({ ...body, administratorToken: readBearerToken(req) });
+    // Public material is useful only when received through the verified
+    // installer channel. There is no anonymous ownership/trust-claim endpoint.
+    return res.json({ ok: true, ...configured, localTrust: await localTrust() });
   }));
 }

@@ -10,7 +10,7 @@ class Element {
   constructor(tag, doc) { this.tagName=tag; this.doc=doc; this.children=[]; this.style={}; this.parent=null; this.textContent=''; this.onclick=null; }
   set id(value) { this._id=value; this.doc.ids.set(value,this); }
   get id() { return this._id; }
-  set innerHTML(value) { this._innerHTML=value; for (const id of ['sonuviPairStatus','sonuviPairQr','sonuviPairCode','sonuviPairStart','sonuviSessionRetry']) { if (value.includes('id="'+id+'"')) { const child=new Element(id.includes('Start')||id.includes('Retry')?'button':'div',this.doc); child.id=id; this.append(child); } } }
+  set innerHTML(value) { this._innerHTML=value; for (const id of ['sonuviPairStatus','sonuviPairQr','sonuviPairCode','sonuviPairStart','sonuviSessionRetry','sonuviLoginForm','sonuviLoginUsername','sonuviLoginPassword','sonuviLoginSubmit']) { if (value.includes('id="'+id+'"')) { const child=new Element(id.includes('Start')||id.includes('Retry')?'button':'div',this.doc); child.id=id; this.append(child); } } }
   append(...items) { for (const item of items) { item.parent=this; this.children.push(item); } }
   querySelector(selector) { if (selector.startsWith('#')) return this.doc.getElementById(selector.slice(1)); if (selector==='button') return this.children.find(child=>child.tagName==='button'); return null; }
   remove() { if (this.parent) this.parent.children=this.parent.children.filter(child=>child!==this); for (const child of this.children) child.remove(); if (this.id) this.doc.ids.delete(this.id); }
@@ -48,4 +48,18 @@ test('browser session offers Retry after a network failure but pairing only afte
 test('pairing poll copy does not claim an approval before one exists', async () => {
   const source=await fs.readFile(path.join(root,'scripts/controller-browser-auth.js'),'utf8');
   assert.doesNotMatch(source,/Retrying the approved pairing/);
+});
+
+test('normal login is available without QR and clears the password after rejection', async () => {
+  const state=await load([{status:200,body:{authenticated:false}}]);
+  const username=state.doc.getElementById('sonuviLoginUsername');username.value='owner';
+  const password=state.doc.getElementById('sonuviLoginPassword');password.value='fixture-only-password';
+  let submitted;
+  // The installed wrapper resolves fetch dynamically for subsequent calls.
+  state.sandbox.fetch=async(input,options)=>{submitted={input,options};return {ok:false,json:async()=>({error:'Sign-in was not accepted.'})};};
+  await state.doc.getElementById('sonuviLoginForm').onsubmit({preventDefault(){}});
+  assert.equal(submitted.input,'/__controller/login');assert.equal(submitted.options.method,'POST');
+  assert.equal(JSON.parse(submitted.options.body).username,'owner');assert.equal(password.value,'');
+  assert.equal(state.doc.getElementById('sonuviPairStatus').textContent,'Sign-in was not accepted.');
+  assert.equal(state.doc.getElementById('sonuviLoginSubmit').disabled,false);
 });

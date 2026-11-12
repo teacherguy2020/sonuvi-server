@@ -44,7 +44,9 @@ test('only existing root ownership can establish login; password and root proof 
   assert.equal(persisted.includes(password), false);
   assert.equal(persisted.includes(rootToken), false);
   assert.equal(fs.statSync(login.file).mode & 0o777, 0o600);
-  await assert.rejects(login.configure({ administratorToken: rootToken, username: 'owner', password }), /already_configured/);
+  await login.configure({ administratorToken: rootToken, username: 'owner', password });
+  assert.equal(fs.readFileSync(login.file, 'utf8'), persisted, 'identical privileged retry preserves account generation');
+  await assert.rejects(login.configure({ administratorToken: rootToken, username: 'owner', password: 'different-test-passphrase' }), /already_configured/);
 });
 
 test('direct login creates distinct revocable sessions; controller-only TV login never grants admin', async t => {

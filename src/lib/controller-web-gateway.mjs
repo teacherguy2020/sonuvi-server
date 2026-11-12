@@ -42,7 +42,7 @@ export function createControllerWebGateway({ secret=process.env.SONUVI_CONTROLLE
       for(const [id,entry] of saved.sessions) {
         if(!/^[\w-]{43}$/.test(id)||typeof entry?.accessToken!=='string'||typeof entry?.csrf!=='string')continue;
         if(typeof entry.refreshToken==='string'&&entry.refreshToken) {
-          sessions.set(id,{csrf:entry.csrf,accessToken:entry.accessToken,accessExpiresAt:Number(entry.accessExpiresAt)||Number(entry.expiresAt)||0,refreshToken:entry.refreshToken});
+          sessions.set(id,{csrf:entry.csrf,accessToken:entry.accessToken,accessExpiresAt:Number(entry.accessExpiresAt)||Number(entry.expiresAt)||0,refreshToken:entry.refreshToken,role:entry.role==='administrator'?'administrator':'controller',deviceId:entry.deviceId||null});
           continue;
         }
         // Version-one files are accepted only while their original bounded
@@ -100,9 +100,38 @@ export function createControllerWebGateway({ secret=process.env.SONUVI_CONTROLLE
     if(new URL(expected).host!==req.headers.host||(req.headers.origin&&req.headers.origin!==expected)||(!['GET','HEAD'].includes(req.method)&&req.headers.origin!==expected)||req.headers['sec-fetch-site']==='cross-site'){send(res,403,{ok:false,error:'Controller origin or Host rejected.'});return true;}
     const id=cookie(req,'sonuvi_controller');let session=sessions.get(id);
     try {
+      if(url.pathname==='/__controller/login-status'&&req.method==='GET'){
+        const up=await api('GET','/v1/auth/status');const body=await up.json();
+        send(res,up.status,{ok:up.ok,loginConfigured:body.loginConfigured===true,ownershipEstablished:body.ownershipEstablished===true});return true;
+      }
+      if(url.pathname==='/__controller/login'&&req.method==='POST'){
+        if(session){send(res,409,{ok:false,error:'Sign out before signing in as another account.'});return true;}
+        if(sessions.size>=512){send(res,429,{ok:false,error:'Browser capacity reached.'});return true;}
+        let body;try{body=await readJson(req);}catch{send(res,400,{ok:false,error:'Invalid sign-in request.'});return true;}
+        if(Object.keys(body).sort().join(',')!=='password,username'||typeof body.username!=='string'||typeof body.password!=='string'||body.username.length>128||Buffer.byteLength(body.password)>1024){send(res,400,{ok:false,error:'Invalid sign-in request.'});return true;}
+        const up=await api('POST','/v1/auth/login',{body:{username:body.username,password:body.password,deviceName:'Sonuvi browser'}});
+        const grant=await up.json();
+        if(!up.ok){send(res,up.status,{ok:false,error:up.status===429?'Too many sign-in attempts. Try again shortly.':'Sign-in was not accepted.'});return true;}
+        const expiry=expiresAt(grant.expiresAt);
+        if(typeof grant.accessToken!=='string'||!grant.accessToken||typeof grant.refreshToken!=='string'||!grant.refreshToken||typeof grant.deviceId!=='string'||!['administrator','controller'].includes(grant.role)||!Number.isFinite(expiry)||expiry<=now())throw new Error('invalid login grant');
+        const sessionId=random(),csrf=random();
+        sessions.set(sessionId,{csrf,accessToken:grant.accessToken,refreshToken:grant.refreshToken,accessExpiresAt:expiry,role:grant.role,deviceId:grant.deviceId});persist();
+        send(res,200,{ok:true,authenticated:true,csrfToken:csrf,role:grant.role},{'set-cookie':controllerCookie(sessionId,secure)});return true;
+      }
       if(url.pathname==='/__controller/session'&&req.method==='GET'){
         if(session){session=await ensureAccess(id,session);if(!session){send(res,401,{ok:false,error:'Controller authorization was revoked; pair again.'},{'set-cookie':setCookie('sonuvi_controller','',secure,0)});return true;}}
-        send(res,200,{ok:true,authenticated:!!session,csrfToken:session?.csrf||null,expiresAt:session?.accessExpiresAt||null,persistent:!!session?.refreshToken},session?{'set-cookie':controllerCookie(id,secure)}:{});return true;
+        send(res,200,{ok:true,authenticated:!!session,csrfToken:session?.csrf||null,role:session?.role||'controller',expiresAt:session?.accessExpiresAt||null,persistent:!!session?.refreshToken},session?{'set-cookie':controllerCookie(id,secure)}:{});return true;
+      }
+      const deviceRemoval=url.pathname.match(/^\/__controller\/devices\/([A-Za-z0-9._:-]{1,200})$/);
+      if((url.pathname==='/__controller/devices'&&req.method==='GET')||(deviceRemoval&&req.method==='DELETE')){
+        if(session)session=await ensureAccess(id,session);
+        if(!session){send(res,401,{ok:false,error:'Sign in to manage devices.'});return true;}
+        if(deviceRemoval&&!equal(session.csrf,req.headers['x-csrf-token'])){send(res,403,{ok:false,error:'CSRF validation failed.'});return true;}
+        // Saved role is UI information only. The Server checks current admin
+        // authority on every request, including after recovery/revocation.
+        const target='/v1/admin/devices'+(deviceRemoval?'/'+encodeURIComponent(deviceRemoval[1]):'');
+        const up=await api(req.method,target,{headers:{authorization:`Bearer ${session.accessToken}`}});
+        const body=await up.json();send(res,up.status,up.ok?body:{ok:false,error:'Administrator authorization is required.'});return true;
       }
       if(url.pathname==='/__controller/pairings'&&req.method==='POST'){
         if(pairings.size>=128||sessions.size>=512){send(res,429,{ok:false,error:'Controller capacity reached.'});return true;}
@@ -152,7 +181,13 @@ export function createControllerWebGateway({ secret=process.env.SONUVI_CONTROLLE
       }
       if(['/__controller/logout','/__controller/refresh'].includes(url.pathname)&&req.method==='POST'){
         if(!session||!equal(session.csrf,req.headers['x-csrf-token'])){send(res,403,{ok:false,error:'CSRF validation failed.'});return true;}
-        if(url.pathname.endsWith('/logout')){sessions.delete(id);persist();send(res,200,{ok:true},{'set-cookie':setCookie('sonuvi_controller','',secure,0)});}
+        if(url.pathname.endsWith('/logout')){
+          // Remove locally before awaiting revocation so concurrent renewal
+          // cannot resurrect the browser. Refresh proof works after access expiry.
+          sessions.delete(id);persist();let revoked=false;
+          try{const up=await api('POST','/v1/mobile/session/logout',{headers:{authorization:`Bearer ${session.accessToken}`,...(session.refreshToken?{'x-mobile-refresh-token':session.refreshToken}:{})}});revoked=up.ok||up.status===401;}catch{}
+          send(res,200,{ok:true,revocationConfirmed:revoked,...(!revoked?{warning:'Signed out here; Server-side revocation could not be confirmed.'}:{})},{'set-cookie':setCookie('sonuvi_controller','',secure,0)});
+        }
         else {session=await ensureAccess(id,session,{force:true});if(!session){send(res,401,{ok:false,error:'Controller authorization was revoked; pair again.'},{'set-cookie':setCookie('sonuvi_controller','',secure,0)});return true;}send(res,200,{ok:true,expiresAt:session.accessExpiresAt},{'set-cookie':controllerCookie(id,secure)});}return true;
       }
       if(legacy||mobile){

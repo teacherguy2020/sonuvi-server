@@ -30,10 +30,15 @@ import { startLibraryHealthScan, waitForLibraryHealthScan } from './src/routes/c
 import { runtimeDiagnostics as nativeRuntimeDiagnostics } from './src/lib/config-runtime-diagnostics.mjs';
 import { installRuntimeShutdown } from './src/lib/runtime-shutdown.mjs';
 import { resolveHardwareCompatibility, createHardwareCompatibilityServer } from './src/lib/hardware-compatibility.mjs';
+import { loadLocalTLSListener } from './src/lib/sonuvi-local-tls-listener.mjs';
+import { startLocalAdvertisement } from './src/lib/sonuvi-lan-discovery.mjs';
+import { localTrustRecord, readLocalTLSBundle, LOCAL_TLS_PORT } from './src/lib/sonuvi-local-tls.mjs';
 
 // Validate explicit hardware exposure before starting any runtime listeners.
 const hardwareCompatibilityConfig = resolveHardwareCompatibility({ apiHost: API_LISTEN_HOST, apiPort: PORT, trackKey: TRACK_KEY });
 let hardwareCompatibilityRuntime = null;
+let localTLSRuntime = null;
+let localAdvertisement = null;
 import { lookupAnimatedArt, resolveAnimatedMediaFile } from './src/routes/config.library-health-animated-art.routes.mjs';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
@@ -9212,7 +9217,14 @@ if (deviceSessions && MOBILE_API_SECRET) {
     directory: path.join(RUNTIME_STATE_PATHS.stateRoot, 'data', 'owner-login'),
     authority: firstAdministratorAuthority, sessionRegistry: deviceSessions, apiSecret: MOBILE_API_SECRET,
   });
-  registerLoginRoutes(app, { login: sonuviLogin, canonicalOrigin: process.env.SONUVI_CONTROLLER_WEB_ORIGIN || '' });
+  registerLoginRoutes(app, { login: sonuviLogin, canonicalOrigin: process.env.SONUVI_CONTROLLER_WEB_ORIGIN || '',
+    localTrust: async () => {
+      if (process.env.SONUVI_LOCAL_HTTPS_ENABLED !== '1') return null;
+      const bundle = await readLocalTLSBundle({stateRoot:process.env.SONUVI_STATE_ROOT || '/var/lib/sonuvi'});
+      if (!bundle) throw new Error('local_tls_unavailable');
+      return localTrustRecord(bundle);
+    }
+  });
 }
 const runtimeBrowseIndex = createRuntimeBrowseIndexProvider({
   freshInstall: FRESH_INSTALL_MODE,
@@ -9259,7 +9271,8 @@ const dlnaRuntime = createDlnaRuntime({
   },
   log,
 });
-stopRuntimeForShutdown = () => Promise.all([dlnaRuntime.stop(), hardwareCompatibilityRuntime?.close()]);
+stopRuntimeForShutdown = () => Promise.all([dlnaRuntime.stop(), hardwareCompatibilityRuntime?.close(), localAdvertisement?.stop(),
+  localTLSRuntime ? new Promise(resolve => { localTLSRuntime.server.close(resolve); localTLSRuntime.server.closeAllConnections(); }) : null]);
 const startDlnaRuntime = () => dlnaRuntime.start();
 
 
@@ -10083,6 +10096,19 @@ if (hardwareCompatibilityConfig.enabled) {
     log.error('Hardware compatibility listener failed; refusing partial startup');
     stopRuntimeForShutdown().finally(() => process.exit(1));
   });
+}
+
+if (process.env.SONUVI_LOCAL_HTTPS_ENABLED === '1') {
+  localTLSRuntime = await loadLocalTLSListener({stateRoot:process.env.SONUVI_STATE_ROOT || '/var/lib/sonuvi',handler:app,
+    onReloadError:()=>log.error('Local HTTPS renewal unavailable; existing trust is unchanged')});
+  if (!localTLSRuntime) throw new Error('local_tls_required');
+  await new Promise((resolve,reject) => {
+    localTLSRuntime.server.once('error',reject);
+    localTLSRuntime.server.listen(LOCAL_TLS_PORT,'0.0.0.0',resolve);
+  });
+  const bundle = await readLocalTLSBundle({stateRoot:process.env.SONUVI_STATE_ROOT || '/var/lib/sonuvi'});
+  localAdvertisement = startLocalAdvertisement({serverId:bundle.serverId,
+    onUnavailable:()=>log.warn('Local Server discovery unavailable; use the verified setup/recovery connection')});
 }
 
 app.listen(PORT, API_LISTEN_HOST, () => {

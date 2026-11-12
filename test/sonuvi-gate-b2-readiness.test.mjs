@@ -12,6 +12,7 @@ import { createFixedServiceAccount, createFixedSystemd, provisionServiceReadable
 import crypto from 'node:crypto';
 
 const attemptId = 'boot_0123456789abcdef'; const targetIdentity = 'machine_0123456789abcdef';
+const fixtureTLSMaintenance = { prepare:async()=>{}, start:async()=>{}, stop:async()=>{} };
 async function fixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'sonuvi-b2-'));
   t.after(async () => {
@@ -64,7 +65,9 @@ test('fixed target installer has no caller-controlled paths or commands', async 
   const ownershipCalls = []; const ownership = async ({ stateRoot }) => { ownershipCalls.push(stateRoot); };
   const configurationAccess = async ({ stateRoot }) => { assert.equal(stateRoot, paths.stateRoot); configurationAccessCalled = true; };
   const activationStateAccess = async ({ stateRoot }) => { assert.equal(stateRoot, paths.stateRoot); activationStateAccessCalled = true; };
-  const result = await runFixedTargetInstallation({ request, paths, platform: 'linux', architecture: 'arm64', uid: 0, systemd, serviceAccount, ownership, configurationAccess, activationStateAccess, health: async () => true, verifyArtifact: async ({ artifactRoot }) => ({ releaseId, artifactRoot }), verifyPrerequisites: async () => {} });
+  let tlsProvisioned = false;
+  const result = await runFixedTargetInstallation({ request, paths, platform: 'linux', architecture: 'arm64', uid: 0, systemd, serviceAccount, ownership, configurationAccess, activationStateAccess, health: async () => true, verifyArtifact: async ({ artifactRoot }) => ({ releaseId, artifactRoot }), verifyPrerequisites: async () => {}, tlsMaintenance:fixtureTLSMaintenance, localTLS: async ({stateRoot,serverId}) => { assert.equal(stateRoot,paths.stateRoot); assert.match(serverId,/^sonuvi-[A-Za-z0-9_-]{43}$/); tlsProvisioned=true; } });
+  assert.equal(tlsProvisioned,true);
   assert.equal(result.state, 'awaiting-administrator-enrollment');
   assert.equal((await fs.readlink(path.join(paths.layoutRoot, 'current'))).includes(releaseId), true);
   const installState = JSON.parse(await fs.readFile(path.join(paths.stateRoot, 'install', 'state.json'), 'utf8'));
@@ -106,7 +109,7 @@ test('failed first start disables only the approved candidate units before clean
   const calls = [];
   const systemd = createFixedSystemd({ run: async (args) => { calls.push(args); if (args[0] === 'enable') throw new Error('api start failed'); } });
   const request = { attemptId, targetIdentity, releaseId, serverIdentity: 'sonuvi-lab-01' };
-  await assert.rejects(runFixedTargetInstallation({ request, paths, platform: 'linux', architecture: 'arm64', uid: 0, systemd, serviceAccount: { ensure: async () => 'fixture' }, ownership: async () => {}, configurationAccess: async () => {}, activationStateAccess: async () => {}, verifyArtifact: async ({ artifactRoot }) => ({ releaseId, artifactRoot }), verifyPrerequisites: async () => {} }), /api start failed/);
+  await assert.rejects(runFixedTargetInstallation({ request, paths, platform: 'linux', architecture: 'arm64', uid: 0, systemd, serviceAccount: { ensure: async () => 'fixture' }, ownership: async () => {}, configurationAccess: async () => {}, activationStateAccess: async () => {}, verifyArtifact: async ({ artifactRoot }) => ({ releaseId, artifactRoot }), verifyPrerequisites: async () => {}, localTLS: async () => {}, tlsMaintenance:fixtureTLSMaintenance }), /api start failed/);
   assert.deepEqual(calls, [['daemon-reload'], ['enable', '--now', 'sonuvi-api.service'], ['disable', '--now', 'sonuvi-web.service'], ['disable', '--now', 'sonuvi-api.service']]);
   await assert.rejects(fs.lstat(path.join(paths.layoutRoot, 'current')), { code: 'ENOENT' });
 });
