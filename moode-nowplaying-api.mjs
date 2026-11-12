@@ -315,6 +315,7 @@ import { readMoodeRadioCatalog } from './src/lib/moode-radio-catalog.mjs';
 import { createMobileVideoCatalog } from './src/lib/mobile-video-catalog.mjs';
 import { AdministratorAuthority } from './src/lib/sonuvi-admin-authority.mjs';
 import { DeviceSessionRegistry } from './src/lib/sonuvi-device-sessions.mjs';
+import { SonuviLogin, registerLoginRoutes } from './src/lib/sonuvi-login.mjs';
 import { buildAnimatedArtContext } from './src/lib/animated-art-context.mjs';
 import { UpnpControlPoint } from './src/lib/upnp-control-point.mjs';
 import { createUpnpPlaybackSessionManager } from './src/lib/upnp-playback-session.mjs';
@@ -9201,7 +9202,18 @@ registerArtRoutes(app, {
 });
 
 let mobileVibeStarter = null;
-const firstAdministratorAuthority = new AdministratorAuthority({ stateRoot: RUNTIME_STATE_PATHS.stateRoot });
+let sonuviLogin = null;
+const firstAdministratorAuthority = new AdministratorAuthority({
+  stateRoot: RUNTIME_STATE_PATHS.stateRoot,
+  verifyLoginSession: token => sonuviLogin?.verifyAdministratorSession(token),
+});
+if (deviceSessions && MOBILE_API_SECRET) {
+  sonuviLogin = new SonuviLogin({
+    directory: path.join(RUNTIME_STATE_PATHS.stateRoot, 'data', 'owner-login'),
+    authority: firstAdministratorAuthority, sessionRegistry: deviceSessions, apiSecret: MOBILE_API_SECRET,
+  });
+  registerLoginRoutes(app, { login: sonuviLogin, canonicalOrigin: process.env.SONUVI_CONTROLLER_WEB_ORIGIN || '' });
+}
 const runtimeBrowseIndex = createRuntimeBrowseIndexProvider({
   freshInstall: FRESH_INSTALL_MODE,
   getMpdBrowseIndex,

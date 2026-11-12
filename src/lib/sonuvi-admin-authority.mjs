@@ -34,6 +34,7 @@ function parseVerifier(value) {
     publicKey: text(value.publicKey),
     status: text(value.status),
     administratorId: text(value.administratorId) || null,
+    serverId: text(value.serverId) || `sonuvi-${digest(text(value.publicKey))}`,
   });
 }
 
@@ -47,9 +48,10 @@ function createMaterial() {
 
 /** Durable administrator authority is separate from mobile bearer and Track Key. */
 export class AdministratorAuthority {
-  constructor({ stateRoot, now = () => Date.now() } = {}) {
+  constructor({ stateRoot, now = () => Date.now(), verifyLoginSession = null } = {}) {
     this.root = absolute(stateRoot);
     this.now = now;
+    this.verifyLoginSession = verifyLoginSession;
     this.identityFile = path.join(this.root, 'protected', 'administrator-identity.json');
     this.keyFile = path.join(this.root, 'protected', 'administrator-signing.key');
     this.verifierFile = path.join(this.root, 'config', 'administrator-verifier.json');
@@ -89,7 +91,7 @@ export class AdministratorAuthority {
         });
       }
       if (verifier.status !== 'claimed' || verifier.administratorId !== existing.administratorId) {
-        await writeVerifier(this.verifierFile, { version: VERIFIER_VERSION, algorithm: TOKEN_ALGORITHM, publicKey: verifier.publicKey, status: 'claimed', administratorId: existing.administratorId });
+        await writeVerifier(this.verifierFile, { version: VERIFIER_VERSION, algorithm: TOKEN_ALGORITHM, publicKey: verifier.publicKey, serverId: verifier.serverId, status: 'claimed', administratorId: existing.administratorId });
       }
       return Object.freeze({ administratorId: existing.administratorId, role: existing.role, createdAt: existing.createdAt });
     }
@@ -106,7 +108,7 @@ export class AdministratorAuthority {
       enrollmentStatus: claimed.status,
     };
     await writePrivate(this.identityFile, identity);
-    await writeVerifier(this.verifierFile, { version: VERIFIER_VERSION, algorithm: TOKEN_ALGORITHM, publicKey: verifier.publicKey, status: 'claimed', administratorId: identity.administratorId });
+    await writeVerifier(this.verifierFile, { version: VERIFIER_VERSION, algorithm: TOKEN_ALGORITHM, publicKey: verifier.publicKey, serverId: verifier.serverId, status: 'claimed', administratorId: identity.administratorId });
     return Object.freeze({ administratorId: identity.administratorId, role: identity.role, createdAt: identity.createdAt });
   }
 
@@ -174,6 +176,7 @@ export class AdministratorAuthority {
       version: VERIFIER_VERSION,
       algorithm: TOKEN_ALGORITHM,
       publicKey: material.publicKey,
+      serverId: (await this.ownership()).serverId,
       status: 'claimed',
       administratorId: current.administratorId,
     });
@@ -199,7 +202,45 @@ export class AdministratorAuthority {
     return `${signed}.${signature}`;
   }
 
+  async ownership() {
+    const verifier = parseVerifier(await readJson(this.verifierFile));
+    return Object.freeze({
+      claimed: verifier.status === 'claimed' && Boolean(verifier.administratorId),
+      administratorId: verifier.administratorId,
+      serverId: verifier.serverId,
+      authorityGeneration: digest(verifier.publicKey),
+    });
+  }
+
   async verifyAccessToken(token) {
+    const rootClaims = await this.verifyRootAccessToken(token);
+    if (rootClaims) return rootClaims;
+    try { return this.verifyLoginSession ? await this.verifyLoginSession(token) : null; }
+    catch { return null; }
+  }
+
+  /** Root-only recovery after independently verified privileged host control. */
+  async recoverFromPrivilegedHost({ targetIdentity, administratorDeviceId, administratorPublicKey } = {}) {
+    const normalized = normalizeAdministratorPublicKey(administratorPublicKey);
+    const previous = await readJsonOrNull(this.identityFile);
+    const verifier = parseVerifier(await readJson(this.verifierFile));
+    if (previous && previous.targetIdentity !== targetIdentity) throw new Error('administrator_recovery_target_mismatch');
+    const administratorId = previous?.administratorId || `adm_${crypto.randomBytes(16).toString('base64url')}`;
+    const material = createMaterial();
+    await writePrivate(this.keyFile, { version: 1, algorithm: TOKEN_ALGORITHM, privateKey: material.privateKey });
+    await writePrivate(this.identityFile, {
+      version: 2, role: 'administrator', administratorId,
+      deviceId: administratorDeviceId, administratorPublicKey: normalized.spki,
+      publicKeyHash: digest(normalized.spki), targetIdentity,
+      createdAt: previous?.createdAt || new Date(this.now()).toISOString(),
+      recoveredAt: new Date(this.now()).toISOString(),
+      attemptId: previous?.attemptId || `recovery_${crypto.randomUUID()}`,
+    });
+    await writeVerifier(this.verifierFile, { version: VERIFIER_VERSION, algorithm: TOKEN_ALGORITHM, publicKey: material.publicKey, serverId: verifier.serverId, status: 'claimed', administratorId });
+    return { administratorId, administratorAccessToken: await this.issueAccessToken({ administratorId, ttlMs: 5 * 60 * 1000 }) };
+  }
+
+  async verifyRootAccessToken(token) {
     try {
       const [header, body, signature] = text(token).split('.');
       if (!header || !body || !signature) return null;

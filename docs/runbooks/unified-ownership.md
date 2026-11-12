@@ -40,12 +40,57 @@ devices are not enumerable until their first renewal. Legacy credentials are
 still replayable until their specific grant is revoked; legacy compatibility
 must not be described as proof-bound session rotation.
 
+## Current: root-bound direct login and host recovery
+
+`POST /v1/auth/configure` requires an existing root-issued administrator bearer.
+It establishes a username and a distinct Sonuvi password (12+ characters,
+maximum 1024 UTF-8 bytes), salted with 32 random bytes and hashed with scrypt
+N=32768/r=8/p=3. The private account file is bound to the existing owner and
+root authority generation. Neither SSH passwords nor root proof tokens are
+stored. Explicit `replace: true` revokes prior administrator login grants before
+committing a replacement. Account locks and generation checks reject stale
+in-flight logins. Normal controller credentials cannot configure an account.
+
+`POST /v1/auth/login` accepts username/password/deviceName and optional
+`controllerOnly: true`. Every login receives a server-generated device ID and
+independent revocable access/refresh grant. Normal owner login is an admin;
+controller-only login and existing pairing never confer admin. Access is
+15 minutes for an admin (including refresh); durable renewal remains separately
+revocable. The owner login currently supports one human account per Server;
+additional devices share that login, not each other's tokens.
+
+`GET /v1/auth/status` reports non-secret ownership/login availability and a
+stable Server ID. These routes accept TLS or the existing actual-loopback
+SSH/proxy boundary, never direct plaintext LAN requests or a spoofed forwarded
+header. Browser Origin checks precede credential use. Login attempts are
+bounded globally, per socket source and account; KDF concurrency is capped.
+Unknown-user and wrong-password responses use the same public error.
+
+The fixed root-only `scripts/sonuvi-owner-recovery.mjs` handles a lost original
+administrator key or an established host without Sonuvi ownership. Its bounded
+stdin request includes a fresh signed P-256 proof, nonce, expiry, and expected
+target identity. It independently derives the local target; rejects non-root,
+substituted/expired/replayed proof; rotates the root signing authority; and
+returns a five-minute ownership proof through private SSH stdout. There is no
+HTTP wrapper, no caller-supplied path/command and no unprivileged sudoers rule.
+Recovery preserves stable Server/owner identity but requires re-establishing
+the durable login against the new authority generation. Existing ordinary
+playback grants are not promoted or globally erased by this root operation.
+The CLI preserves root:sonuvi/0640 verifier access; protected keys remain root
+only. Invocation requires the existing installed layout and service account.
+
+Tests cover real root-bound account enrollment, no plaintext persisted
+credentials, separate devices, controller denial, credential replacement,
+in-flight login races, root revocation, rate limits, transport/origin rejection,
+lost-key recovery, identity preservation and replay rejection. These are local
+fixtures, not host deployment acceptance.
+
 ## Approved target, not implemented here yet
 
-Durable Sonuvi username/password login; root-authorized first account setup and
-recovery; role-scoped device login; iOS Bonjour/direct login and automatic
+iOS Bonjour/direct login and automatic
 post-install enrollment; TV discovery and local secure destination handoff;
-browser login and administrator device UI. Root signer, installer host-key
+browser login and administrator device UI; native integration of fixed host
+recovery and first-account configuration. Root signer, installer host-key
 pinning, release verification, privilege checks and ownership remain boundaries.
 
 Universal Links are not operational: the audited iOS entitlement lacks

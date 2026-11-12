@@ -2336,12 +2336,14 @@ export function registerMobileRoutes(app, deps = {}) {
     const sessionId = sessionRegistry
       ? (renewalClaims ? sessionRegistry.renew(renewalClaims) : sessionRegistry.authorize(deviceId))
       : undefined;
+    const accessTTL = renewalClaims && sessionRegistry?.administratorFor({ ...renewalClaims, sid: sessionId })
+      ? 15 * 60 * 1000 : SESSION_TTL_MS;
     return {
-      accessToken: createMobileSessionToken({ secret: apiSecret, deviceId, sessionId, ttlMs: SESSION_TTL_MS, now: issuedAt }),
+      accessToken: createMobileSessionToken({ secret: apiSecret, deviceId, sessionId, ttlMs: accessTTL, now: issuedAt }),
       refreshToken: persistentControllerRefresh
         ? createPersistentControllerRefreshToken({ secret: apiSecret, deviceId, sessionId, now: issuedAt })
         : createPersistentMobileRefreshToken({ secret: apiSecret, deviceId, sessionId, now: issuedAt }),
-      expiresAt: new Date(issuedAt + SESSION_TTL_MS).toISOString(),
+      expiresAt: new Date(issuedAt + accessTTL).toISOString(),
       deviceId,
     };
   };

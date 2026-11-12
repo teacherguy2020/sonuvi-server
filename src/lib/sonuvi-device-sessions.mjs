@@ -10,7 +10,8 @@ const identifier = () => crypto.randomBytes(32).toString('base64url');
 
 /**
  * Durable device grants, shared by all API verification boundaries. This store
- * never grants administrator authority and never stores bearer/refresh tokens.
+ * stores only server-selected roles and never stores bearer/refresh tokens.
+ * Its administrator binding must come from verified owner login, not pairing.
  * Legacy signed credentials remain controller-only until authenticated renewal.
  * Tombstones are permanent: legacy credentials cannot resurrect revoked grants.
  * Each operation rereads disk, so revocation is visible across API processes.
@@ -60,7 +61,8 @@ export class DeviceSessionRegistry {
         if (!validId(entry?.deviceId) || !validSession(entry?.sessionId) || seen.has(entry.deviceId)
             || !['active', 'revoked'].includes(entry.status) || typeof entry.allowLegacy !== 'boolean'
             || !Number.isFinite(entry.createdAt) || !Number.isFinite(entry.updatedAt)
-            || entry.role !== 'controller') throw new Error('device_session_state_invalid');
+            || !['controller', 'administrator'].includes(entry.role)
+            || (entry.role === 'administrator' && !validId(entry.administratorId))) throw new Error('device_session_state_invalid');
         seen.add(entry.deviceId);
       }
       return state.devices;
@@ -105,11 +107,14 @@ export class DeviceSessionRegistry {
   }
 
   /** Call only AFTER independent pairing/login authorization, never on refresh. */
-  authorize(deviceId) {
+  authorize(deviceId, { administratorId, label = '' } = {}) {
     if (!validId(deviceId)) throw new Error('device_session_id_invalid');
+    if (administratorId !== undefined && !validId(administratorId)) throw new Error('device_session_owner_invalid');
+    if (typeof label !== 'string' || label.length > 120 || /[\x00-\x1f\x7f]/.test(label)) throw new Error('device_session_label_invalid');
     return this.mutate(devices => {
       const old = devices.find(item => item.deviceId === deviceId);
-      const record = { deviceId, sessionId: identifier(), role: 'controller', status: 'active', allowLegacy: false, createdAt: this.now(), updatedAt: this.now() };
+      const record = { deviceId, sessionId: identifier(), role: administratorId ? 'administrator' : 'controller', ...(administratorId ? { administratorId } : {}), label, status: 'active', allowLegacy: false, createdAt: this.now(), updatedAt: this.now() };
+      if (old) delete old.administratorId;
       if (old) Object.assign(old, record); else devices.push(record);
       return record.sessionId;
     });
@@ -145,6 +150,19 @@ export class DeviceSessionRegistry {
   }
 
   list() {
-    return this.read().map(({ deviceId, role, status, createdAt, updatedAt }) => ({ deviceId, role, status, createdAt, updatedAt }));
+    return this.read().map(({ deviceId, label, role, status, createdAt, updatedAt }) => ({ deviceId, label, role, status, createdAt, updatedAt }));
+  }
+
+  administratorFor(claims) {
+    if (!this.accepts(claims) || !claims.sid) return null;
+    const record = this.read().find(item => item.deviceId === claims.deviceId && item.sessionId === claims.sid && item.status === 'active');
+    return record?.role === 'administrator' ? record.administratorId : null;
+  }
+
+  revokeAdministrator(administratorId) {
+    if (!validId(administratorId)) throw new Error('device_session_owner_invalid');
+    this.mutate(devices => {
+      for (const record of devices) if (record.administratorId === administratorId) Object.assign(record, { status: 'revoked', allowLegacy: false, updatedAt: this.now() });
+    });
   }
 }
