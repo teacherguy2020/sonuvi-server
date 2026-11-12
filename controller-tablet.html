@@ -5827,26 +5827,51 @@
     let tracking = false;
     let armed = false;
     const THRESH = 80;
+    const reset = () => {
+      startY = 0;
+      tracking = false;
+      armed = false;
+    };
+    const isLibraryNavigation = (target) => {
+      if (!target) return false;
+      if (typeof target.closest === "function") return Boolean(target.closest("#libraryList"));
+      let current = target;
+      while (current) {
+        if (current.id === "libraryList") return true;
+        current = current.parentElement;
+      }
+      return false;
+    };
     const topScrollable = () => {
       const el = document.scrollingElement || document.documentElement || document.body;
       return ((el == null ? void 0 : el.scrollTop) || window.pageYOffset || 0) <= 0;
     };
     window.addEventListener("touchstart", (e) => {
-      if (!e.touches || e.touches.length !== 1) return;
-      if (!topScrollable()) return;
+      // The landscape library is its own scroll surface. Its gestures must
+      // never become a document pull-to-refresh gesture, including at edges.
+      if (isLibraryNavigation(e.target) || !e.touches || e.touches.length !== 1 || !topScrollable()) {
+        reset();
+        return;
+      }
       startY = e.touches[0].clientY;
       tracking = true;
       armed = false;
     }, { passive: true });
     window.addEventListener("touchmove", (e) => {
-      if (!tracking || !e.touches || e.touches.length !== 1) return;
+      const inLibraryNavigation = isLibraryNavigation(e.target);
+      if (inLibraryNavigation || !tracking || !e.touches || e.touches.length !== 1) {
+        if (inLibraryNavigation || (!e.touches || e.touches.length !== 1)) reset();
+        return;
+      }
       const dy = e.touches[0].clientY - startY;
       if (dy > THRESH && topScrollable()) armed = true;
     }, { passive: true });
     window.addEventListener("touchend", () => {
       if (tracking && armed) location.reload();
-      tracking = false;
-      armed = false;
+      reset();
+    }, { passive: true });
+    window.addEventListener("touchcancel", () => {
+      reset();
     }, { passive: true });
   })();
 })();
