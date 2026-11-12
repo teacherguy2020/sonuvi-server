@@ -609,6 +609,52 @@
     :is(body.ipad11Landscape, body.tabletLandscape) .npCtrls .ctl svg{width:var(--np-ctl-icon) !important;height:var(--np-ctl-icon) !important}
     :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape, body.ipad11Landscape, body.tabletLandscape, body.ipadModern, body.ipadAir) .npCtrls .ctl.on{background:rgba(22,163,74,.62)!important;box-shadow:0 0 0 1px rgba(34,197,94,.72),0 0 20px rgba(34,197,94,.50),0 5px 14px rgba(0,0,0,.34)!important;color:#eaffef!important;border-color:rgba(74,222,128,.78)!important}
     :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape, body.ipad11Landscape, body.tabletLandscape, body.ipadModern, body.ipadAir) .npCtrls .ctl.confirm{background:rgba(22,163,74,.68)!important;box-shadow:0 0 0 1px rgba(74,222,128,.80),0 0 22px rgba(74,222,128,.58),0 6px 16px rgba(0,0,0,.34)!important}
+    /* Final native tablet geometry: the rendered, square card owns its grid column. */
+    :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape){--tablet-np-source-width:clamp(300px,31vw,390px);--tablet-np-card-size:clamp(284.625px,29.41125vw,370.0125px);--tablet-np-gap:10px}
+    :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) #kioskCanvas{grid-template-columns:var(--tablet-np-card-size) minmax(0,1fr);grid-template-rows:var(--tablet-np-card-size) auto minmax(0,1fr);grid-template-areas:'np recent' 'quick recent' 'list recent';column-gap:var(--tablet-np-gap);row-gap:0;max-height:none}
+    :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) .npTap{width:var(--tablet-np-card-size);height:var(--tablet-np-card-size);min-height:0;max-height:none}
+    :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) .npTap .card{width:100%;height:100%;padding:10px}
+    :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) .npTap .title{display:none !important}
+    :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) .np{width:100%;height:100%;grid-template-columns:minmax(0,3fr) minmax(0,2fr) !important;grid-template-rows:minmax(0,1fr) auto auto;grid-template-areas:'art ctrls' 'prog prog' 'meta meta';column-gap:8px;row-gap:6px}
+    :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) .artWrap,:is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) .np img{width:100% !important;height:auto !important;aspect-ratio:1/1}
+    :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) .npCtrls{height:var(--np-art-live,100%) !important;min-height:0}
+    :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) .npMeta{padding-top:0;margin:0;min-height:0}
+    :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) #line1{font-size:clamp(18px,1.9vw,23px);line-height:1.08;transform:none}
+    :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) #line2Wrap{transform:none;gap:5px}
+    :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) #line2{font-size:clamp(13px,1.35vw,16px);line-height:1.13}
+    :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) #line3{font-size:clamp(12px,1.2vw,14px);line-height:1.14;transform:none}
+    :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) .quickWrap,:is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) #libraryList{width:var(--tablet-np-card-size)}
+    :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) .quickWrap{margin:10px 0 0}
+    :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) #libraryList{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:minmax(0,1fr);gap:0 8px;padding:0 0 8px;overflow:visible;justify-content:stretch}
+    :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) #libraryList .row{min-width:0;grid-template-columns:24px minmax(0,1fr) 12px;gap:5px;padding:5px 2px;align-self:stretch}
+    :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) #libraryList .row .lbl{font-size:clamp(13px,1.45vw,17px);line-height:1.06;white-space:normal}
+    :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) #libraryList .row .ico,:is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) #libraryList .row .ico svg{width:20px;height:20px}
+    :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) #libraryList .rowWrap{min-width:0;overflow:visible}
+
+    /* Portrait keeps the same reduced native card and lets the complete page scroll. */
+    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)){--tablet-portrait-card-size:calc(82.5vw - 19.8px);height:auto;min-height:100dvh;overflow-x:clip;overflow-y:auto}
+    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) #kioskCanvas{display:flex;height:auto;min-height:0;grid-template-rows:none;flex-direction:column;gap:10px;overflow:visible}
+    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .npTap,:is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .quickWrap,:is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) #libraryList,:is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .recentWrap{width:min(100%,var(--tablet-portrait-card-size));margin-left:auto;margin-right:auto}
+    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .npTap{height:var(--tablet-portrait-card-size);max-height:none}
+    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .npTap .card{width:100%;height:100%;padding:10px}
+    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .np{width:100%;height:100%;grid-template-columns:minmax(0,3fr) minmax(0,2fr) !important;grid-template-rows:minmax(0,1fr) auto auto;grid-template-areas:'art ctrls' 'prog prog' 'meta meta';column-gap:8px;row-gap:6px}
+    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .np > .artWrap{grid-area:art}
+    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .artWrap,:is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .np img{width:100% !important;height:auto !important;aspect-ratio:1/1}
+    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .npCtrls{grid-area:ctrls;position:static !important;display:grid !important;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:minmax(34px,1fr);gap:6px;width:100%;height:100%;padding:0 !important;background:transparent !important;border:0 !important}
+    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .npCtrls .ctl{width:100% !important;height:100% !important;min-width:34px !important;min-height:34px !important}
+    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .npCtrls .ctl svg{width:clamp(14px,2.4vw,22px) !important;height:clamp(14px,2.4vw,22px) !important}
+    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .npCtrls .ctlPause,:is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .npCtrls .ctlPlay{display:grid}
+    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .npCtrls .ctlToggle{display:none}
+    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .np > .npProgress{grid-area:prog;width:100%;margin:2px 0 0 !important}
+    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .np > .npMeta{grid-area:meta;width:100%;padding-top:0;margin:0;min-height:0}
+    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .quickWrap{height:auto;margin-top:0}
+    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) #libraryList{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 8px;overflow:visible}
+    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) #libraryList .row{min-width:0}
+    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .recentWrap{overflow:visible}
+    @media (max-width:540px){
+      :is(body.ipad11, body.tablet) #libraryList{grid-template-columns:1fr}
+      :is(body.ipad11, body.tablet) #libraryList .row{min-height:42px}
+    }
 
     @keyframes navForwardOut{
       from{transform:translateX(0);opacity:1}
