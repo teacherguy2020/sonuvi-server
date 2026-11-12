@@ -611,7 +611,7 @@
     :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape, body.ipad11Landscape, body.tabletLandscape, body.ipadModern, body.ipadAir) .npCtrls .ctl.confirm{background:rgba(22,163,74,.68)!important;box-shadow:0 0 0 1px rgba(74,222,128,.80),0 0 22px rgba(74,222,128,.58),0 6px 16px rgba(0,0,0,.34)!important}
     /* Final native tablet geometry: the rendered, square card owns its grid column. */
     :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape){--tablet-np-source-width:clamp(300px,31vw,390px);--tablet-np-card-size:clamp(284.625px,29.41125vw,370.0125px);--tablet-np-gap:10px}
-    :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) #kioskCanvas{grid-template-columns:var(--tablet-np-card-size) minmax(0,1fr);grid-template-rows:var(--tablet-np-card-size) auto minmax(0,1fr);grid-template-areas:'np recent' 'quick recent' 'list recent';column-gap:var(--tablet-np-gap);row-gap:0;max-height:none}
+    :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) #kioskCanvas{grid-template-columns:var(--tablet-np-card-size) minmax(0,1fr);grid-template-rows:var(--tablet-np-card-size) auto minmax(0,1fr);grid-template-areas:'np recent' 'quick recent' 'list recent';column-gap:var(--tablet-np-gap);row-gap:0;height:calc(100dvh - 44px);max-height:calc(100dvh - 44px);min-height:0;overflow:hidden}
     :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) .npTap{width:var(--tablet-np-card-size);height:var(--tablet-np-card-size);min-height:0;max-height:none}
     :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) .npTap .card{width:100%;height:100%;padding:10px}
     :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) .npTap .title{display:none !important}
@@ -625,11 +625,15 @@
     :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) #line3{font-size:clamp(12px,1.2vw,14px);line-height:1.14;transform:none}
     :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) .quickWrap,:is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) #libraryList{width:var(--tablet-np-card-size)}
     :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) .quickWrap{margin:10px 0 0}
-    :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) #libraryList{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:minmax(0,1fr);gap:0 8px;padding:0 0 8px;overflow:visible;justify-content:stretch}
+    /* The landscape library remains its own touch scroll region when the short
+       Safari viewport cannot fit all two-column rows. Do not fraction-shrink
+       these rows: their 44px minimum keeps every target readable and tappable. */
+    :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) #libraryList{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:minmax(44px,auto);gap:0 8px;padding:0 0 8px;min-height:0;overflow-x:hidden;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain;touch-action:pan-y;align-content:start;justify-content:stretch}
     :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) #libraryList .row{min-width:0;grid-template-columns:24px minmax(0,1fr) 12px;gap:5px;padding:5px 2px;align-self:stretch}
     :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) #libraryList .row .lbl{font-size:clamp(13px,1.45vw,17px);line-height:1.06;white-space:normal}
     :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) #libraryList .row .ico,:is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) #libraryList .row .ico svg{width:20px;height:20px}
     :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) #libraryList .rowWrap{min-width:0;overflow:visible}
+    :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) #libraryList .homeRow:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 
     /* Portrait keeps the same reduced native card and lets the complete page scroll. */
     :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)){--tablet-portrait-card-size:calc(82.5vw - 19.8px);height:auto;min-height:100dvh;overflow-x:clip;overflow-y:auto}
@@ -774,6 +778,7 @@
   </div>
 
   <ul class="list" id="libraryList">
+    <li class="row homeRow is-open" data-home="true" role="button" tabindex="0" aria-current="page"><span class="ico" aria-hidden="true">⌂</span><span class="lbl">Home</span><span class="chev" aria-hidden="true">›</span></li>
     <li class="row" data-page="kiosk-playlists.html"><span class="ico">♫</span><span class="lbl">Playlists</span><span class="chev">›</span></li>
     <li class="row" data-page="kiosk-artists.html"><span class="ico ico-mic" aria-hidden="true"></span><span class="lbl">Artists</span><span class="chev">›</span></li>
     <li class="row" data-page="kiosk-albums.html"><span class="ico ico-album" aria-hidden="true"></span><span class="lbl">Albums</span><span class="chev">›</span></li>
@@ -3415,8 +3420,18 @@
   }
   function setOpenNavRow(page) {
     const p = String(page || "").trim();
+    const homeRow = document.querySelector('.row[data-home="true"]');
+    const isHome = !p;
+    if (homeRow) {
+      homeRow.classList.toggle("is-open", isHome);
+      if (isHome) homeRow.setAttribute("aria-current", "page");
+      else homeRow.removeAttribute("aria-current");
+    }
     document.querySelectorAll(".row[data-page]").forEach((r) => {
-      r.classList.toggle("is-open", !!p && String(r.getAttribute("data-page") || "").trim() === p);
+      const isOpen = !!p && String(r.getAttribute("data-page") || "").trim() === p;
+      r.classList.toggle("is-open", isOpen);
+      if (isOpen) r.setAttribute("aria-current", "page");
+      else r.removeAttribute("aria-current");
     });
   }
   function shouldOpenInRightPane() {
@@ -5517,7 +5532,13 @@
       tracking = false;
       const dx = ex - sx;
       const dy = ey - sy;
-      if (Math.abs(dy) > 24 && Math.abs(dy) > Math.abs(dx)) return;
+      if (Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx)) {
+        suppressClick = true;
+        setTimeout(() => {
+          suppressClick = false;
+        }, 450);
+        return;
+      }
       if (dx <= -26) {
         liveQueueRowWrap.classList.add("swiped");
         suppressClick = true;
@@ -5610,6 +5631,19 @@
     setOpenNavRow("");
     syncPaneUrlParam("", { genre: "" });
   };
+  const homeNavRow = document.querySelector('.row[data-home="true"]');
+  const returnToTabletHome = () => {
+    closeLibraryRowSwipes();
+    closeKioskPane();
+  };
+  if (homeNavRow) {
+    homeNavRow.addEventListener("click", returnToTabletHome);
+    homeNavRow.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Enter" && ev.key !== " ") return;
+      ev.preventDefault();
+      returnToTabletHome();
+    });
+  }
   function prewarmPaneRoute(page) {
     try {
       if (!shouldOpenInRightPane()) return;

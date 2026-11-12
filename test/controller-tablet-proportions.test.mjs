@@ -20,6 +20,18 @@ test('tablet shell assigns the rendered card, search, and navigation the same co
   assert.match(page, /#libraryList\{display:grid;grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
 });
 
+test('tablet landscape navigation has an accessible Home row and scrolls without shrinking targets', () => {
+  const landscape = page.match(/\/\* Final native tablet geometry[\s\S]*?(?=\n    \/\* Portrait keeps)/)?.[0] ?? '';
+
+  assert.match(page, /<li class="row homeRow is-open" data-home="true" role="button" tabindex="0" aria-current="page">[\s\S]*?<span class="lbl">Home<\/span>/);
+  assert.match(landscape, /height:calc\(100dvh - 44px\);max-height:calc\(100dvh - 44px\);min-height:0;overflow:hidden/);
+  assert.match(landscape, /grid-template-columns:repeat\(2,minmax\(0,1fr\)\);grid-auto-rows:minmax\(44px,auto\)/);
+  assert.match(landscape, /overflow-x:hidden;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain;touch-action:pan-y/);
+  assert.doesNotMatch(landscape, /grid-auto-rows:minmax\(0,1fr\)/);
+  assert.match(page, /const returnToTabletHome = \(\) => \{[\s\S]*?closeKioskPane\(\);/);
+  assert.match(page, /homeNavRow\.addEventListener\("keydown",[\s\S]*?ev\.key !== "Enter" && ev\.key !== " "/);
+});
+
 test('tablet portrait uses the reduced square with a scrolling page fallback', () => {
   assert.match(page, /--tablet-portrait-card-size:calc\(82\.5vw - 19\.8px\)/);
   assert.match(page, /overflow-y:auto/);
