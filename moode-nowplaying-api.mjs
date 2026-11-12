@@ -9227,7 +9227,7 @@ if (deviceSessions && MOBILE_API_SECRET) {
   });
 }
 const runtimeBrowseIndex = createRuntimeBrowseIndexProvider({
-  freshInstall: FRESH_INSTALL_MODE,
+  freshInstall: FRESH_INSTALL_MODE && process.env.SONUVI_MUSIC_CONFIGURED !== '1',
   getMpdBrowseIndex,
   getMpdBrowseIndexStatus,
 });

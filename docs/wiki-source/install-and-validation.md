@@ -343,3 +343,31 @@ can follow creation of the kit and public trust anchor; do not blindly retry or
 erase that state. Test and retain an offline clean checkpoint before mutation.
 
 Last updated: 2026-11-12.
+
+## Guided music setup — 2026-11-12 candidate
+
+Server installation and music readiness are distinct. After owner enrollment,
+the native installer discovers `moode.local` and bounded `_mpd._tcp` LAN
+advertisements from the Server, with manual private-LAN address/MPD port entry.
+The listener chooses a player and one SMB music share, checks sample files as
+the Sonuvi service account, then explicitly confirms read-only connection and
+catalog import. Additional tracks on other storage are reported and excluded;
+the selected share's podcasts remain available through the podcast projection.
+
+The fixed `sonuvi-music-setup.mjs` command requires sudo over pinned SSH and
+rechecks the machine-derived target identity. It accepts no commands, paths,
+mount flags or service names. SMB credentials, when needed, go only through
+stdin and protected root-only files; guest access is supported. CIFS mounts
+use SMB3, `ro,nosuid,nodev,noexec` and the service UID/GID. Only the fixed Sonuvi
+mount unit, root-managed environment/drop-in and sanitized setup status are
+created. Existing host setup is not overwritten; a partial apply is not blindly
+replayed. moOde settings, queue, media files and remote SSH authorization are
+not changed. HTTPS identity, owner accounts and controller grants are retained.
+
+The configured catalog is activated only after file verification and index
+creation. Status rechecks the actual read-only mount and player/file access;
+zero tracks is not reported as music-ready. The Settings music-setup entry
+continues setup after closing the installer. Multi-share aggregation, SMB1,
+remote storage administration and automatic rollback of partial host setup are
+not implemented. Existing production installations retain their prior catalog
+behavior unless this explicit setup is completed.

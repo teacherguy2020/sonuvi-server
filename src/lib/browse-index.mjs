@@ -128,7 +128,7 @@ export function createBrowseIndexAdapter({
   qualityBatchSize = 24,
   qualityBatchDelayMs = 1_000,
   schedule = setTimeout,
-  mpdPort = 6600,
+  mpdPort = Number(process.env.MPD_PORT || 6600),
   readMpdRaw = mpdQueryRawAt,
 } = {}) {
   const indexPath = String(statePaths?.browseIndexPath || '').trim();
@@ -203,7 +203,7 @@ export function createBrowseIndexAdapter({
 
   async function getMpdDbUpdateIso(mpdHost = 'moode.local') {
     try {
-      const { stdout } = await runExecFile('mpc', ['-h', String(mpdHost || 'moode.local'), 'stats'], {
+      const { stdout } = await runExecFile('mpc', ['-h', String(mpdHost || 'moode.local'), '-p', String(mpdPort), 'stats'], {
         maxBuffer: 2 * 1024 * 1024,
         timeout: 8000,
       });
@@ -240,7 +240,7 @@ export function createBrowseIndexAdapter({
       getMpdFileRevisions(mpdHost),
     ]);
     const fmt = '%file%\t%artist%\t%albumartist%\t%album%\t%title%\t%track%\t%genre%\t%time%\t%MUSICBRAINZ_TRACKID%\t%MUSICBRAINZ_ALBUMID%\t%MUSICBRAINZ_ARTISTID%';
-    const { stdout } = await runExecFile('mpc', ['-h', String(mpdHost || 'moode.local'), '-f', fmt, 'listall'], {
+    const { stdout } = await runExecFile('mpc', ['-h', String(mpdHost || 'moode.local'), '-p', String(mpdPort), '-f', fmt, 'listall'], {
       maxBuffer: 96 * 1024 * 1024,
     });
     const previousByFile = new Map((Array.isArray(previousIndex?.tracks) ? previousIndex.tracks : [])
@@ -257,6 +257,7 @@ export function createBrowseIndexAdapter({
       const [file = '', artistRaw = '', albumArtistRaw = '', albumRaw = '', titleRaw = '', trackRaw = '', genreRaw = '', timeRaw = '', mbTrackRaw = '', mbAlbumRaw = '', mbArtistRaw = ''] = ln.split('\t');
       const filePath = String(file || '').trim();
       if (!filePath) continue;
+      if (process.env.SONUVI_MUSIC_CONFIGURED === '1' && !filePath.startsWith(process.env.MOODE_USB_PREFIX ?? '')) continue;
 
       const artist = String(artistRaw || albumArtistRaw || '').trim();
       const albumArtist = String(albumArtistRaw || artistRaw || '').trim();

@@ -58,7 +58,7 @@ fi
 
 dependencies_ready=true
 [ "$node_state" = compatible ] || dependencies_ready=false
-for executable in ffmpeg ffprobe metaflac curl ssh scp mpc openssl avahi-publish-service avahi-publish-address; do
+for executable in ffmpeg ffprobe metaflac curl ssh scp mpc openssl avahi-publish-service avahi-publish-address smbclient mount.cifs; do
   command -v "$executable" >/dev/null 2>&1 || dependencies_ready=false
 done
 /usr/bin/python3 -c 'import mpd, mutagen, requests' >/dev/null 2>&1 || dependencies_ready=false
@@ -153,13 +153,13 @@ fi
 /usr/bin/apt-get update
 /usr/bin/apt-get install --yes --no-install-recommends \
   nodejs ffmpeg python3 python3-mpd python3-mutagen python3-requests \
-  mpc flac curl openssh-client openssl avahi-daemon avahi-utils
+  mpc flac curl openssh-client openssl avahi-daemon avahi-utils cifs-utils smbclient
 if ! /usr/bin/node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 20 || (major === 20 && minor >= 9) ? 0 : 1);'; then
   echo 'configured Debian repositories do not provide the required Node 20.9+ runtime' >&2
   exit 80
 fi
 /usr/bin/node --version
 /usr/bin/python3 -c 'import mpd, mutagen, requests'
-for executable in ffmpeg ffprobe metaflac curl ssh scp mpc openssl avahi-publish-service avahi-publish-address; do
+for executable in ffmpeg ffprobe metaflac curl ssh scp mpc openssl avahi-publish-service avahi-publish-address smbclient mount.cifs; do
   command -v "$executable" >/dev/null 2>&1 || { echo "required executable is unavailable: $executable" >&2; exit 83; }
 done

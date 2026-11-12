@@ -78,7 +78,7 @@ export const PUBLIC_BASE_URL =
 export const MPD_HOST = process.env.MPD_HOST || mpdCfg?.host || MOODE_SSH_HOST || 'moode.local';
 export const MPD_PORT = Number(process.env.MPD_PORT || mpdCfg?.port || '6600');
 
-export const MOODE_USB_PREFIX =
+export const MOODE_USB_PREFIX = process.env.SONUVI_MUSIC_CONFIGURED === '1' ? (process.env.MOODE_USB_PREFIX ?? '') :
   process.env.MOODE_USB_PREFIX ||
   (MASTER_CONFIG?.paths?.moodeUsbMount
     ? `USB/${String(MASTER_CONFIG.paths.moodeUsbMount).split('/').filter(Boolean).slice(-1)[0] || 'SamsungMoode'}/`
