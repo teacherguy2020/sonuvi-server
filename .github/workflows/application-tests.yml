@@ -1,0 +1,42 @@
+name: Server Application Tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - 'ci/application-tests-*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: application-tests-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Application test suite
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run Node application tests
+        run: npm test
+
+      - name: Run pure-Python Vibe planner tests
+        run: npm run test:vibe-planner
