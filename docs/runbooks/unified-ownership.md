@@ -1,6 +1,8 @@
 # Unified ownership implementation ledger
 
 Updated: 2026-11-12. This branch is development-only. No deployment authorized.
+Brian separately authorized a ready iPad candidate installation; Server/VM/Pi
+deployment and release-endpoint publication remain excluded.
 
 ## Current: revocable controller session foundation
 
@@ -117,6 +119,23 @@ no authority. The private-browser fallback runs separately on port 8444 and
 requires explicit browser root trust; native pinning does not grant Safari
 trust. Never bypass a certificate warning or submit passwords over HTTP.
 
+Authenticated browsers also inspect/approve short-lived native TV presentations
+through `/__controller/device-pairings/:id` and `/:id/approve` (or reject), with
+the existing Server proof, comparison code and CSRF checks. A browser does not
+need to have created the TV request and never receives the TV poll token or
+resulting credential. A non-secret `#pair-tv=<presentationId>` link pre-fills
+the browser review UI; it does not authenticate or authorize anyone.
+
+`GET /v1/auth/local-trust` requires Server-verified administrator access and
+exports only the public trust record plus its complete certificate SHA-256.
+The browser exposes it through authenticated `/__controller/local-trust` and
+**Local device trust**. An additional native client can import the record and
+independently compare the complete fingerprint on that already-trusted browser.
+This supports exceptional TV recovery without a signed-in iPhone. The public
+document grants neither ownership nor a device session; browser approval is
+still required. Never obtain the comparison fingerprint from the same untrusted
+discovery or certificate-warning screen being enrolled.
+
 ## Approved public browser path and remaining integration
 
 Public per-Server HTTPS under a Sonuvi-controlled domain is the preferred
@@ -138,9 +157,10 @@ native LAN operation without weakening TLS. One home router accepted an
 independent public test name returning a private address; that is not proof
 of all routers or the future Sonuvi service.
 
-TV discovery/local secure handoff, native fixed host recovery UI, public
-certificate renewal/service integration and four-journey physical acceptance
-remain to be completed. Root signer, installer host-key pinning, signed release
+TV discovery/local secure handoff is implemented on the coordinated native
+branches using a short-lived TLS-PSK channel and existing Server presentations.
+Native fixed host recovery UI, public certificate renewal/service integration
+and four-journey physical acceptance remain open. Root signer, installer host-key pinning, signed release
 verification, sudo and immutable activation remain unchanged boundaries.
 
 Universal Links are not operational: the audited iOS entitlement lacks
@@ -157,8 +177,10 @@ admin routes and unaffected second-device renewal. Full source tests and Linux
 ownership fixture results are recorded in the task evidence, not inferred from
 deployment history. No physical-client or four-journey acceptance is claimed.
 
-2026-11-12 local TLS/web regression: 773 tests, 762 passed, 7 skipped, 4 macOS
+2026-11-12 final local TLS/web regression: 774 tests, 763 passed, 7 skipped, 4 macOS
 chown fixture failures also present on baseline. Those four passed in a
 read-only, network-disabled Linux container. Subsequent focused TLS/browser
 integration: 9/9 passed, including real TLS handshake, hostname/Host rejection,
 explicit private browser root trust, session restart and independent revocation.
+Browser-TV approval and public trust export also passed real API/gateway
+fixtures. Latest full log: `server-final-regression-2.log` in task evidence.

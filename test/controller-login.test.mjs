@@ -4,11 +4,13 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
+import crypto from 'node:crypto';
 import express from 'express';
 import { SonuviLogin, registerLoginRoutes } from '../src/lib/sonuvi-login.mjs';
 import { DeviceSessionRegistry } from '../src/lib/sonuvi-device-sessions.mjs';
 import { registerMobileRoutes } from '../src/routes/mobile.routes.mjs';
 import { createControllerWebGateway } from '../src/lib/controller-web-gateway.mjs';
+import { reversePairingProofMessage } from '../src/lib/mobile-pairing.mjs';
 import { listen, close } from './helpers/controller-stack.mjs';
 
 test('normal browser login has private cookies, survives restart and revokes only its own device; admin management stays authorized',async t=>{
@@ -22,7 +24,8 @@ test('normal browser login has private cookies, survives restart and revokes onl
   const apiSecret='fixture-api-secret';
   login=new SonuviLogin({directory:path.join(root,'login'),authority,sessionRegistry:registry,apiSecret});
   await login.configure({administratorToken:'fixture-root',username:'owner',password:'fixture-password-long'});
-  const app=express();app.use(express.json());registerLoginRoutes(app,{login});
+  const trustFixture={contract:'sonuvi.local-tls-trust.v1',serverId:owner.serverId,origin:'https://fixture.local:8443',anchorDER:Buffer.from('fixture-public-certificate').toString('base64')};
+  const app=express();app.use(express.json());registerLoginRoutes(app,{login,localTrust:async()=>trustFixture});
   registerMobileRoutes(app,{enabled:true,apiSecret,trackIdSecret:'fixture-track-secret',sessionRegistry:registry,administratorAuthority:authority,getBrowseIndex:async()=>({tracks:[]})});
   const api=http.createServer(app);await listen(api);t.after(()=>close(api));
   const createWeb=()=>{const gateway=createControllerWebGateway({origin:'https://controller.test',apiPort:api.address().port,trustLoopbackProxy:true,sessionFile:path.join(root,'browser.json')});return http.createServer((req,res)=>gateway(req,res));};
@@ -34,14 +37,36 @@ test('normal browser login has private cookies, survives restart and revokes onl
   });
   const signIn=()=>request('login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:'owner',password:'fixture-password-long'})});
   assert.equal((await request('devices')).status,401);
+  assert.equal((await request('local-trust')).status,401);
   assert.equal((await request('login',{method:'POST',headers:{origin:'https://evil.test','content-type':'application/json'},body:'{}'})).status,403);
   const first=await signIn();assert.equal(first.status,200);const body=await first.json();
   assert.equal(body.accessToken,undefined);assert.equal(body.refreshToken,undefined);assert.equal(body.role,'administrator');
   const header=first.headers.getSetCookie()[0];assert.match(header,/HttpOnly/);assert.match(header,/Secure/);assert.match(header,/SameSite=Strict/);
   const cookie=header.split(';')[0];
+  const exported=await (await request('local-trust',{headers:{cookie}})).json();
+  assert.deepEqual(exported.localTrust,trustFixture);
+  assert.equal(exported.fingerprint,crypto.createHash('sha256').update('fixture-public-certificate').digest('hex'));
   const second=await signIn();assert.equal(second.status,200);const secondBody=await second.json();const secondCookie=second.headers.getSetCookie()[0].split(';')[0];
   const devices=await (await request('devices',{headers:{cookie}})).json();assert.equal(devices.devices.length,2);
   assert.ok(devices.devices.every(device=>device.role==='administrator'));
+  // A browser can approve a TV presentation it did not create. TV retains
+  // its own poll proof; browser never obtains the resulting TV credential.
+  const apiRequest=async(route,options={})=>fetch(`http://127.0.0.1:${api.address().port}${route}`,options);
+  const start=await (await apiRequest('/v1/mobile/pairing/presentations',{method:'POST'})).json();
+  const keys=crypto.generateKeyPairSync('ec',{namedCurve:'prime256v1'});
+  const tv={deviceId:'tv-browser-fallback-fixture',deviceName:'Fixture Apple TV',deviceModel:'Apple TV'};
+  const message=reversePairingProofMessage({...tv,presentationId:start.presentationId,challenge:start.challenge});
+  const attested=await (await apiRequest(`/v1/mobile/pairing/presentations/${start.presentationId}/attest`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({...tv,publicKey:keys.publicKey.export({format:'der',type:'spki'}).toString('base64url'),signature:crypto.sign('sha256',Buffer.from(message),keys.privateKey).toString('base64url'),signatureAlgorithm:'ecdsa-p256-sha256'})})).json();
+  const tvPath='device-pairings/'+start.presentationId;
+  assert.equal((await request(tvPath)).status,401);
+  const inspected=await request(tvPath,{headers:{cookie}});assert.equal(inspected.status,200);
+  assert.equal((await inspected.json()).deviceName,tv.deviceName);
+  assert.equal((await request(tvPath+'/approve',{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({verificationCode:attested.verificationCode})})).status,403);
+  const approved=await request(tvPath+'/approve',{method:'POST',headers:{cookie,'x-csrf-token':body.csrfToken,'content-type':'application/json'},body:JSON.stringify({verificationCode:attested.verificationCode})});
+  assert.equal(approved.status,200);const approval=await approved.json();assert.equal(approval.accessToken,undefined);assert.equal(approval.refreshToken,undefined);
+  const completed=await (await apiRequest(`/v1/mobile/pairing/presentations/${start.presentationId}/complete`,{headers:{'x-mobile-pairing-poll-token':start.pollToken}})).json();
+  assert.equal(completed.status,'approved');assert.ok(completed.accessToken);assert.equal(registry.list().find(item=>item.deviceId===tv.deviceId).role,'controller');
+  assert.equal((await request('devices/'+tv.deviceId,{method:'DELETE',headers:{cookie,'x-csrf-token':body.csrfToken}})).status,200);
   await close(web);web=createWeb();await listen(web);
   const restored=await (await request('session',{headers:{cookie}})).json();assert.equal(restored.authenticated,true);assert.equal(restored.role,'administrator');
   const firstID=devices.devices[0].deviceId;

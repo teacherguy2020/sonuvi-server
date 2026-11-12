@@ -81,6 +81,27 @@
   function browserApproval() {
     if(approvalShown||window.top!==window.self)return;
     approvalShown=true;
+    if(auth.role==='administrator'){
+      const trust=document.createElement('button');trust.textContent='Local device trust';trust.style.cssText='position:fixed;right:310px;bottom:12px;z-index:9999;padding:8px 12px;border-radius:8px';document.body.append(trust);
+      trust.onclick=async()=>{try{const r=await request('local-trust');const j=await r.json();if(!r.ok)throw Error(j.error||'Trust unavailable.');const dialog=document.createElement('dialog');dialog.style.cssText='max-width:650px;padding:24px';const heading=document.createElement('h2');heading.textContent='Enroll a private LAN client';dialog.append(heading);const note=document.createElement('p');note.textContent='Use only this already-trusted HTTPS browser. Copy the public trust document to the new client and independently compare the complete fingerprint here. Neither value grants a Sonuvi session. Never bypass a browser certificate warning.';dialog.append(note);const fingerprint=document.createElement('pre');fingerprint.textContent=j.fingerprint;fingerprint.style.whiteSpace='pre-wrap';dialog.append(fingerprint);const data=document.createElement('textarea');data.readOnly=true;data.value=JSON.stringify(j.localTrust);data.rows=8;data.style.width='100%';data.setAttribute('aria-label','Public Server trust document');dialog.append(data);const close=document.createElement('button');close.textContent='Close';close.onclick=()=>{dialog.close();dialog.remove();};dialog.append(close);document.body.append(dialog);dialog.showModal();}catch(error){alert(error.message);}};
+    }
+    const tv=document.createElement('button');tv.textContent='Authorize Apple TV';tv.style.cssText='position:fixed;right:150px;bottom:12px;z-index:9999;padding:8px 12px;border-radius:8px';document.body.append(tv);
+    tv.onclick=()=>{
+      const dialog=document.createElement('dialog');dialog.style.cssText='max-width:520px;background:#142235;color:white;padding:24px;border-radius:12px';
+      const heading=document.createElement('h2');heading.textContent='Authorize Apple TV';dialog.append(heading);
+      const requestID=document.createElement('input');requestID.placeholder='Request ID shown by Apple TV';requestID.maxLength=160;requestID.setAttribute('aria-label','Apple TV request ID');
+      const hash=location.hash.match(/^#pair-tv=([\w-]{16,160})$/);if(hash)requestID.value=hash[1];dialog.append(requestID);
+      const details=document.createElement('p');dialog.append(details);
+      const inspect=document.createElement('button');inspect.textContent='Check request';dialog.append(inspect);
+      const code=document.createElement('input');code.placeholder='Code displayed by Apple TV';code.maxLength=32;code.setAttribute('aria-label','Code displayed by Apple TV');dialog.append(code);
+      const approve=document.createElement('button');approve.textContent='Approve Apple TV';approve.disabled=true;dialog.append(approve);
+      let reviewed=null;
+      requestID.oninput=()=>{reviewed=null;approve.disabled=true;};
+      inspect.onclick=async()=>{reviewed=null;approve.disabled=true;const id=requestID.value.trim();if(!/^[\w-]{16,160}$/.test(id)){details.textContent='Enter a valid request ID.';return;}try{const r=await request('device-pairings/'+id);const j=await r.json();if(!r.ok||j.status!=='waiting')throw Error(j.error||'Request unavailable.');if(requestID.value.trim()!==id)return;reviewed=id;details.textContent=(j.deviceName||'Apple TV')+' — '+(j.deviceModel||'')+'. Confirm that this is your TV, then type the code displayed on it.';approve.disabled=false;}catch(error){details.textContent=error.message;}};
+      approve.onclick=async()=>{if(!reviewed||reviewed!==requestID.value.trim())return;approve.disabled=true;try{const r=await request('device-pairings/'+reviewed+'/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({verificationCode:code.value.trim()})});const j=await r.json();if(!r.ok)throw Error(j.error||'Approval failed.');details.textContent='Apple TV approved. It receives its own controller credential.';code.value='';reviewed=null;}catch(error){details.textContent=error.message;approve.disabled=false;}};
+      const close=document.createElement('button');close.textContent='Close';close.onclick=()=>{dialog.close();dialog.remove();};dialog.append(close);document.body.append(dialog);dialog.showModal();if(hash)inspect.onclick();
+    };
+    if(/^#pair-tv=[\w-]{16,160}$/.test(location.hash))tv.onclick();
     const button=document.createElement('button');button.textContent='Pair a browser';button.style.cssText='position:fixed;right:12px;bottom:12px;z-index:9999;padding:8px 12px;border-radius:8px';document.body.append(button);
     const logout=document.createElement('button');logout.textContent='Sign out';logout.style.cssText='position:fixed;left:12px;bottom:12px;z-index:9999;padding:8px 12px;border-radius:8px';document.body.append(logout);
     logout.onclick=async()=>{logout.disabled=true;try{const r=await request('logout',{method:'POST'});const j=await r.json();if(!r.ok)throw Error(j.error||'Sign-out failed.');if(j.warning)alert(j.warning);location.reload();}catch(error){logout.textContent=error.message;logout.disabled=false;}};

@@ -185,6 +185,13 @@ export function registerLoginRoutes(app, { login, canonicalOrigin = '', localTru
     }
   };
   app.get('/v1/auth/status', route(async (_req, res) => res.json({ ok: true, ...(await login.status()) })));
+  app.get('/v1/auth/local-trust', route(async (req, res) => {
+    if (!await login.authority.verifyAccessToken(readBearerToken(req))) throw new LoginError('administrator_required', 403);
+    const trust = await localTrust();
+    if (!trust) throw new LoginError('local_trust_unavailable', 503);
+    return res.json({ ok: true, localTrust: trust,
+      fingerprint: crypto.createHash('sha256').update(Buffer.from(trust.anchorDER, 'base64')).digest('hex') });
+  }));
   app.post('/v1/auth/login', route(async (req, res) => {
     const body = req.body || {};
     if (Object.keys(body).some(key => !['username', 'password', 'deviceName', 'controllerOnly'].includes(key)) || (body.controllerOnly !== undefined && typeof body.controllerOnly !== 'boolean')) throw new LoginError('login_request_invalid');

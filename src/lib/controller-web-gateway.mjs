@@ -133,7 +133,14 @@ export function createControllerWebGateway({ secret=process.env.SONUVI_CONTROLLE
         const up=await api(req.method,target,{headers:{authorization:`Bearer ${session.accessToken}`}});
         const body=await up.json();send(res,up.status,up.ok?body:{ok:false,error:'Administrator authorization is required.'});return true;
       }
+      if(url.pathname==='/__controller/local-trust'&&req.method==='GET'){
+        if(session)session=await ensureAccess(id,session);
+        if(!session){send(res,401,{ok:false,error:'Sign in as the owner before exporting trust.'});return true;}
+        const up=await api('GET','/v1/auth/local-trust',{headers:{authorization:`Bearer ${session.accessToken}`}});
+        send(res,up.status,up.ok?await up.json():{ok:false,error:'Local trust export requires administrator access and an installed local TLS identity.'});return true;
+      }
       if(url.pathname==='/__controller/pairings'&&req.method==='POST'){
+        // Browser-originated presentations retain their existing private poll handle.
         if(pairings.size>=128||sessions.size>=512){send(res,429,{ok:false,error:'Controller capacity reached.'});return true;}
         const up=await api('POST','/v1/mobile/pairing/presentations');const p=await up.json();
         if(!up.ok||!p.presentationId||!p.pollToken)throw new Error('pairing unavailable');
@@ -147,6 +154,21 @@ export function createControllerWebGateway({ secret=process.env.SONUVI_CONTROLLE
         pairings.set(p.presentationId,{pollToken:p.pollToken,nonce,expiresAt,deviceId:device.deviceId,label:String(req.headers['user-agent']||'New browser').replace(/[\x00-\x1f]/g,'').slice(0,160),createdAt:now()});
         const qrPayload={protocol:'now-playing-mobile-reverse-pairing',version:1,baseUrl:p.baseUrl,presentationId:p.presentationId,challenge:p.challenge};
         send(res,201,{ok:true,presentationId:p.presentationId,expiresAt,verificationCode:proof.verificationCode,qrPayload,qrDataUrl:await QRCode.toDataURL(JSON.stringify(qrPayload),{margin:1,width:360})},{'set-cookie':setCookie('sonuvi_controller_pairing',nonce,secure,120)});return true;
+      }
+      const devicePairing=url.pathname.match(/^\/__controller\/device-pairings\/([\w-]{16,160})(?:\/(approve|reject))?$/);
+      if(devicePairing&&((!devicePairing[2]&&req.method==='GET')||(devicePairing[2]&&req.method==='POST'))){
+        if(session)session=await ensureAccess(id,session);
+        if(!session){send(res,401,{ok:false,error:'Sign in before approving Apple TV.'});return true;}
+        let body;
+        if(devicePairing[2]){
+          if(!equal(session.csrf,req.headers['x-csrf-token'])){send(res,403,{ok:false,error:'CSRF validation failed.'});return true;}
+          try{body=await readJson(req);}catch{send(res,400,{ok:false,error:'Invalid device approval.'});return true;}
+          if(Object.keys(body).join(',')!=='verificationCode'||typeof body.verificationCode!=='string'||body.verificationCode.length>32){send(res,400,{ok:false,error:'Enter the code displayed by Apple TV.'});return true;}
+        }
+        const target='/v1/mobile/pairing/presentations/'+devicePairing[1]+(devicePairing[2]?'/'+devicePairing[2]:'');
+        const up=await api(req.method,target,{headers:{authorization:`Bearer ${session.accessToken}`},...(body?{body}:{})});
+        const result=await up.json();
+        send(res,up.status,up.ok?result:{ok:false,error:'Device request expired, was rejected, or the code did not match.'});return true;
       }
       if(url.pathname==='/__controller/pairings/pending'&&req.method==='GET'){
         if(session)session=await ensureAccess(id,session);
