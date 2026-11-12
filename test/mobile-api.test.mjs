@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
+import { DeviceSessionRegistry } from '../src/lib/sonuvi-device-sessions.mjs';
 
 import { registerMobileRoutes } from '../src/routes/mobile.routes.mjs';
 import { createMobileRefreshToken, createMobileSessionToken, createPersistentControllerRefreshToken, createPersistentMobileRefreshToken, verifyMobileToken } from '../src/lib/mobile-auth.mjs';
@@ -110,6 +114,59 @@ function registerFixture(extra = {}) {
   });
   return app;
 }
+
+test('registered session logout revokes access, refresh, pairing approval and media; another device survives', async t => {
+  const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'sonuvi-api-session-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const sessionRegistry = new DeviceSessionRegistry({ directory: path.join(root, 'registry') });
+  const app = registerFixture({ sessionRegistry });
+  async function enroll(deviceId) {
+    const res = createResponse();
+    await app.routes.get('POST /v1/mobile/session')(request({ headers: { 'x-mobile-enrollment-code': 'one-time-code' }, body: { deviceId } }), res);
+    assert.equal(res.statusCode, 200);
+    return res.body;
+  }
+  const phone = await enroll('phone'), tv = await enroll('tv');
+  const authorized = { authorization: `Bearer ${phone.accessToken}` };
+  const deniedAdmin = createResponse();
+  await app.routes.get('GET /v1/admin/devices')(request({ headers: authorized }), deniedAdmin);
+  assert.equal(deniedAdmin.statusCode, 401);
+  const logout = createResponse();
+  await app.routes.get('POST /v1/mobile/session/logout')(request({ headers: authorized }), logout);
+  assert.equal(logout.statusCode, 200);
+  for (const route of ['GET /v1/mobile/genres', 'POST /v1/mobile/pairing/challenges', 'POST /v1/mobile/media-authorizations']) {
+    const res = createResponse();
+    await app.routes.get(route)(request({ headers: authorized }), res);
+    assert.ok([401, 403].includes(res.statusCode), route);
+  }
+  for (const headers of [{ 'x-mobile-refresh-token': phone.refreshToken }, { ...authorized, 'x-mobile-session-migration': '1' }]) {
+    const res = createResponse();
+    await app.routes.get('POST /v1/mobile/session/refresh')(request({ headers }), res);
+    assert.equal(res.statusCode, 401);
+  }
+  const other = createResponse();
+  await app.routes.get('POST /v1/mobile/session/refresh')(request({ headers: { 'x-mobile-refresh-token': tv.refreshToken } }), other);
+  assert.equal(other.statusCode, 200);
+  assert.ok(other.body.accessToken);
+});
+
+test('legacy API renewal registers a revocable controller without escalating administrator authority', async t => {
+  const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'sonuvi-api-migration-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const registry = new DeviceSessionRegistry({ directory: path.join(root, 'registry') });
+  const app = registerFixture({ sessionRegistry: registry });
+  const legacy = createMobileRefreshToken({ secret: 'api-secret-for-test', deviceId: 'old-ipad' });
+  const res = createResponse();
+  await app.routes.get('POST /v1/mobile/session/refresh')(request({ headers: { 'x-mobile-refresh-token': legacy } }), res);
+  assert.equal(res.statusCode, 200);
+  const claims = verifyMobileToken(res.body.accessToken, { secret: 'api-secret-for-test', scope: 'mobile-api', sessionRegistry: registry });
+  assert.ok(claims.sid);
+  assert.equal(registry.list()[0].role, 'controller');
+  registry.revoke('old-ipad');
+  const replay = createResponse();
+  await app.routes.get('POST /v1/mobile/session/refresh')(request({ headers: { 'x-mobile-refresh-token': legacy } }), replay);
+  assert.equal(replay.statusCode, 401);
+});
 
 test('mobile session enrollment uses its own credential and issues a scoped token', async () => {
   const app = registerFixture();

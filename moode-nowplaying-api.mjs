@@ -314,6 +314,7 @@ import { createRadioFeatureService } from './src/lib/radio-feature-service.mjs';
 import { readMoodeRadioCatalog } from './src/lib/moode-radio-catalog.mjs';
 import { createMobileVideoCatalog } from './src/lib/mobile-video-catalog.mjs';
 import { AdministratorAuthority } from './src/lib/sonuvi-admin-authority.mjs';
+import { DeviceSessionRegistry } from './src/lib/sonuvi-device-sessions.mjs';
 import { buildAnimatedArtContext } from './src/lib/animated-art-context.mjs';
 import { UpnpControlPoint } from './src/lib/upnp-control-point.mjs';
 import { createUpnpPlaybackSessionManager } from './src/lib/upnp-playback-session.mjs';
@@ -2539,7 +2540,10 @@ function extractYear(str) {
   return m ? m[1] : '';
 }
 
-const authorizeControllerDispatch = createControllerDispatchAuthorizer({ secret: process.env.SONUVI_CONTROLLER_WEB_SECRET, apiSecret: MOBILE_API_SECRET });
+const deviceSessions = RUNTIME_STATE_PATHS.sharedStateEnabled
+  ? new DeviceSessionRegistry({ directory: path.join(RUNTIME_STATE_PATHS.stateRoot, 'data', 'device-sessions') })
+  : null;
+const authorizeControllerDispatch = createControllerDispatchAuthorizer({ secret: process.env.SONUVI_CONTROLLER_WEB_SECRET, apiSecret: MOBILE_API_SECRET, sessionRegistry: deviceSessions });
 function requireTrackKey(req, res) {
   if (authorizeControllerDispatch(req)) return true;
   if (!hasConfiguredTrackKey(TRACK_KEY)) {
@@ -9248,6 +9252,7 @@ const startDlnaRuntime = () => dlnaRuntime.start();
 
 
 registerMobileRoutes(app, {
+  sessionRegistry: deviceSessions,
   enabled: MOBILE_API_ENABLED,
   apiSecret: MOBILE_API_SECRET,
   trackIdSecret: MOBILE_TRACK_ID_SECRET,

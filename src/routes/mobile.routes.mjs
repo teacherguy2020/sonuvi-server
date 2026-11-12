@@ -16,7 +16,7 @@ import {
   createMobileTrackId,
   readBearerToken,
   timingSafeEqualText,
-  verifyMobileToken,
+  verifyMobileToken as verifySignedMobileToken,
 } from '../lib/mobile-auth.mjs';
 import {
   buildMobileCatalog,
@@ -603,6 +603,8 @@ function pairingBaseUrl(req, configuredBaseUrl = '') {
 }
 
 export function registerMobileRoutes(app, deps = {}) {
+  const sessionRegistry = deps.sessionRegistry;
+  const verifyMobileToken = (token, options) => verifySignedMobileToken(token, { ...options, sessionRegistry });
   const enabled = Boolean(deps.enabled);
   const apiSecret = text(deps.apiSecret);
   const trackIdSecret = text(deps.trackIdSecret);
@@ -2329,13 +2331,16 @@ export function registerMobileRoutes(app, deps = {}) {
     return false;
   };
 
-  const issueMobileSession = (deviceId, { persistentControllerRefresh = false } = {}) => {
+  const issueMobileSession = (deviceId, { persistentControllerRefresh = false, renewalClaims } = {}) => {
     const issuedAt = Date.now();
+    const sessionId = sessionRegistry
+      ? (renewalClaims ? sessionRegistry.renew(renewalClaims) : sessionRegistry.authorize(deviceId))
+      : undefined;
     return {
-      accessToken: createMobileSessionToken({ secret: apiSecret, deviceId, ttlMs: SESSION_TTL_MS, now: issuedAt }),
+      accessToken: createMobileSessionToken({ secret: apiSecret, deviceId, sessionId, ttlMs: SESSION_TTL_MS, now: issuedAt }),
       refreshToken: persistentControllerRefresh
-        ? createPersistentControllerRefreshToken({ secret: apiSecret, deviceId, now: issuedAt })
-        : createPersistentMobileRefreshToken({ secret: apiSecret, deviceId, now: issuedAt }),
+        ? createPersistentControllerRefreshToken({ secret: apiSecret, deviceId, sessionId, now: issuedAt })
+        : createPersistentMobileRefreshToken({ secret: apiSecret, deviceId, sessionId, now: issuedAt }),
       expiresAt: new Date(issuedAt + SESSION_TTL_MS).toISOString(),
       deviceId,
     };
@@ -2419,7 +2424,7 @@ export function registerMobileRoutes(app, deps = {}) {
     if (deps.animatedArt && mediaUrl) {
       const match = new URL(mediaUrl).pathname.match(/\/config\/library-health\/animated-art\/media\/([a-f0-9]{40}\.mp4)$/);
       if (match) {
-        const ticket = createMobileAnimationTicket({ secret: apiSecret, deviceId: session.deviceId, name: match[1] });
+        const ticket = createMobileAnimationTicket({ secret: apiSecret, deviceId: session.deviceId, sessionId: session.sid, name: match[1] });
         mediaUrl = `${requestBaseUrl(req, mobileBaseUrl)}/v1/mobile/animated-art/media/${match[1]}?ticket=${encodeURIComponent(ticket)}`;
       }
     }
@@ -2454,7 +2459,7 @@ export function registerMobileRoutes(app, deps = {}) {
   app.post('/v1/admin/bootstrap/first-controller', async (req, res) => {
     if (!administratorAuthority || !administratorStateRoot || !apiSecret) return errorResponse(res, 404, 'administrator bootstrap is unavailable');
     try {
-      const handoff = await authorizeFirstController({ authority: administratorAuthority, administratorToken: readBearerToken(req), mobileApiSecret: apiSecret, controllerDeviceId: req.body?.deviceId, stateRoot: administratorStateRoot });
+      const handoff = await authorizeFirstController({ authority: administratorAuthority, administratorToken: readBearerToken(req), mobileApiSecret: apiSecret, controllerDeviceId: req.body?.deviceId, stateRoot: administratorStateRoot, sessionRegistry });
       return res.status(201).json({ ok: true, ...handoff });
     } catch (error) {
       if (error?.message === 'administrator_authorization_required') return errorResponse(res, 401, 'administrator authorization is required');
@@ -2668,8 +2673,31 @@ export function registerMobileRoutes(app, deps = {}) {
     return res.json({
       ok: true,
       tokenType: 'Bearer',
-      ...issueMobileSession(deviceId, { persistentControllerRefresh }),
+      ...issueMobileSession(deviceId, { persistentControllerRefresh, renewalClaims: claims }),
     });
+  }));
+
+  app.post('/v1/mobile/session/logout', asyncRoute(async (req, res) => {
+    if (!sessionRegistry) return errorResponse(res, 503, 'device revocation is unavailable');
+    const session = requireSession(req, res);
+    if (!session) return;
+    sessionRegistry.revoke(session.deviceId);
+    return res.json({ ok: true });
+  }));
+
+  app.get('/v1/admin/devices', asyncRoute(async (req, res) => {
+    if (!sessionRegistry) return errorResponse(res, 503, 'device management is unavailable');
+    try { await requireAdministratorAuthorization({ authority: administratorAuthority, bearerToken: readBearerToken(req) }); }
+    catch { return errorResponse(res, 401, 'administrator authorization is required'); }
+    return res.json({ ok: true, devices: sessionRegistry.list() });
+  }));
+
+  app.delete('/v1/admin/devices/:deviceId', asyncRoute(async (req, res) => {
+    if (!sessionRegistry) return errorResponse(res, 503, 'device management is unavailable');
+    try { await requireAdministratorAuthorization({ authority: administratorAuthority, bearerToken: readBearerToken(req) }); }
+    catch { return errorResponse(res, 401, 'administrator authorization is required'); }
+    sessionRegistry.revoke(req.params.deviceId);
+    return res.json({ ok: true });
   }));
 
   app.post('/v1/mobile/push-tokens', asyncRoute(async (req, res) => {
@@ -3073,6 +3101,7 @@ export function registerMobileRoutes(app, deps = {}) {
     const ticket = createMobileRadioTicket({
       secret: apiSecret,
       deviceId: session.deviceId,
+      sessionId: session.sid,
       stationId,
       ttlMs: RADIO_TICKET_TTL_MS,
     });
@@ -5207,6 +5236,7 @@ export function registerMobileRoutes(app, deps = {}) {
     const ticket = createMobileMediaTicket({
       secret: apiSecret,
       deviceId: session.deviceId,
+      sessionId: session.sid,
       trackId,
       format: requestedFormat,
       ttlMs: MEDIA_TICKET_TTL_MS,

@@ -77,7 +77,7 @@ export function verifyControllerDispatch({ secret, header = '', method = 'GET', 
   return crypto.timingSafeEqual(Buffer.from(mac), Buffer.from(expected));
 }
 /** Per-process bounded replay protection, plus actual socket and query validation. */
-export function createControllerDispatchAuthorizer({ secret, apiSecret } = {}) {
+export function createControllerDispatchAuthorizer({ secret, apiSecret, sessionRegistry } = {}) {
   const used = new Map();
   return (req) => {
     const target = req.originalUrl || req.url || req.path;
@@ -87,7 +87,7 @@ export function createControllerDispatchAuthorizer({ secret, apiSecret } = {}) {
     if (!isLoopbackAddress(req.socket?.remoteAddress) || !isControllerDispatchable({method:req.method,pathname:req.path || target?.split('?')[0]}) || !validControllerTarget(target, req.method) || !validControllerBody({method:req.method, pathname:req.path || target?.split('?')[0], body:req.body})) return false;
     // Fresh installations reuse the existing paired-controller grant; no additional
     // shared secret or administrator credential has to be provisioned to the web service.
-    if (header === 'mobile-session') return Boolean(verifyMobileToken(readBearerToken(req), { secret: apiSecret, scope: 'mobile-api', now }));
+    if (header === 'mobile-session') return Boolean(verifyMobileToken(readBearerToken(req), { secret: apiSecret, scope: 'mobile-api', now, sessionRegistry }));
     if (req.method !== 'GET') return false;
     if (used.has(header) || used.size >= 10000 || !verifyControllerDispatch({secret,header,method:req.method,target,now})) return false;
     used.set(header, now+MAX_AGE_MS); return true;
