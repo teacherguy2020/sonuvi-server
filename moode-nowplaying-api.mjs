@@ -328,6 +328,7 @@ import { createUpnpPlaybackQueueManager } from './src/lib/upnp-playback-queue.mj
 import { registerAllConfigRoutes } from './src/routes/config.routes.index.mjs';
 import { getLibraryHealthStatus } from './src/routes/config.library-health-read.routes.mjs';
 import { registerNativeAdministratorConfigurationRoutes } from './src/routes/admin-native-configuration.routes.mjs';
+import { readManagedMusicSource } from './src/lib/managed-music-source.mjs';
 import { registerUpnpRoutes } from './src/routes/upnp.routes.mjs';
 import { createDlnaMediaServer, isPrivateLanAddress } from './src/lib/dlna-media-server.mjs';
 import { createDlnaRuntime } from './src/lib/dlna-runtime.mjs';
@@ -9464,6 +9465,7 @@ registerNativeAdministratorConfigurationRoutes(app, {
   writeConfig: async (value) => writeNativeRuntimeConfig(value),
   runtimeProjectionOptions: {
     environment: process.env,
+    readMusicSource: () => readManagedMusicSource({ stateRoot: process.env.SONUVI_STATE_ROOT || '/var/lib/sonuvi' }),
     apnsCredentials: {
       keyId: APNS_KEY_ID,
       teamId: APNS_TEAM_ID,

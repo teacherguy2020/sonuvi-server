@@ -15,29 +15,30 @@ class Element {
   querySelector(selector) { if (selector.startsWith('#')) return this.doc.getElementById(selector.slice(1)); if (selector==='button') return this.children.find(child=>child.tagName==='button'); return null; }
   remove() { if (this.parent) this.parent.children=this.parent.children.filter(child=>child!==this); for (const child of this.children) child.remove(); if (this.id) this.doc.ids.delete(this.id); }
 }
-function browser(responses) {
+function browser(responses, settings=false) {
   const doc={ids:new Map(), listener:null, body:null, createElement(tag){return new Element(tag,this);}, getElementById(id){return this.ids.get(id)||null;}, addEventListener(_name,listener){this.listener=listener;}};
   doc.body=new Element('body',doc);
+  if(settings){const card=new Element('section',doc);card.id='sonuviAccountSettings';const actions=new Element('div',doc);actions.id='sonuviAccountActions';card.append(actions);doc.body.append(card);}
   const calls=[];
   const sandbox={URL,Headers,Promise,Map,encodeURIComponent,JSON,Error,document:doc,window:null,location:{href:'https://controller.test/controller.html',origin:'https://controller.test',reload(){}},setTimeout(){return 1;},clearTimeout(){},SonuviControllerWeb:true,fetch:async (input)=>{calls.push(String(input));const next=responses.shift();if(next instanceof Error) throw next;return {status:next.status,ok:next.status>=200&&next.status<300,json:async()=>next.body};}};
   sandbox.window=sandbox;
   return {doc,sandbox,calls};
 }
-async function load(responses) {
+async function load(responses, settings=false) {
   const source=await fs.readFile(path.join(root,'scripts/controller-browser-auth.js'),'utf8');
-  const state=browser(responses);state.sandbox.source=source;
+  const state=browser(responses,settings);state.sandbox.source=source;
   vm.runInNewContext(source,state.sandbox);
   await state.doc.listener();
   return state;
 }
 test('browser session retries transient failures without re-pairing and clears the overlay on success', async () => {
-  const state=await load([{status:503,body:{error:'upstream unavailable'}},{status:200,body:{authenticated:true,csrfToken:'csrf'}},{status:200,body:{authenticated:true,csrfToken:'csrf'}}]);
+  const state=await load([{status:503,body:{error:'upstream unavailable'}},{status:200,body:{authenticated:true,csrfToken:'csrf'}},{status:200,body:{authenticated:true,csrfToken:'csrf'}}],true);
   const retry=state.doc.getElementById('sonuviSessionRetry');
   assert.equal(state.doc.getElementById('sonuviPairStart').style.display,'none');assert.equal(retry.style.display,'inline-block');
   await retry.onclick();
   assert.equal(state.sandbox.SonuviControllerAuth.csrfToken,'csrf');assert.equal(state.doc.getElementById('sonuviBrowserPairing'),null);
-  assert.equal(state.doc.body.children.filter(child=>child.textContent==='Pair a browser').length,1);
-  await retry.onclick();assert.equal(state.doc.body.children.filter(child=>child.textContent==='Pair a browser').length,1);
+  assert.equal(state.doc.getElementById('sonuviAccountActions').children.filter(child=>child.textContent==='Pair a browser').length,1);
+  await retry.onclick();assert.equal(state.doc.getElementById('sonuviAccountActions').children.filter(child=>child.textContent==='Pair a browser').length,1);
 });
 test('browser session offers Retry after a network failure but pairing only after unauthenticated response', async () => {
   const transient=await load([new Error('network down'),{status:200,body:{authenticated:true,csrfToken:'csrf'}}]);
@@ -62,4 +63,16 @@ test('normal login is available without QR and clears the password after rejecti
   assert.equal(JSON.parse(submitted.options.body).username,'owner');assert.equal(password.value,'');
   assert.equal(state.doc.getElementById('sonuviPairStatus').textContent,'Sign-in was not accepted.');
   assert.equal(state.doc.getElementById('sonuviLoginSubmit').disabled,false);
+});
+
+test('account controls exist only within Settings; administrator-only actions stay scoped',async()=>{
+ const home=await load([{status:200,body:{authenticated:true,csrfToken:'csrf',role:'administrator'}}]);
+ assert.equal(home.doc.body.children.filter(e=>e.tagName==='button').length,0);
+ const settings=await load([{status:200,body:{authenticated:true,csrfToken:'csrf',role:'administrator'}}],true);
+ const actions=settings.doc.getElementById('sonuviAccountActions').children;
+ assert.deepEqual(actions.map(e=>e.textContent).sort(),['Authorize Apple TV','Local device trust','Manage devices','Pair a browser','Sign out'].sort());
+ assert.ok(actions.every(e=>!e.style.cssText.includes('position:fixed')));
+ assert.equal(settings.doc.body.children.filter(e=>e.tagName==='button').length,0);
+ const controller=await load([{status:200,body:{authenticated:true,csrfToken:'csrf',role:'controller'}}],true);
+ assert.deepEqual(controller.doc.getElementById('sonuviAccountActions').children.map(e=>e.textContent).sort(),['Authorize Apple TV','Pair a browser','Sign out'].sort());
 });

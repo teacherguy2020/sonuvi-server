@@ -176,6 +176,7 @@ export function projectRuntimeAdminConfig(cfg, {
   environment = process.env,
   apnsCredentials = {},
   defaults = {},
+  readMusicSource = () => null,
 } = {}) {
   const source = object(cfg);
   const notifications = object(source.notifications);
@@ -187,6 +188,10 @@ export function projectRuntimeAdminConfig(cfg, {
   const paths = object(source.paths);
   const moodeHost = text(environment.MOODE_SSH_HOST || moode.sshHost || mpd.host || defaults.moodeHost || 'moode.local');
   const moodeBaseRaw = text(environment.MOODE_BASE_URL || moode.baseUrl);
+  // This optional reader is supplied only to authenticated administration.
+  const configuredMusicSource = environment.SONUVI_MUSIC_CONFIGURED === '1' ? readMusicSource() : null;
+  const musicSource = configuredMusicSource?.mountPath === text(environment.MUSIC_LIBRARY_ROOT || paths.musicLibraryRoot)
+    ? configuredMusicSource : null;
 
   return {
     ...projectRuntimePublicConfig(source, { environment }),
@@ -250,6 +255,7 @@ export function projectRuntimeAdminConfig(cfg, {
       podcastRoot: text(environment.PODCAST_ROOT || paths.podcastRoot),
     },
     storage: {
+      ...(musicSource ? { musicSource } : {}),
       mediaPathOverrides: {
         ...(text(environment.PI4_MOUNT_BASE) ? { piMountBase: text(environment.PI4_MOUNT_BASE) } : {}),
         ...(text(environment.PODCAST_ROOT) ? { podcastRoot: text(environment.PODCAST_ROOT) } : {}),

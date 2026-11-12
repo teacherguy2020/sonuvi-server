@@ -86,7 +86,7 @@ export function configurationWorkspace(cfg, options={}){
   if(f.id==='paths.podcastRoot')effective=env.PODCAST_ROOT||cfg.paths?.podcastRoot||(env.MUSIC_LIBRARY_ROOT||cfg.paths?.musicLibraryRoot||'/var/lib/mpd/music').replace(/\/$/,'')+'/Podcasts';
   return {...f,saved,effective,editable:!managed,source:managed?'environment':'configuration',reason:managed?`${f.env} is host-managed. Change the host environment and restart Sonuvi services.`:f.id.startsWith('paths.')?'The folder must already exist on its host; this setting does not create or mount storage.':'Save requires a Server restart for startup-loaded settings.'};
  });
- return {revision:digest({cfg,environment:fields.filter(f=>!f.editable).map(f=>[f.id,f.effective])}),fields,hostManaged:[
+ return {...(projection.storage.musicSource ? { musicSource: projection.storage.musicSource } : {}),revision:digest({cfg,environment:fields.filter(f=>!f.editable).map(f=>[f.id,f.effective])}),fields,hostManaged:[
   'API bind address, API/UI ports, HTTPS certificates and DNS are deployment-managed; changing them here could disconnect this Server.',
   'Network shares, storage mounts, permissions and remote SSH authorization require host setup. Sonuvi uses one MPD/moOde catalog, not an arbitrary source registry.',
   'DLNA requires a host-selected private LAN interface (DLNA_LAN_ADDRESS) and port. The toggle does not create that network configuration.',

@@ -79,13 +79,22 @@
     }catch(error){status.textContent=error.message;}
   }
   function browserApproval() {
-    if(approvalShown||window.top!==window.self)return;
+    if(approvalShown)return;
+    const settings=document.getElementById('sonuviAccountActions');
+    if(!settings){
+      if(window.top===window.self&&/^#pair-tv=[\w-]{16,160}$/.test(location.hash)) {
+        location.href=(globalThis.innerWidth>=680?'controller-tablet-settings.html':'controller-mobile-settings.html')+location.hash;
+      }
+      return;
+    }
     approvalShown=true;
+    const card=document.getElementById('sonuviAccountSettings');if(card)card.hidden=false;
+    const addAction=(button)=>{button.type='button';button.className='applyBtn';button.style.cssText='padding:10px 14px;border-radius:10px';settings.append(button);};
     if(auth.role==='administrator'){
-      const trust=document.createElement('button');trust.textContent='Local device trust';trust.style.cssText='position:fixed;right:310px;bottom:12px;z-index:9999;padding:8px 12px;border-radius:8px';document.body.append(trust);
+      const trust=document.createElement('button');trust.textContent='Local device trust';addAction(trust);
       trust.onclick=async()=>{try{const r=await request('local-trust');const j=await r.json();if(!r.ok)throw Error(j.error||'Trust unavailable.');const dialog=document.createElement('dialog');dialog.style.cssText='max-width:650px;padding:24px';const heading=document.createElement('h2');heading.textContent='Enroll a private LAN client';dialog.append(heading);const note=document.createElement('p');note.textContent='Use only this already-trusted HTTPS browser. Copy the public trust document to the new client and independently compare the complete fingerprint here. Neither value grants a Sonuvi session. Never bypass a browser certificate warning.';dialog.append(note);const fingerprint=document.createElement('pre');fingerprint.textContent=j.fingerprint;fingerprint.style.whiteSpace='pre-wrap';dialog.append(fingerprint);const data=document.createElement('textarea');data.readOnly=true;data.value=JSON.stringify(j.localTrust);data.rows=8;data.style.width='100%';data.setAttribute('aria-label','Public Server trust document');dialog.append(data);const close=document.createElement('button');close.textContent='Close';close.onclick=()=>{dialog.close();dialog.remove();};dialog.append(close);document.body.append(dialog);dialog.showModal();}catch(error){alert(error.message);}};
     }
-    const tv=document.createElement('button');tv.textContent='Authorize Apple TV';tv.style.cssText='position:fixed;right:150px;bottom:12px;z-index:9999;padding:8px 12px;border-radius:8px';document.body.append(tv);
+    const tv=document.createElement('button');tv.textContent='Authorize Apple TV';addAction(tv);
     tv.onclick=()=>{
       const dialog=document.createElement('dialog');dialog.style.cssText='max-width:520px;background:#142235;color:white;padding:24px;border-radius:12px';
       const heading=document.createElement('h2');heading.textContent='Authorize Apple TV';dialog.append(heading);
@@ -102,11 +111,11 @@
       const close=document.createElement('button');close.textContent='Close';close.onclick=()=>{dialog.close();dialog.remove();};dialog.append(close);document.body.append(dialog);dialog.showModal();if(hash)inspect.onclick();
     };
     if(/^#pair-tv=[\w-]{16,160}$/.test(location.hash))tv.onclick();
-    const button=document.createElement('button');button.textContent='Pair a browser';button.style.cssText='position:fixed;right:12px;bottom:12px;z-index:9999;padding:8px 12px;border-radius:8px';document.body.append(button);
-    const logout=document.createElement('button');logout.textContent='Sign out';logout.style.cssText='position:fixed;left:12px;bottom:12px;z-index:9999;padding:8px 12px;border-radius:8px';document.body.append(logout);
-    logout.onclick=async()=>{logout.disabled=true;try{const r=await request('logout',{method:'POST'});const j=await r.json();if(!r.ok)throw Error(j.error||'Sign-out failed.');if(j.warning)alert(j.warning);location.reload();}catch(error){logout.textContent=error.message;logout.disabled=false;}};
+    const button=document.createElement('button');button.textContent='Pair a browser';addAction(button);
+    const logout=document.createElement('button');logout.textContent='Sign out';addAction(logout);
+    logout.onclick=async()=>{logout.disabled=true;try{const r=await request('logout',{method:'POST'});const j=await r.json();if(!r.ok)throw Error(j.error||'Sign-out failed.');if(j.warning)alert(j.warning);try{window.top.location.reload();}catch{location.reload();}}catch(error){logout.textContent=error.message;logout.disabled=false;}};
     if(auth.role==='administrator'){
-      const devices=document.createElement('button');devices.textContent='Manage devices';devices.style.cssText='position:fixed;left:110px;bottom:12px;z-index:9999;padding:8px 12px;border-radius:8px';document.body.append(devices);
+      const devices=document.createElement('button');devices.textContent='Manage devices';addAction(devices);
       devices.onclick=async()=>{
         const dialog=document.createElement('dialog');dialog.style.cssText='max-width:520px;background:#142235;color:white;padding:24px;border-radius:12px';
         const title=document.createElement('h2');title.textContent='Authorized Sonuvi devices';dialog.append(title);
