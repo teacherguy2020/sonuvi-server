@@ -251,3 +251,15 @@ test('immutable runtime administration rejects Last.fm credential writes', async
     await fs.rm(directory, { recursive: true, force: true });
   }
 });
+
+test('administrator settings show effective managed music paths instead of stale fresh-install placeholders', () => {
+ const cfg={paths:{musicLibraryRoot:'/var/lib/sonuvi/empty-library',piMountBase:'/old/mount',podcastRoot:'/old/podcasts'}};
+ const environment={SONUVI_STATE_ROOT:'/var/lib/sonuvi',MUSIC_LIBRARY_ROOT:'/var/lib/sonuvi/music',PI4_MOUNT_BASE:'/var/lib/sonuvi/music',PODCAST_ROOT:'/managed/podcasts'};
+ const result=projectRuntimeAdminConfig(cfg,{environment});
+ assert.equal(result.paths.musicLibraryRoot,environment.MUSIC_LIBRARY_ROOT);
+ assert.equal(result.paths.piMountBase,environment.PI4_MOUNT_BASE);
+ assert.equal(result.paths.podcastRoot,environment.PODCAST_ROOT);
+ for(const id of ['pathMusicLibraryRoot','pathPiMountBase','pathPodcastRoot'])assert.ok(result.deployment.environmentManaged.includes(id));
+ assert.equal(JSON.stringify(projectRuntimePublicConfig(cfg,{environment})).includes('/var/lib/sonuvi/music'),false);
+ assert.equal(cfg.paths.musicLibraryRoot,'/var/lib/sonuvi/empty-library');
+});

@@ -244,20 +244,20 @@ export function projectRuntimeAdminConfig(cfg, {
         : 'toptracks',
     },
     paths: {
-      musicLibraryRoot: text(paths.musicLibraryRoot),
+      musicLibraryRoot: text(environment.MUSIC_LIBRARY_ROOT || paths.musicLibraryRoot),
       moodeUsbMount: text(paths.moodeUsbMount),
-      piMountBase: text(paths.piMountBase),
-      podcastRoot: text(paths.podcastRoot),
+      piMountBase: text(environment.PI4_MOUNT_BASE || paths.piMountBase),
+      podcastRoot: text(environment.PODCAST_ROOT || paths.podcastRoot),
     },
     storage: {
       mediaPathOverrides: {
         ...(text(environment.PI4_MOUNT_BASE) ? { piMountBase: text(environment.PI4_MOUNT_BASE) } : {}),
         ...(text(environment.PODCAST_ROOT) ? { podcastRoot: text(environment.PODCAST_ROOT) } : {}),
       },
-      musicLibraryRootConfigured: Boolean(text(paths.musicLibraryRoot)),
+      musicLibraryRootConfigured: Boolean(text(environment.MUSIC_LIBRARY_ROOT || paths.musicLibraryRoot)),
       moodeUsbMountConfigured: Boolean(text(paths.moodeUsbMount)),
-      piMountBaseConfigured: Boolean(text(paths.piMountBase)),
-      podcastRootConfigured: Boolean(text(paths.podcastRoot)),
+      piMountBaseConfigured: Boolean(text(environment.PI4_MOUNT_BASE || paths.piMountBase)),
+      podcastRootConfigured: Boolean(text(environment.PODCAST_ROOT || paths.podcastRoot)),
     },
   };
 }
