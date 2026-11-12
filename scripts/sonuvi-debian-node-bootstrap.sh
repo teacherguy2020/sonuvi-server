@@ -67,12 +67,84 @@ if [ "$dependencies_ready" = true ]; then
   exit 0
 fi
 
-# Fail closed unless a configured official Debian repository is present. The
-# script intentionally does not add repositories or accept a caller URL. Both
-# canonical APT URI spellings are valid: Debian's installer commonly writes a
-# trailing slash, while other tools omit it.
-official_debian_repository_pattern='^(deb[[:space:]]+https?://deb\.debian\.org/debian/?[[:space:]]+[^[:space:]]+[[:space:]].*\bmain\b|[[:space:]]*URIs:[[:space:]]+https?://deb\.debian\.org/debian/?)'
-if ! grep -RhsE "$official_debian_repository_pattern" /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null | grep -q .; then
+# Read configured APT sources without changing them or accepting caller input.
+# Official Debian cloud images use a local mirror list instead of a direct URI.
+# Only the fixed Debian mirror-list path is supported, and every mirror in it
+# must be the canonical Debian archive. A lookalike host/path is not sufficient.
+if ! /usr/bin/python3 - <<'SONUVI_APT_CHECK'
+from pathlib import Path
+import re
+import shlex
+import sys
+from urllib.parse import urlsplit
+
+apt_root = Path("/etc/apt")
+
+def official_uri(uri):
+    try:
+        parsed = urlsplit(uri)
+        return (parsed.scheme in ("http", "https")
+                and parsed.netloc == "deb.debian.org"
+                and parsed.path in ("/debian", "/debian/")
+                and not parsed.query and not parsed.fragment)
+    except ValueError:
+        return False
+
+def supported_uri(uri):
+    if official_uri(uri):
+        return True
+    if uri != "mirror+file:///etc/apt/mirrors/debian.list":
+        return False
+    try:
+        mirrors = [line.split("#", 1)[0].strip() for line in
+                   (apt_root / "mirrors/debian.list").read_text().splitlines()]
+        mirrors = [line for line in mirrors if line]
+        return bool(mirrors) and all(official_uri(line) for line in mirrors)
+    except (OSError, UnicodeError):
+        return False
+
+def enabled_binary_sources(file):
+    text = file.read_text()
+    if file.suffix == ".list":
+        for line in text.splitlines():
+            # APT options precede the URI; never interpret their text as a URI.
+            line = re.sub(r"^(\s*deb\s+)\[[^\]]*\]\s*", r"\1", line)
+            fields = shlex.split(line, comments=True)
+            if len(fields) >= 4 and fields[0] == "deb" and "main" in fields[3:]:
+                yield fields[1]
+    else:
+        fields = {}
+        key = None
+        for line in text.splitlines() + [""]:
+            if line.lstrip().startswith("#"):
+                continue
+            if not line.strip():
+                if (fields.get("enabled", "yes").lower() != "no"
+                        and "deb" in fields.get("types", "").split()
+                        and "main" in fields.get("components", "").split()
+                        and fields.get("suites", "").strip()):
+                    yield from fields.get("uris", "").split()
+                fields, key = {}, None
+            elif line[:1].isspace() and key:
+                fields[key] += " " + line.strip()
+            elif ":" in line:
+                key, value = line.split(":", 1)
+                key = key.lower()
+                fields[key] = value.strip()
+            else:
+                raise ValueError("malformed APT stanza")
+
+try:
+    files = [apt_root / "sources.list"]
+    files += sorted((apt_root / "sources.list.d").glob("*.list"))
+    files += sorted((apt_root / "sources.list.d").glob("*.sources"))
+    recognized = any(supported_uri(uri) for file in files if file.is_file()
+                     for uri in enabled_binary_sources(file))
+except (OSError, UnicodeError, ValueError):
+    recognized = False
+sys.exit(0 if recognized else 1)
+SONUVI_APT_CHECK
+then
   echo 'official configured Debian repository is required' >&2
   echo 'sonuvi_sftp_bootstrap:debian_repository_unrecognized' >&2
   exit 79

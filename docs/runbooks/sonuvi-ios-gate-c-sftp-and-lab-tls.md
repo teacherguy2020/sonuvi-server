@@ -299,3 +299,22 @@ private keys, SSH passwords, and sudo passwords remain out of transfer logs
 and durable progress. The fixed TLS policy authenticates the distribution
 host; it does not authenticate a release. Ed25519 verification remains
 mandatory before SFTP and before any privileged activation.
+
+## Debian cloud-image repository compatibility — 2026-11-12
+
+The first-stage prerequisite installer recognizes enabled binary Debian APT
+sources in legacy list and deb822 formats. Official Debian 13 cloud images use
+`mirror+file:///etc/apt/mirrors/debian.list`; the fixed local list is accepted
+only when every non-comment entry is the canonical HTTP(S) Debian archive.
+Disabled/source-only stanzas, arbitrary local paths, remote mirror-list URLs,
+mixed untrusted lists and lookalike archive hosts/paths are rejected. APT
+configuration and signature verification are not modified. The read-only
+parser uses the Python 3 already present on supported Debian cloud images.
+
+Earlier direct-URI-only builds fail after copying the kit and provisioning its
+public verification anchor, before Node or Sonuvi activation. Such a target is
+not fresh: preserve it for diagnosis; do not blindly rerun the activation
+capsule or erase its trust state. Verify a newly signed matching kit/app on a
+separate clean target.
+
+Last updated: 2026-11-12.
