@@ -11,8 +11,13 @@ export const MOBILE_PAIRING_PROTOCOL_VERSION = 1;
 export const MOBILE_PAIRING_TTL_MS = 90 * 1000;
 export const MOBILE_PAIRING_RETENTION_MS = 10 * 60 * 1000;
 export const MOBILE_PAIRING_COMPLETION_GRACE_MS = 30 * 1000;
+export const MOBILE_REVERSE_PAIRING_PROTOCOL_VERSION = 1;
+export const MOBILE_REVERSE_PAIRING_MAX_ACTIVE_PRESENTATIONS = 64;
+export const MOBILE_REVERSE_PAIRING_RATE_LIMIT_COUNT = 6;
+export const MOBILE_REVERSE_PAIRING_RATE_LIMIT_WINDOW_MS = 60 * 1000;
 
 const PROOF_DOMAIN = 'now-playing-mobile-pairing-v1';
+const REVERSE_PROOF_DOMAIN = 'now-playing-mobile-reverse-pairing-v1';
 const MAX_DEVICE_ID_LENGTH = 200;
 const MAX_DEVICE_NAME_LENGTH = 120;
 const MAX_DEVICE_MODEL_LENGTH = 120;
@@ -68,6 +73,23 @@ export function pairingProofMessage({ challenge, deviceId, deviceName, deviceMod
   ].join('\n');
 }
 
+export function reversePairingProofMessage({
+  presentationId,
+  challenge,
+  deviceId,
+  deviceName,
+  deviceModel,
+}) {
+  return [
+    REVERSE_PROOF_DOMAIN,
+    String(presentationId),
+    String(challenge),
+    normalizePairingDeviceId(deviceId),
+    normalizePairingDeviceName(deviceName),
+    normalizePairingDeviceModel(deviceModel),
+  ].join('\n');
+}
+
 function decodeBase64(value, fieldName) {
   const text = String(value ?? '').trim();
   if (!text) {
@@ -108,16 +130,11 @@ function publicKeyFromPayload(value) {
   }
 }
 
-function verifyProof({ challenge, deviceId, deviceName, deviceModel, publicKey, signature, signatureAlgorithm }) {
+function verifyProof({ proofMessage, publicKey, signature, signatureAlgorithm }) {
   const key = publicKeyFromPayload(publicKey);
   const signatureBytes = decodeBase64(signature, 'signature');
   const algorithm = String(signatureAlgorithm ?? '').trim().toLowerCase();
-  const message = Buffer.from(pairingProofMessage({
-    challenge,
-    deviceId,
-    deviceName,
-    deviceModel,
-  }), 'utf8');
+  const message = Buffer.from(String(proofMessage ?? ''), 'utf8');
 
   let valid = false;
   if (algorithm === 'ed25519') {
@@ -152,6 +169,17 @@ function requestId() {
   return `pair_${randomBytes(16).toString('base64url')}`;
 }
 
+function presentationId() {
+  return `present_${randomBytes(16).toString('base64url')}`;
+}
+
+function publicKeyFingerprint(key) {
+  return createHash('sha256')
+    .update(key.export({ format: 'der', type: 'spki' }))
+    .digest('hex')
+    .slice(0, 32);
+}
+
 function safeRequest(request) {
   return {
     requestId: request.requestId,
@@ -173,19 +201,41 @@ function safeChallenge(challenge) {
   };
 }
 
+function safePresentation(presentation) {
+  return {
+    presentationId: presentation.presentationId,
+    deviceId: presentation.deviceId,
+    deviceName: presentation.deviceName,
+    deviceModel: presentation.deviceModel,
+    publicKeyFingerprint: presentation.publicKeyFingerprint,
+    verificationCode: presentation.verificationCode,
+    status: presentation.status,
+    createdAt: presentation.createdAt,
+    expiresAt: presentation.expiresAt,
+  };
+}
+
 export class MobilePairingStore {
   constructor({
     ttlMs = MOBILE_PAIRING_TTL_MS,
     retentionMs = MOBILE_PAIRING_RETENTION_MS,
     completionGraceMs = MOBILE_PAIRING_COMPLETION_GRACE_MS,
+    reverseMaxActivePresentations = MOBILE_REVERSE_PAIRING_MAX_ACTIVE_PRESENTATIONS,
+    reverseRateLimitCount = MOBILE_REVERSE_PAIRING_RATE_LIMIT_COUNT,
+    reverseRateLimitWindowMs = MOBILE_REVERSE_PAIRING_RATE_LIMIT_WINDOW_MS,
     now = () => Date.now(),
   } = {}) {
     this.ttlMs = ttlMs;
     this.retentionMs = retentionMs;
     this.completionGraceMs = completionGraceMs;
+    this.reverseMaxActivePresentations = reverseMaxActivePresentations;
+    this.reverseRateLimitCount = reverseRateLimitCount;
+    this.reverseRateLimitWindowMs = reverseRateLimitWindowMs;
     this.now = typeof now === 'function' ? now : () => Date.now();
     this.challenges = new Map();
     this.requests = new Map();
+    this.presentations = new Map();
+    this.presentationStarts = new Map();
     this.cleanupTimer = setInterval(() => this.cleanup(), Math.min(this.ttlMs, 30 * 1000));
     this.cleanupTimer.unref?.();
   }
@@ -211,6 +261,22 @@ export class MobilePairingStore {
     for (const request of this.requests.values()) {
       if (now > request.expiresAt + this.retentionMs) {
         this.requests.delete(request.requestId);
+      }
+    }
+
+    for (const presentation of this.presentations.values()) {
+      if ((presentation.status === 'created' || presentation.status === 'waiting')
+        && now >= presentation.expiresAt) {
+        presentation.status = 'expired';
+      }
+      if (now > presentation.expiresAt + this.retentionMs) {
+        this.presentations.delete(presentation.presentationId);
+      }
+    }
+
+    for (const [source, entry] of this.presentationStarts) {
+      if (now >= entry.windowStartedAt + this.reverseRateLimitWindowMs) {
+        this.presentationStarts.delete(source);
       }
     }
   }
@@ -312,18 +378,17 @@ export class MobilePairingStore {
     const deviceName = normalizePairingDeviceName(rawDeviceName);
     const deviceModel = normalizePairingDeviceModel(rawDeviceModel);
     const key = verifyProof({
-      challenge: challenge.challenge,
-      deviceId,
-      deviceName,
-      deviceModel,
+      proofMessage: pairingProofMessage({
+        challenge: challenge.challenge,
+        deviceId,
+        deviceName,
+        deviceModel,
+      }),
       publicKey,
       signature,
       signatureAlgorithm,
     });
-    const publicKeyFingerprint = createHash('sha256')
-      .update(key.export({ format: 'der', type: 'spki' }))
-      .digest('hex')
-      .slice(0, 32);
+    const fingerprint = publicKeyFingerprint(key);
     const pollToken = randomBytes(32).toString('base64url');
     const request = {
       requestId: requestId(),
@@ -332,7 +397,7 @@ export class MobilePairingStore {
       deviceId,
       deviceName,
       deviceModel,
-      publicKeyFingerprint,
+      publicKeyFingerprint: fingerprint,
       verificationCode: verificationCode(),
       status: 'pending',
       createdAt: current,
@@ -455,6 +520,218 @@ export class MobilePairingStore {
       accessToken: request.session.accessToken,
       ...(request.session.refreshToken ? { refreshToken: request.session.refreshToken } : {}),
       expiresAt: request.session.expiresAt,
+    };
+  }
+
+  presentationSource(value) {
+    const source = String(value ?? '').trim();
+    if (!source || source.length > 200) return 'unknown';
+    return source;
+  }
+
+  activePresentationCount() {
+    return [...this.presentations.values()]
+      .filter((presentation) => presentation.status === 'created' || presentation.status === 'waiting')
+      .length;
+  }
+
+  createPresentation({ baseUrl, source, now } = {}) {
+    const current = this.currentTime(now);
+    this.cleanup(current);
+    const sourceKey = this.presentationSource(source);
+    const prior = this.presentationStarts.get(sourceKey);
+    const entry = !prior || current >= prior.windowStartedAt + this.reverseRateLimitWindowMs
+      ? { windowStartedAt: current, count: 0 }
+      : prior;
+    if (entry.count >= this.reverseRateLimitCount) {
+      throw new MobilePairingError(429, 'presentation_rate_limited', 'Too many pairing presentations were started');
+    }
+    if (this.activePresentationCount() >= this.reverseMaxActivePresentations) {
+      throw new MobilePairingError(503, 'presentation_capacity_reached', 'Pairing presentation capacity is temporarily unavailable');
+    }
+    entry.count += 1;
+    this.presentationStarts.set(sourceKey, entry);
+
+    const expiresAt = current + this.ttlMs;
+    const presentation = {
+      presentationId: presentationId(),
+      challenge: randomBytes(32).toString('base64url'),
+      // Assigned below once, from the sole opaque handle returned to the TV.
+      // Do not retain an unused random handle or any plaintext token.
+      pollTokenHash: '',
+      baseUrl: String(baseUrl || ''),
+      createdAt: current,
+      expiresAt,
+      status: 'created',
+      deviceId: '',
+      deviceName: '',
+      deviceModel: '',
+      publicKeyFingerprint: '',
+      verificationCode: '',
+      completionConsumed: false,
+    };
+    const pollToken = randomBytes(32).toString('base64url');
+    presentation.pollTokenHash = hashText(pollToken);
+    this.presentations.set(presentation.presentationId, presentation);
+    return {
+      presentationId: presentation.presentationId,
+      challenge: presentation.challenge,
+      pollToken,
+      baseUrl: presentation.baseUrl,
+      createdAt: presentation.createdAt,
+      expiresAt: presentation.expiresAt,
+      status: presentation.status,
+    };
+  }
+
+  presentationForId(value, now = this.currentTime()) {
+    const id = String(value ?? '').trim();
+    if (!id || id.length > 256) {
+      throw new MobilePairingError(410, 'invalid_presentation', 'Pairing presentation is invalid or expired');
+    }
+    const presentation = this.presentations.get(id);
+    if (!presentation) {
+      throw new MobilePairingError(410, 'invalid_presentation', 'Pairing presentation is invalid or expired');
+    }
+    if ((presentation.status === 'created' || presentation.status === 'waiting')
+      && now >= presentation.expiresAt) {
+      presentation.status = 'expired';
+    }
+    return presentation;
+  }
+
+  assertPresentationStatus(presentation, expected) {
+    if (presentation.status !== expected) {
+      throw new MobilePairingError(409, 'presentation_not_available', 'Pairing presentation is no longer available');
+    }
+  }
+
+  attestPresentation({
+    presentationId: id,
+    deviceId: rawDeviceId,
+    deviceName: rawDeviceName,
+    deviceModel: rawDeviceModel,
+    publicKey,
+    signature,
+    signatureAlgorithm,
+    now,
+  } = {}) {
+    const current = this.currentTime(now);
+    const presentation = this.presentationForId(id, current);
+    this.assertPresentationStatus(presentation, 'created');
+    const deviceId = normalizePairingDeviceId(rawDeviceId);
+    const deviceName = normalizePairingDeviceName(rawDeviceName);
+    const deviceModel = normalizePairingDeviceModel(rawDeviceModel);
+    if (String(signatureAlgorithm ?? '').trim().toLowerCase() !== 'ecdsa-p256-sha256') {
+      throw new MobilePairingError(400, 'reverse_p256_proof_required', 'Reverse pairing requires a P-256 device proof');
+    }
+    const key = verifyProof({
+      proofMessage: reversePairingProofMessage({
+        presentationId: presentation.presentationId,
+        challenge: presentation.challenge,
+        deviceId,
+        deviceName,
+        deviceModel,
+      }),
+      publicKey,
+      signature,
+      signatureAlgorithm,
+    });
+    presentation.deviceId = deviceId;
+    presentation.deviceName = deviceName;
+    presentation.deviceModel = deviceModel;
+    presentation.publicKeyFingerprint = publicKeyFingerprint(key);
+    presentation.verificationCode = verificationCode();
+    presentation.status = 'waiting';
+    return safePresentation(presentation);
+  }
+
+  inspectPresentation({ presentationId: id, now } = {}) {
+    const presentation = this.presentationForId(id, this.currentTime(now));
+    if (presentation.status !== 'waiting') {
+      return {
+        presentationId: presentation.presentationId,
+        status: presentation.status,
+        expiresAt: presentation.expiresAt,
+      };
+    }
+    return safePresentation(presentation);
+  }
+
+  approvePresentation({ presentationId: id, verificationCode: suppliedCode, now } = {}) {
+    const presentation = this.presentationForId(id, this.currentTime(now));
+    this.assertPresentationStatus(presentation, 'waiting');
+    if (!sameSecretHash(hashText(presentation.verificationCode), hashText(String(suppliedCode ?? '').trim()))) {
+      throw new MobilePairingError(403, 'verification_code_mismatch', 'Verification code does not match');
+    }
+    presentation.status = 'approved';
+    presentation.approvedAt = this.currentTime(now);
+    return safePresentation(presentation);
+  }
+
+  rejectPresentation({ presentationId: id, verificationCode: suppliedCode, now } = {}) {
+    const presentation = this.presentationForId(id, this.currentTime(now));
+    this.assertPresentationStatus(presentation, 'waiting');
+    if (!sameSecretHash(hashText(presentation.verificationCode), hashText(String(suppliedCode ?? '').trim()))) {
+      throw new MobilePairingError(403, 'verification_code_mismatch', 'Verification code does not match');
+    }
+    presentation.status = 'rejected';
+    return safePresentation(presentation);
+  }
+
+  presentationForPoll({ presentationId: id, pollToken, now } = {}) {
+    const presentation = this.presentationForId(id, this.currentTime(now));
+    if (!pollToken || !sameSecretHash(presentation.pollTokenHash, hashText(pollToken))) {
+      throw new MobilePairingError(401, 'invalid_poll_token', 'Invalid pairing poll token');
+    }
+    return presentation;
+  }
+
+  cancelPresentation({ presentationId: id, pollToken, now } = {}) {
+    const presentation = this.presentationForPoll({ presentationId: id, pollToken, now });
+    if (presentation.status === 'created' || presentation.status === 'waiting') {
+      presentation.status = 'cancelled';
+    }
+    return {
+      presentationId: presentation.presentationId,
+      status: presentation.status,
+      expiresAt: presentation.expiresAt,
+    };
+  }
+
+  completePresentation({ presentationId: id, pollToken, issueSession, now } = {}) {
+    const current = this.currentTime(now);
+    const presentation = this.presentationForPoll({ presentationId: id, pollToken, now: current });
+    if (presentation.status === 'approved' && current > presentation.expiresAt + this.completionGraceMs) {
+      presentation.status = 'expired';
+    }
+    if (presentation.status !== 'approved') {
+      return {
+        presentationId: presentation.presentationId,
+        status: presentation.status,
+        expiresAt: presentation.expiresAt,
+      };
+    }
+    if (presentation.completionConsumed) {
+      return {
+        presentationId: presentation.presentationId,
+        status: 'completed',
+        expiresAt: presentation.expiresAt,
+      };
+    }
+    if (typeof issueSession !== 'function') {
+      throw new MobilePairingError(500, 'session_issuer_unavailable', 'Pairing session issuer unavailable');
+    }
+    const session = issueSession({ deviceId: presentation.deviceId });
+    presentation.completionConsumed = true;
+    presentation.status = 'completed';
+    return {
+      presentationId: presentation.presentationId,
+      status: 'approved',
+      deviceId: presentation.deviceId,
+      accessToken: session.accessToken,
+      ...(session.refreshToken ? { refreshToken: session.refreshToken } : {}),
+      expiresAt: session.expiresAt,
     };
   }
 }

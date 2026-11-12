@@ -2,7 +2,7 @@ import { RadioCatalogUnavailableError } from '../lib/moode-radio-catalog.mjs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { MPD_HOST, TRACK_KEY, PORT, MOODE_SSH_HOST, MOODE_SSH_USER } from '../config.mjs';
-import { getBrowseIndex } from '../lib/browse-index.mjs';
+import { getBrowseIndex as defaultGetBrowseIndex } from '../lib/browse-index.mjs';
 
 const execFileP = promisify(execFile);
 
@@ -76,11 +76,11 @@ async function refreshRecentPodcastsCache() {
   return recentPodcastsCache.inflight;
 }
 
-async function refreshRecentRadioCache() {
+async function refreshRecentRadioCache(radioFeatures) {
   if (recentRadioCache.inflight) return recentRadioCache.inflight;
   recentRadioCache.inflight = (async () => {
     try {
-      const resp = await localApi('/config/queue-wizard/radio-favorites', { timeoutMs: 7000 });
+      const resp = radioFeatures ? {ok:true,json:await radioFeatures.favorites()} : await localApi('/config/queue-wizard/radio-favorites', { timeoutMs: 7000 });
       if (!resp.ok || resp?.json?.ok !== true || !Array.isArray(resp.json.favorites)) throw new RadioCatalogUnavailableError();
       const rows = resp.json.favorites;
       const items = rows.map((x) => {
@@ -137,20 +137,20 @@ async function refreshRecentPlaylistsCache() {
 }
 
 export function registerConfigBrowseRoutes(app, deps) {
-  const { requireTrackKey } = deps;
+  const { requireTrackKey, radioFeatures, getBrowseIndex = defaultGetBrowseIndex } = deps;
 
   // Warm browse index in background shortly after API startup (non-blocking).
-  setTimeout(() => {
+  if (deps.warmCaches !== false) setTimeout(() => {
     const mpdHost = String(MPD_HOST || 'moode.local');
     getBrowseIndex(mpdHost).catch(() => null);
   }, 1500);
 
   // Warm recent caches shortly after startup to reduce cold-start empties.
-  setTimeout(() => {
+  if (deps.warmCaches !== false) setTimeout(() => {
     refreshRecentAlbumsFastCache().catch(() => null);
     refreshRecentPodcastsCache().catch(() => null);
     refreshRecentPlaylistsCache().catch(() => null);
-    refreshRecentRadioCache().catch(() => null);
+    refreshRecentRadioCache(radioFeatures).catch(() => null);
   }, 2200);
 
   app.get('/recent/albums', async (req, res) => {
@@ -159,18 +159,20 @@ export function registerConfigBrowseRoutes(app, deps) {
       const now = Date.now();
       const fresh = Array.isArray(recentAlbumsFastCache.items) && recentAlbumsFastCache.items.length && (now - Number(recentAlbumsFastCache.ts || 0)) < 5 * 60 * 1000;
 
-      if (fresh) {
+      const direct = Boolean(req.headers?.['x-sonuvi-controller-dispatch']);
+      if (direct && !requireTrackKey(req, res)) return;
+      if (!direct && fresh) {
         const items = recentAlbumsFastCache.items.slice(0, limit);
         return res.json({ ok: true, count: items.length, items, source: 'library-health-cache' });
       }
 
-      await refreshRecentAlbumsFastCache();
-      if ((!Array.isArray(recentAlbumsFastCache.items) || !recentAlbumsFastCache.items.length)) {
+      if (!direct) await refreshRecentAlbumsFastCache();
+      if (!direct && ((!Array.isArray(recentAlbumsFastCache.items) || !recentAlbumsFastCache.items.length))) {
         // One short retry for cold-start races (e.g., first web-app launch).
         await new Promise((r) => setTimeout(r, 300));
         await refreshRecentAlbumsFastCache();
       }
-      if (Array.isArray(recentAlbumsFastCache.items) && recentAlbumsFastCache.items.length) {
+      if (!direct && Array.isArray(recentAlbumsFastCache.items) && recentAlbumsFastCache.items.length) {
         const items = recentAlbumsFastCache.items.slice(0, limit);
         return res.json({ ok: true, count: items.length, items, source: 'library-health-cache' });
       }
@@ -226,7 +228,7 @@ export function registerConfigBrowseRoutes(app, deps) {
     try {
       const limit = Math.max(1, Math.min(60, Number(req.query?.limit || 18) || 18));
       const fresh = Array.isArray(recentRadioCache.items) && recentRadioCache.items.length && (Date.now() - Number(recentRadioCache.ts || 0)) < 5 * 60 * 1000;
-      if (!fresh) await refreshRecentRadioCache();
+      if (!fresh) await refreshRecentRadioCache(radioFeatures);
       const items = (recentRadioCache.items || []).slice(0, limit);
       return res.json({ ok: true, count: items.length, items, source: 'radio-cache' });
     } catch (e) {
@@ -285,7 +287,9 @@ export function registerConfigBrowseRoutes(app, deps) {
       let albums = Array.isArray(idx?.albums) ? idx.albums : [];
       if (artist) albums = albums.filter((a) => String(a?.artist || '').trim().toLowerCase() === artist);
       if (q) albums = albums.filter((a) => (`${String(a?.artist || '')} ${String(a?.album || '')}`).toLowerCase().includes(q));
-      albums = albums.slice(0, limit);
+      albums = albums.slice(0, limit).map(album => ({ ...album,
+        thumbUrl: album.sampleFile ? `/art/track_640.jpg?file=${encodeURIComponent(album.sampleFile)}` : '',
+      }));
       return res.json({ ok: true, count: albums.length, albums });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e?.message || String(e) });

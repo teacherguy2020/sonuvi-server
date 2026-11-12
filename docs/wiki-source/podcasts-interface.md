@@ -54,3 +54,22 @@ Track-Key-protected `seekrel` action.
 - [configuration-and-administration.md](configuration-and-administration.md)
 
 *Last reviewed: 2026-10-02 06:12 America/Chicago*
+
+## Authenticated LAN browser and migrated test servers — 2026-11-11
+
+Immutable Server subscriptions are read from the shared runtime podcast-map
+directory (`/var/lib/sonuvi/cache/podcasts/maps/subscriptions.json` by default),
+not from the music-library catalog or the legacy `paths.subscriptionsJson`
+setting. A fresh Server has no subscriptions. To populate a disposable replica,
+copy the subscription/map metadata separately, remap `mapJson`/`outM3u` into its
+local shared state, and point `paths.podcastRoot` and each subscription `dir`
+at the actual podcast media mount. Keep test media read-only and automated
+downloads disabled; do not run a second production download/cleanup job.
+
+The authenticated browser permits only the bounded, CSRF-protected
+`POST /podcasts/episodes/list` read (existing subscription RSS plus limit).
+Download, delete, refresh, and subscription mutations are not enabled by this
+read allowance. Playlist covers use existing bearer playlist IDs/artwork through
+the cookie-authenticated HTTPS gateway, rather than direct moOde HTTP images.
+
+*Last reviewed: 2026-11-11 America/Chicago*

@@ -25,9 +25,12 @@ import { registerEchoLinkRoutes } from './echo-link.routes.mjs';
 export function registerAllConfigRoutes(app, deps) {
   registerEchoLinkRoutes(app, {
     requireTrackKey: deps.requireTrackKey,
+    radioFeatures: deps.radioFeatures,
   });
 
   registerConfigQueueWizardBasicRoutes(app, {
+    getBrowseIndex: deps.getBrowseIndex,
+    radioFeatures: deps.radioFeatures,
     requireTrackKey: deps.requireTrackKey,
   });
 
@@ -128,6 +131,8 @@ export function registerAllConfigRoutes(app, deps) {
   });
 
   registerConfigBrowseRoutes(app, {
+    radioFeatures: deps.radioFeatures,
+    getBrowseIndex: deps.getBrowseIndex,
     requireTrackKey: deps.requireTrackKey,
   });
 

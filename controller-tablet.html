@@ -1,6 +1,9 @@
 <!doctype html>
 <html lang="en">
 <head>
+<script src="/__controller/config.js"></script>
+<script src="scripts/controller-browser-auth.js"></script>
+
   <script src="scripts/runtime-auth.js?v=20261024-h2"></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
@@ -1306,15 +1309,16 @@
     r.style.setProperty("--np-blur-overlay", isLight ? "linear-gradient(180deg, rgba(255,255,255,.26), rgba(255,255,255,.42))" : "linear-gradient(180deg, rgba(7,12,20,.36), rgba(7,12,20,.52))");
     r.style.setProperty("--np-blur-overlay-strong", isLight ? "linear-gradient(180deg, rgba(255,255,255,.62), rgba(255,255,255,.78))" : "linear-gradient(180deg, rgba(7,12,20,.74), rgba(7,12,20,.86))");
   }
-  const base = !location.port || location.port === "80" || location.port === "443"
+  const base = globalThis.SonuviControllerWeb ? location.origin : (!location.port || location.port === "80" || location.port === "443"
     ? location.origin
-    : "".concat(location.protocol, "//").concat(location.hostname || "sonuvi.local", ":3101");
+    : "".concat(location.protocol, "//").concat(location.hostname || "sonuvi.local", ":3101"));
   let runtimeTrackKey = "";
   let runtimeMoodeHost = "moode.local";
   var recentLastfmPrefCache = { ts: 0, enabled: false, mode: "toptracks" };
   let quickIndex = [];
   let ensureKeyInFlight = null;
   async function ensureKey() {
+      if (globalThis.SonuviControllerAuth?.enabled) { await globalThis.SonuviControllerAuth.ready; return ""; }
     var _b, _c, _d, _e, _f, _g;
     if (runtimeTrackKey) return runtimeTrackKey;
     if (ensureKeyInFlight) return ensureKeyInFlight;
@@ -1349,10 +1353,10 @@
     if (npMotionCache.has(k)) return String(npMotionCache.get(k) || "");
     try {
       await ensureKey();
-      const url = "".concat(base, "/config/library-health/animated-art/lookup?artist=").concat(encodeURIComponent(a), "&album=").concat(encodeURIComponent(b));
+      const url = "".concat(base, globalThis.SonuviControllerWeb ? "/v1/mobile/animated-art?artist=" : "/config/library-health/animated-art/lookup?artist=").concat(encodeURIComponent(a), "&album=").concat(encodeURIComponent(b));
       const r = await fetch(url, { headers: reqHeaders(false) });
       const j = await r.json().catch(() => ({}));
-      const mp4 = String(((_a6 = j == null ? void 0 : j.hit) == null ? void 0 : _a6.mp4) || "").trim();
+      const mp4 = String((j == null ? void 0 : j.mediaUrl) || ((_a6 = j == null ? void 0 : j.hit) == null ? void 0 : _a6.mp4) || "").trim();
       npMotionCache.set(k, mp4);
       return mp4;
     } catch {
@@ -2238,7 +2242,7 @@
       try {
         const cAlb = loadRecentCache(RECENT_ALBUMS_CACHE_KEY).items;
         const cPod = loadRecentCache(RECENT_PODCASTS_CACHE_KEY).items;
-        const cPl = loadRecentCache(RECENT_PLAYLISTS_CACHE_KEY).items;
+        const cPl = (globalThis.SonuviControllerAuth?.enabled ? {items:[]} : loadRecentCache(RECENT_PLAYLISTS_CACHE_KEY)).items;
         const cRa = loadRecentCache(RECENT_RADIO_CACHE_KEY).items;
         if (Array.isArray(cAlb) && cAlb.length) setIpadRecentItemsIfChanged("albums", cAlb.slice(0, limit));
         if (Array.isArray(cPod) && cPod.length) setIpadRecentItemsIfChanged("podcasts", cPod.slice(0, limit));
@@ -2274,12 +2278,13 @@
         rss: String((p == null ? void 0 : p.rss) || "").trim()
       })) : [];
       if (nextPodcasts.length && setIpadRecentItemsIfChanged("podcasts", nextPodcasts)) saveRecentCache(RECENT_PODCASTS_CACHE_KEY, ipadRecentItems.podcasts);
+      const artwork = globalThis.SonuviControllerAuth?.enabled ? await globalThis.SonuviControllerAuth.playlistArtwork() : null;
       const pl = await fetchJsonWithTimeout("".concat(base, "/recent/playlists?limit=").concat(limit), { cache: "no-store" }, 3200);
       if (pl.ok && ((_b = pl.json) == null ? void 0 : _b.ok) && Array.isArray(pl.json.items)) {
         const playlists = pl.json.items.slice(0, limit).map((x) => ({
           title: String((x == null ? void 0 : x.title) || (x == null ? void 0 : x.playlist) || "(playlist)").trim(),
-          art: String((x == null ? void 0 : x.art) || "").trim(),
-          artAlt: String((x == null ? void 0 : x.artAlt) || "").trim()
+          art: artwork ? artwork.get(String(x.title || x.playlist || "").trim()) || "" : String((x == null ? void 0 : x.art) || "").trim(),
+          artAlt: artwork ? "" : String((x == null ? void 0 : x.artAlt) || "").trim()
         }));
         const nextPlaylists = playlists.map((x) => ({ kind: "playlist", playlist: String((x == null ? void 0 : x.title) || "(playlist)").trim(), title: String((x == null ? void 0 : x.title) || "(playlist)").trim(), art: String((x == null ? void 0 : x.art) || "".concat(base, "/art/current.jpg")) }));
         if (nextPlaylists.length && setIpadRecentItemsIfChanged("playlists", nextPlaylists)) saveRecentCache(RECENT_PLAYLISTS_CACHE_KEY, ipadRecentItems.playlists);
@@ -2506,7 +2511,7 @@
     if (now - Number(recentLastfmPrefCache.ts || 0) < 5e3) return recentLastfmPrefCache;
     try {
       await ensureKey();
-      const rr = await fetchJsonWithTimeout("".concat(base, "/config/runtime/admin"), { cache: "no-store", headers: reqHeaders(false) }, 2400);
+      const rr = await fetchJsonWithTimeout("".concat(base, globalThis.SonuviControllerWeb ? "/config/runtime" : "/config/runtime/admin"), { cache: "no-store", headers: reqHeaders(false) }, 2400);
       const cfg = rr.ok && rr.json && rr.json.config ? rr.json.config : {};
       const enabled = !!(cfg == null ? void 0 : cfg.lastfm) && !!cfg.lastfm.recentsReplaceRadio;
       const m = String((cfg == null ? void 0 : cfg.lastfm) && cfg.lastfm.recentsMode || "toptracks").toLowerCase();
@@ -2643,7 +2648,7 @@
       }
       if (src === "playlists") {
         try {
-          const cachedPl = loadRecentCache(RECENT_PLAYLISTS_CACHE_KEY).items;
+          const cachedPl = (globalThis.SonuviControllerAuth?.enabled ? {items:[]} : loadRecentCache(RECENT_PLAYLISTS_CACHE_KEY)).items;
           if (Array.isArray(cachedPl) && cachedPl.length) {
             recentItems = cachedPl.slice(0, recentLimit());
             rail.innerHTML = "";
@@ -2657,6 +2662,7 @@
           }
         } catch {
         }
+        const artwork = globalThis.SonuviControllerAuth?.enabled ? await globalThis.SonuviControllerAuth.playlistArtwork() : null;
         const pl = await fetchJsonWithTimeout("".concat(base, "/config/queue-wizard/playlists"), { cache: "no-store", headers: reqHeaders(false) }, 3200);
         const names = pl.ok && ((_b = pl.json) == null ? void 0 : _b.ok) && Array.isArray(pl.json.playlists) ? pl.json.playlists : [];
         const cleaned = names.map((n) => String(n || "").trim()).filter(Boolean).filter((n) => !n.toLowerCase().endsWith(".youtube")).filter((n) => !n.toLowerCase().endsWith(".youtube.json"));
@@ -2677,8 +2683,8 @@
             kind: "playlist",
             playlist: n,
             title: n,
-            art: "http://".concat(runtimeMoodeHost, "/imagesw/playlist-covers/").concat(encodeURIComponent(n), ".jpg"),
-            artAlt: "http://".concat(runtimeMoodeHost, "/imagesw/playlist-covers/").concat(encodeURIComponent(safe), ".jpg")
+            art: artwork ? artwork.get(n) || "" : "http://".concat(runtimeMoodeHost, "/imagesw/playlist-covers/").concat(encodeURIComponent(n), ".jpg"),
+            artAlt: artwork ? "" : "http://".concat(runtimeMoodeHost, "/imagesw/playlist-covers/").concat(encodeURIComponent(safe), ".jpg")
           };
         });
         recentItems = await sortPlaylistsByCoverDate(recentItems);
@@ -2995,7 +3001,7 @@
     }
   }
   async function sendPlaybackDirect(action) {
-    if (npQobuzActive) return false;
+    if (globalThis.SonuviControllerWeb || npQobuzActive) return false;
     const a = String(action || "").toLowerCase();
     const map = { prev: "previous", previous: "previous", next: "next", play: "play", pause: "pause", toggle: "toggle_play_pause", stop: "stop" };
     const cmd = map[a];
@@ -4069,6 +4075,34 @@
     if (!act) return;
     const isFastTransport = act === "prev" || act === "next" || act === "play" || act === "pause" || act === "toggle";
     btn.disabled = true;
+    if (globalThis.SonuviControllerWeb && (isFastTransport || act === "shuffle" || act === "repeat")) {
+      // Paired HTTPS controllers use only the authenticated same-origin server.
+      // Confirm actual success instead of treating an opaque moOde fetch as success.
+      let status = document.getElementById("npTransportStatus");
+      if (!status) {
+        status = document.createElement("span");
+        status.id = "npTransportStatus";
+        status.setAttribute("role", "status");
+        npCtrlsEl.appendChild(status);
+      }
+      status.textContent = "";
+      btn.classList.add("loading");
+      try {
+        const out = await sendPlaybackChecked(act === "shuffle" ? "shufflequeue" : act);
+        if (!out.ok) {
+          status.textContent = out.status === 401 ? "Pair this browser again to control playback." : "Playback command failed. Please try again.";
+        } else {
+          btn.classList.add("confirm");
+          setTimeout(() => btn.classList.remove("confirm"), 420);
+          if (act === "shuffle") window.dispatchEvent(new CustomEvent("np-live-queue-changed"));
+        }
+        await refreshNowPlayingCard().catch(() => null);
+      } finally {
+        btn.classList.remove("loading");
+        btn.disabled = false;
+      }
+      return;
+    }
     if (isFastTransport) {
       btn.classList.add("loading");
       if (act === "play" || act === "pause" || act === "toggle") {

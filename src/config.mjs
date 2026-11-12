@@ -6,6 +6,10 @@ import { loadProtectedLastfmEnvironment } from './lib/protected-runtime-secrets.
 
 export const RUNTIME_STATE_PATHS = runtimeStatePaths();
 export const MASTER_CONFIG = loadConfigOrNull();
+// A fresh Server deliberately starts without a playback destination. This is
+// configuration state, not an operator-controlled environment override: the
+// root-managed fresh configuration is the only way to enable this mode.
+export const FRESH_INSTALL_MODE = String(MASTER_CONFIG?.environment || '').trim() === 'fresh-install';
 const PROTECTED_LASTFM = loadProtectedLastfmEnvironment({ statePaths: RUNTIME_STATE_PATHS });
 
 const apiNode = (MASTER_CONFIG?.nodes || []).find(n => n?.role === 'api' || n?.role === 'both') || null;
@@ -40,6 +44,23 @@ export const FAVORITES_PATH = `${MPD_PLAYLIST_DIR}/Favorites.m3u`;
 export const MOODE_SSH_USER = process.env.MOODE_SSH_USER || moodeCfg?.sshUser || 'moode';
 export const MOODE_SSH_HOST = process.env.MOODE_SSH_HOST || moodeCfg?.sshHost || mpdCfg?.host || 'moode.local';
 export const PORT = Number(process.env.PORT || MASTER_CONFIG?.ports?.api || '3000');
+
+/**
+ * A fresh Server has no approved TLS listener yet. Bind its authenticated API
+ * to loopback so administrator/controller material can only traverse the
+ * pinned SSH direct-tcpip path. Established deployments retain their existing
+ * listener unless an operator explicitly configures a reviewed host value.
+ */
+export function resolveApiListenHost({ freshInstall = FRESH_INSTALL_MODE, override = process.env.SONUVI_API_LISTEN_HOST } = {}) {
+  const requested = String(override || '').trim();
+  if (freshInstall && requested && requested !== '127.0.0.1') {
+    throw new Error('fresh Sonuvi installation API must bind to 127.0.0.1');
+  }
+  const selected = freshInstall ? '127.0.0.1' : (requested || '0.0.0.0');
+  if (!['127.0.0.1', '0.0.0.0'].includes(selected)) throw new Error('SONUVI_API_LISTEN_HOST must be 127.0.0.1 or 0.0.0.0');
+  return selected;
+}
+export const API_LISTEN_HOST = resolveApiListenHost();
 
 export const MOODE_BASE_URL = normalizeMoodeBaseUrl(
   process.env.MOODE_BASE_URL || moodeCfg?.baseUrl,
@@ -98,6 +119,13 @@ export const MOBILE_API_SECRET = String(process.env.MOBILE_API_SECRET || '').tri
 export const MOBILE_TRACK_ID_SECRET = String(process.env.MOBILE_TRACK_ID_SECRET || '').trim();
 export const MOBILE_API_ENROLLMENT_CODE = String(process.env.MOBILE_API_ENROLLMENT_CODE || '').trim();
 export const MOBILE_PUBLIC_BASE_URL = String(process.env.MOBILE_PUBLIC_BASE_URL || '').trim();
+// DLNA is opt-in and isolated from the authenticated API listener. A valid
+// private-LAN interface and dedicated port must be selected explicitly.
+export const ENABLE_DLNA_MEDIA_SERVER = process.env.ENABLE_DLNA_MEDIA_SERVER != null
+  ? /^(1|true|yes|on)$/i.test(String(process.env.ENABLE_DLNA_MEDIA_SERVER).trim())
+  : Boolean(MASTER_CONFIG?.features?.dlnaMediaServer);
+export const DLNA_LAN_ADDRESS = String(process.env.DLNA_LAN_ADDRESS || '').trim();
+export const DLNA_PORT = Number(process.env.DLNA_PORT || '3102');
 export const MOBILE_TRACK_CACHE_DIR = RUNTIME_STATE_PATHS.mobileTrackCacheDir;
 export const MOBILE_TRANSCODE_TRACKS =
   process.env.MOBILE_TRANSCODE_TRACKS != null

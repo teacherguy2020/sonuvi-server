@@ -33,7 +33,7 @@ const PUBLIC_SCRIPTS = new Set([
   'about-card.js', 'alexa.js', 'client-preferences.js', 'diagnostics.js', 'echo-link-volume.js',
   'config-editable.js', 'hero-transport.js', 'index-ui.js', 'index.js', 'library-health.js', 'mobile-pairing-ui.js',
   'now-playing-art.js', 'podcasts.js', 'queue-wizard.js', 'radio.js', 'runtime-auth.js',
-  'source-audio.js', 'theme-toggle.js', 'upnp-now-playing.js', 'web-stream.js',
+  'source-audio.js', 'theme-toggle.js', 'upnp-now-playing.js', 'web-stream.js', 'controller-browser-auth.js',
 ]);
 
 const PUBLIC_STYLES = new Set([

@@ -144,3 +144,9 @@ export function createMobileTrackId({ secret, trackIdentity } = {}) {
   const digest = crypto.createHmac('sha256', key).update(identity).digest('base64url').slice(0, 32);
   return `trk_${digest}`;
 }
+
+/** A short-lived capability for one immutable cached animation, never general API access. */
+export function createMobileAnimationTicket({ secret, deviceId, name, ttlMs = 60 * 60 * 1000, now } = {}) {
+  if (!deviceId || !/^[a-f0-9]{40}\.mp4$/.test(String(name))) throw new Error('invalid animation ticket');
+  return createSignedToken({ secret, scope: 'mobile-animation', claims: { deviceId, name }, ttlMs, now });
+}

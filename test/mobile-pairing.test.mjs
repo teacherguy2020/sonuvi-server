@@ -10,6 +10,7 @@ import {
   MobilePairingError,
   MobilePairingStore,
   pairingProofMessage,
+  reversePairingProofMessage,
 } from '../src/lib/mobile-pairing.mjs';
 import {
   createMobileSessionToken,
@@ -45,6 +46,7 @@ function request(overrides = {}) {
     query: {},
     params: {},
     body: {},
+    socket: { remoteAddress: '192.0.2.44' },
     protocol: 'https',
     get(name) { return name.toLowerCase() === 'host' ? 'nowplaying.local:3101' : ''; },
     ...overrides,
@@ -82,6 +84,36 @@ function keyProof({ challenge, deviceId, deviceName, deviceModel, keyPair }) {
   };
 }
 
+function reverseKeyProof({ presentationId, challenge, deviceId, deviceName, deviceModel, keyPair }) {
+  const message = reversePairingProofMessage({
+    presentationId,
+    challenge,
+    deviceId,
+    deviceName,
+    deviceModel,
+  });
+  return {
+    publicKey: keyPair.publicKey.export({ format: 'der', type: 'spki' }).toString('base64url'),
+    signature: sign('sha256', Buffer.from(message, 'utf8'), keyPair.privateKey).toString('base64url'),
+    signatureAlgorithm: 'ecdsa-p256-sha256',
+  };
+}
+
+function reverseEd25519Proof({ presentationId, challenge, deviceId, deviceName, deviceModel, keyPair }) {
+  const message = reversePairingProofMessage({
+    presentationId,
+    challenge,
+    deviceId,
+    deviceName,
+    deviceModel,
+  });
+  return {
+    publicKey: keyPair.publicKey.export({ format: 'der', type: 'spki' }).toString('base64url'),
+    signature: sign(null, Buffer.from(message, 'utf8'), keyPair.privateKey).toString('base64url'),
+    signatureAlgorithm: 'ed25519',
+  };
+}
+
 async function createChallenge(app, headers = { 'x-track-key': 'admin-track-key' }) {
   const res = createResponse();
   await app.routes.get('POST /v1/mobile/pairing/challenges')?.(request({ headers }), res);
@@ -107,6 +139,50 @@ async function submitDevice(app, challenge, overrides = {}) {
     },
   }), res);
   return { res, keyPair, deviceId, deviceName, deviceModel };
+}
+
+async function createPresentation(app, overrides = {}) {
+  const res = createResponse();
+  await app.routes.get('POST /v1/mobile/pairing/presentations')?.(request({
+    headers: overrides.headers || {},
+    socket: { remoteAddress: overrides.remoteAddress || '192.0.2.44' },
+  }), res);
+  return res;
+}
+
+async function attestPresentation(app, presentation, overrides = {}) {
+  const keyPair = overrides.keyPair || generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const deviceId = overrides.deviceId || 'apple-tv-pairing-test';
+  const deviceName = overrides.deviceName || 'Sonavui TV';
+  const deviceModel = overrides.deviceModel || 'AppleTV';
+  const proof = reverseKeyProof({
+    presentationId: presentation.presentationId,
+    challenge: presentation.challenge,
+    deviceId,
+    deviceName,
+    deviceModel,
+    keyPair,
+  });
+  const res = createResponse();
+  await app.routes.get('POST /v1/mobile/pairing/presentations/:presentationId/attest')?.(request({
+    params: { presentationId: presentation.presentationId },
+    body: {
+      deviceId,
+      deviceName,
+      deviceModel,
+      ...proof,
+      ...(overrides.body || {}),
+    },
+  }), res);
+  return { res, keyPair, deviceId, deviceName, deviceModel, proof };
+}
+
+function trustedPairingHeaders() {
+  const token = createMobileSessionToken({
+    secret: 'pairing-api-secret',
+    deviceId: 'trusted-iphone',
+  });
+  return { authorization: `Bearer ${token}` };
 }
 
 test('pairing challenge is admin-protected and QR payload contains no long-lived secret', async () => {
@@ -370,4 +446,187 @@ test('pairing store expires challenges and rejects replay/use-after-approval', (
     (error) => error instanceof MobilePairingError && error.status === 409,
   );
   store.dispose();
+});
+
+test('reverse pairing binds the attested Apple TV P-256 key before trusted bearer approval', async () => {
+  const app = registerPairingFixture();
+  const created = await createPresentation(app);
+  assert.equal(created.statusCode, 201);
+  assert.equal(created.body.protocolVersion, 1);
+  assert.equal('accessToken' in created.body, false);
+  assert.equal('refreshToken' in created.body, false);
+  assert.ok(created.body.pollToken);
+
+  const attested = await attestPresentation(app, created.body);
+  assert.equal(attested.res.statusCode, 202);
+  assert.equal(attested.res.body.status, 'waiting');
+  assert.equal('pollToken' in attested.res.body, false);
+  assert.equal('publicKey' in attested.res.body, false);
+  assert.equal('accessToken' in attested.res.body, false);
+
+  const unauthenticatedRead = createResponse();
+  await app.routes.get('GET /v1/mobile/pairing/presentations/:presentationId')?.(request({
+    params: { presentationId: created.body.presentationId },
+  }), unauthenticatedRead);
+  assert.equal(unauthenticatedRead.statusCode, 403);
+
+  const trustedRead = createResponse();
+  await app.routes.get('GET /v1/mobile/pairing/presentations/:presentationId')?.(request({
+    headers: trustedPairingHeaders(),
+    params: { presentationId: created.body.presentationId },
+  }), trustedRead);
+  assert.equal(trustedRead.statusCode, 200);
+  assert.equal(trustedRead.body.status, 'waiting');
+  assert.equal(trustedRead.body.deviceId, attested.deviceId);
+  assert.match(trustedRead.body.publicKeyFingerprint, /^[a-f0-9]{32}$/);
+  assert.equal('pollToken' in trustedRead.body, false);
+  assert.equal('accessToken' in trustedRead.body, false);
+
+  const wrongCode = createResponse();
+  await app.routes.get('POST /v1/mobile/pairing/presentations/:presentationId/approve')?.(request({
+    headers: trustedPairingHeaders(),
+    params: { presentationId: created.body.presentationId },
+    body: { verificationCode: '000000' },
+  }), wrongCode);
+  assert.equal(wrongCode.statusCode, 403);
+
+  const approved = createResponse();
+  await app.routes.get('POST /v1/mobile/pairing/presentations/:presentationId/approve')?.(request({
+    headers: trustedPairingHeaders(),
+    params: { presentationId: created.body.presentationId },
+    body: { verificationCode: trustedRead.body.verificationCode },
+  }), approved);
+  assert.equal(approved.statusCode, 200);
+  assert.equal(approved.body.status, 'approved');
+
+  const wrongPoll = createResponse();
+  await app.routes.get('GET /v1/mobile/pairing/presentations/:presentationId/complete')?.(request({
+    headers: { 'x-mobile-pairing-poll-token': 'wrong-poll-handle' },
+    params: { presentationId: created.body.presentationId },
+  }), wrongPoll);
+  assert.equal(wrongPoll.statusCode, 401);
+
+  const completed = createResponse();
+  await app.routes.get('GET /v1/mobile/pairing/presentations/:presentationId/complete')?.(request({
+    headers: { 'x-mobile-pairing-poll-token': created.body.pollToken },
+    params: { presentationId: created.body.presentationId },
+  }), completed);
+  assert.equal(completed.statusCode, 200);
+  assert.equal(completed.body.status, 'approved');
+  assert.equal(verifyMobileToken(completed.body.accessToken, {
+    secret: 'pairing-api-secret',
+    scope: 'mobile-api',
+  }).deviceId, attested.deviceId);
+
+  const replay = createResponse();
+  await app.routes.get('GET /v1/mobile/pairing/presentations/:presentationId/complete')?.(request({
+    headers: { 'x-mobile-pairing-poll-token': created.body.pollToken },
+    params: { presentationId: created.body.presentationId },
+  }), replay);
+  assert.equal(replay.statusCode, 200);
+  assert.equal(replay.body.status, 'completed');
+  assert.equal('accessToken' in replay.body, false);
+});
+
+test('reverse pairing rejects a substituted proof, re-attestation, expiry, and anonymous admission exhaustion', async () => {
+  const app = registerPairingFixture();
+  const created = await createPresentation(app);
+  const keyPair = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const tampered = await attestPresentation(app, created.body, {
+    keyPair,
+    deviceName: 'Expected TV',
+    body: { deviceName: 'Substituted TV' },
+  });
+  assert.equal(tampered.res.statusCode, 403);
+
+  const attested = await attestPresentation(app, created.body);
+  assert.equal(attested.res.statusCode, 202);
+  const replayedAttestation = await attestPresentation(app, created.body, {
+    keyPair: generateKeyPairSync('ec', { namedCurve: 'prime256v1' }),
+  });
+  assert.equal(replayedAttestation.res.statusCode, 409);
+
+  let now = 1_000_000;
+  const store = new MobilePairingStore({
+    ttlMs: 100,
+    retentionMs: 500,
+    reverseMaxActivePresentations: 1,
+    reverseRateLimitCount: 1,
+    reverseRateLimitWindowMs: 1_000,
+    now: () => now,
+  });
+  const first = store.createPresentation({ baseUrl: 'https://nowplaying.local:3101', source: '192.0.2.10' });
+  assert.throws(
+    () => store.createPresentation({ baseUrl: 'https://nowplaying.local:3101', source: '192.0.2.10' }),
+    (error) => error instanceof MobilePairingError && error.status === 429,
+  );
+  now += 101;
+  assert.deepEqual(
+    store.inspectPresentation({ presentationId: first.presentationId }).status,
+    'expired',
+  );
+  now += 1_000;
+  const replacement = store.createPresentation({ baseUrl: 'https://nowplaying.local:3101', source: '192.0.2.11' });
+  assert.ok(replacement.presentationId);
+  assert.throws(
+    () => store.createPresentation({ baseUrl: 'https://nowplaying.local:3101', source: '192.0.2.12' }),
+    (error) => error instanceof MobilePairingError && error.status === 503,
+  );
+  store.dispose();
+});
+
+test('reverse pairing rejects non-P-256 proofs before the trusted-device review', async () => {
+  const app = registerPairingFixture();
+  const created = await createPresentation(app);
+  const keyPair = generateKeyPairSync('ed25519');
+  const deviceId = 'apple-tv-ed25519-test';
+  const deviceName = 'Sonavui TV';
+  const deviceModel = 'AppleTV';
+  const res = createResponse();
+  await app.routes.get('POST /v1/mobile/pairing/presentations/:presentationId/attest')?.(request({
+    params: { presentationId: created.body.presentationId },
+    body: {
+      deviceId,
+      deviceName,
+      deviceModel,
+      ...reverseEd25519Proof({
+        presentationId: created.body.presentationId,
+        challenge: created.body.challenge,
+        deviceId,
+        deviceName,
+        deviceModel,
+        keyPair,
+      }),
+    },
+  }), res);
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.error, 'reverse_p256_proof_required');
+
+  const nonP256KeyPair = generateKeyPairSync('ec', { namedCurve: 'secp384r1' });
+  const wrongCurve = await attestPresentation(app, created.body, {
+    keyPair: nonP256KeyPair,
+    deviceId,
+    deviceName,
+    deviceModel,
+  });
+  assert.equal(wrongCurve.res.statusCode, 400);
+  assert.equal(wrongCurve.res.body.error, 'key_curve_mismatch');
+});
+
+test('reverse pairing admission ignores forwarded client-address headers', async () => {
+  const app = registerPairingFixture();
+  const remoteAddress = '198.51.100.24';
+  for (let index = 0; index < 6; index += 1) {
+    const created = await createPresentation(app, {
+      remoteAddress,
+      headers: { 'x-forwarded-for': `203.0.113.${index + 1}` },
+    });
+    assert.equal(created.statusCode, 201);
+  }
+
+  const limited = await createPresentation(app, {
+    remoteAddress,
+    headers: { 'x-forwarded-for': '203.0.113.99' },
+  });
+  assert.equal(limited.statusCode, 429);
 });

@@ -122,6 +122,10 @@ export async function mpdStop() {
 }
 
 export function mpdQueryRaw(command, timeoutMs = 3000) {
+  return mpdQueryRawAt(command, { host: MPD_HOST, port: MPD_PORT, timeoutMs });
+}
+
+export function mpdQueryRawAt(command, { host = MPD_HOST, port = MPD_PORT, timeoutMs = 3000 } = {}) {
   return new Promise((resolve, reject) => {
     try {
       const capability = mpdCommandCapability(command);
@@ -132,7 +136,7 @@ export function mpdQueryRaw(command, timeoutMs = 3000) {
       reject(error);
       return;
     }
-    const sock = net.createConnection({ host: MPD_HOST, port: MPD_PORT });
+    const sock = net.createConnection({ host, port });
 
     let buf = '';
     let finished = false;

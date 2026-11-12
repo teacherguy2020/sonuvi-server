@@ -663,6 +663,211 @@ async function runDiscoverJob({ limitAlbums = 0 } = {}) {
   discoverJob.message = 'Completed';
 }
 
+// Shared read service: callers authenticate at their own boundary; no loopback Track Key.
+export async function lookupAnimatedArt({ artist = '', album = '', appleMusicUrl = '', baseUrl = 'http://localhost', resolve = true } = {}) {
+  const base = new URL(baseUrl);
+  const req = { protocol: base.protocol.slice(0, -1), get: () => base.host,
+    query: { artist, album, url: appleMusicUrl, h264: '1', resolve: resolve ? '1' : '0' } };
+  return appleMusicUrl ? lookupRadioAnimatedArt(req) : lookupAlbumAnimatedArt(req);
+}
+
+export async function resolveAnimatedMediaFile(name) {
+  if (!/^[a-f0-9]{40}\.mp4$/.test(String(name))) return null;
+  const root = await fs.realpath(H264_DIR).catch(() => '');
+  const file = await fs.realpath(path.join(H264_DIR, name)).catch(() => '');
+  if (!root || !file || path.dirname(file) !== root) return null;
+  return (await fs.stat(file)).isFile() ? file : null;
+}
+
+export async function lookupRadioAnimatedArt(req) {
+  const appleUrl = String(req.query?.url || req.query?.appleUrl || '').trim();
+  const resolveOnMiss = String(req.query?.resolve || '1').trim().toLowerCase() !== '0';
+  const wantH264 = String(req.query?.h264 || '1').trim().toLowerCase() !== '0';
+  const normalized = normalizeAppleMotionUrl(appleUrl);
+  if (!normalized) throw Object.assign(new Error('invalid animated-art request'), { status: 400 });
+
+  const key = `radio:${hashUrl(normalized)}`;
+  const cache = await readCache();
+  const radioEntries = cache.radioEntries || {};
+  const existing = radioEntries[key] || null;
+
+  if (existing?.hasMotion && existing?.mp4) {
+    let hit = existing;
+    if (wantH264) {
+      hit = await materializeRadioMotion(req, existing);
+    } else if (existing.sourceCodec === 'h264' && existing.mp4Source) {
+      hit = { ...existing, mp4: String(existing.mp4Source) };
+    }
+    if (hit.mp4 !== existing.mp4 || hit.sourceCodec !== existing.sourceCodec || hit.h264RetryAt !== existing.h264RetryAt) {
+      try {
+        await updateCacheFile(async (liveCache) => {
+          liveCache.radioEntries = liveCache.radioEntries || {};
+          liveCache.radioEntries[key] = hit;
+        });
+      } catch (e) {
+        console.warn('[animated-art] radio cache update failed:', e?.message || e);
+      }
+    }
+    return ({ ok: true, key, hit, source: hit.sourceCodec === 'h264' ? 'cache-hit-local' : 'cache-hit' });
+  }
+
+  const retryAt = Number(existing?.retryAt || 0);
+  if (!resolveOnMiss || (retryAt > Date.now())) {
+    return ({ ok: true, key, hit: existing, source: 'cache-miss-no-resolve' });
+  }
+
+  let p = radioMotionLookupInFlight.get(key);
+  if (!p) {
+    p = (async () => {
+      const hit = await lookupMotionForAppleUrl(normalized);
+      let nextEntry = {
+        key,
+        appleUrl: normalized,
+        mp4: String(hit?.mp4 || ''),
+        hasMotion: !!hit?.ok,
+        matchDebug: hit?.matchDebug || null,
+        reason: String(hit?.reason || ''),
+        retryAt: hit?.ok ? 0 : Date.now() + (10 * 60 * 1000),
+        updatedAt: new Date().toISOString(),
+      };
+
+      if (wantH264 && nextEntry.hasMotion) {
+        nextEntry = await materializeRadioMotion(req, nextEntry);
+      }
+
+      try {
+        await updateCacheFile(async (liveCache) => {
+          liveCache.radioEntries = liveCache.radioEntries || {};
+          const prior = liveCache.radioEntries[key] || null;
+          // Never replace a known hit with a transient provider miss.
+          if (prior?.hasMotion && prior?.mp4 && !nextEntry.hasMotion) {
+            nextEntry = prior;
+            return;
+          }
+          liveCache.radioEntries[key] = nextEntry;
+        });
+      } catch (e) {
+        console.warn('[animated-art] radio cache write failed:', e?.message || e);
+      }
+      return nextEntry;
+    })().finally(() => {
+      radioMotionLookupInFlight.delete(key);
+    });
+    radioMotionLookupInFlight.set(key, p);
+  }
+
+  const resolved = await p;
+  return ({ ok: true, key, hit: resolved, source: resolved?.hasMotion ? 'resolved-hit' : 'resolved-miss' });
+}
+export async function lookupAlbumAnimatedArt(req) {
+  const artist = String(req.query?.artist || '').trim();
+  const album = String(req.query?.album || '').trim();
+  const resolveOnMiss = String(req.query?.resolve || '1').trim().toLowerCase() !== '0';
+  if (!artist || !album) throw Object.assign(new Error('invalid animated-art request'), { status: 400 });
+
+  const key = albumKey(artist, album);
+  const cache = await readCache();
+  const entries = cache.entries || {};
+  const existing = entries[key] || null;
+
+  // Respect manual suppression for this album key.
+  if (existing?.suppress) {
+    return ({ ok: true, key, hit: { ...existing, hasMotion: false, mp4: '', mp4H264: '', reason: 'suppressed-by-user' }, source: 'cache-suppressed' });
+  }
+
+  // Fast path: cached motion hit
+  if (existing?.hasMotion && existing?.mp4) {
+    let hit = existing;
+    const wantH264 = String(req.query?.h264 || '1').trim().toLowerCase() !== '0';
+    if (wantH264 && existing?.sourceCodec === 'h264' && existing?.mp4H264) {
+      const okLocal = await h264PublicUrlExists(existing.mp4H264);
+      if (okLocal) {
+        hit = { ...existing, mp4: String(existing.mp4H264) };
+      } else {
+        // stale cache pointer to missing local file: force re-resolve below.
+        hit = null;
+      }
+    } else if (wantH264) {
+      try {
+        const outPath = await ensureH264ForSource(existing.mp4);
+        if (outPath) {
+          hit = { ...existing, mp4Source: String(existing.mp4Source || existing.mp4 || ''), mp4H264: h264PublicUrlForSource(req, existing.mp4), mp4: h264PublicUrlForSource(req, existing.mp4), sourceCodec: 'h264' };
+          const liveCache = await readCache();
+          liveCache.entries = liveCache.entries || {};
+          liveCache.entries[key] = { ...(liveCache.entries[key] || {}), ...hit, updatedAt: new Date().toISOString() };
+          liveCache.updatedAt = new Date().toISOString();
+          await writeCache(liveCache);
+        }
+      } catch (e) {
+        console.warn('[animated-art] h264 transcode failed (cache-hit):', e?.message || e);
+        // fallback to original mp4 URL
+      }
+    }
+    if (hit) return ({ ok: true, key, hit, source: 'cache-hit' });
+  }
+
+  // Optional miss resolution (default ON): one-shot runtime lookup for current playing album.
+  if (!resolveOnMiss) {
+    return ({ ok: true, key, hit: existing, source: 'cache-miss-no-resolve' });
+  }
+
+  // De-duplicate concurrent lookups by album key.
+  let p = runtimeLookupInFlight.get(key);
+  if (!p) {
+    p = (async () => {
+      try {
+        const hit = await lookupMotionForAlbum(artist, album);
+        const nextEntry = {
+          key,
+          artist,
+          album,
+          tracks: Number(existing?.tracks || 0),
+          appleUrl: String(hit?.appleUrl || ''),
+          mp4: String(hit?.mp4 || ''),
+          matchDebug: hit?.matchDebug || null,
+          hasMotion: !!hit?.ok,
+          reason: String(hit?.reason || ''),
+          updatedAt: new Date().toISOString(),
+        };
+        const liveCache = await readCache();
+        liveCache.entries = liveCache.entries || {};
+        const prior = liveCache.entries[key] || null;
+        // Never clobber a known motion hit with a no-motion probe.
+        if (prior?.hasMotion && prior?.mp4 && !nextEntry.hasMotion) {
+          return prior;
+        }
+        liveCache.entries[key] = nextEntry;
+        liveCache.updatedAt = new Date().toISOString();
+        await writeCache(liveCache);
+        return nextEntry;
+      } finally {
+        runtimeLookupInFlight.delete(key);
+      }
+    })();
+    runtimeLookupInFlight.set(key, p);
+  }
+
+  let resolved = await p;
+  const wantH264 = String(req.query?.h264 || '1').trim().toLowerCase() !== '0';
+  if (wantH264 && resolved?.hasMotion && resolved?.mp4) {
+    try {
+      const outPath = await ensureH264ForSource(resolved.mp4);
+      if (outPath) {
+        resolved = { ...resolved, mp4Source: String(resolved.mp4Source || resolved.mp4 || ''), mp4H264: h264PublicUrlForSource(req, resolved.mp4), mp4: h264PublicUrlForSource(req, resolved.mp4), sourceCodec: 'h264' };
+        const liveCache = await readCache();
+        liveCache.entries = liveCache.entries || {};
+        liveCache.entries[key] = { ...(liveCache.entries[key] || {}), ...resolved, updatedAt: new Date().toISOString() };
+        liveCache.updatedAt = new Date().toISOString();
+        await writeCache(liveCache);
+      }
+    } catch (e) {
+      console.warn('[animated-art] h264 transcode failed (resolved):', e?.message || e);
+      // fallback to original mp4 URL
+    }
+  }
+  return ({ ok: true, key, hit: resolved, source: resolved?.hasMotion ? 'resolved-hit' : 'resolved-miss' });
+}
+
 export function registerConfigLibraryHealthAnimatedArtRoutes(app, deps) {
   const { requireTrackKey } = deps;
 
@@ -722,203 +927,15 @@ export function registerConfigLibraryHealthAnimatedArtRoutes(app, deps) {
   });
 
   app.get('/config/library-health/animated-art/radio-lookup', async (req, res) => {
-    try {
-      if (!requireTrackKey(req, res)) return;
-      const appleUrl = String(req.query?.url || req.query?.appleUrl || '').trim();
-      const resolveOnMiss = String(req.query?.resolve || '1').trim().toLowerCase() !== '0';
-      const wantH264 = String(req.query?.h264 || '1').trim().toLowerCase() !== '0';
-      const normalized = normalizeAppleMotionUrl(appleUrl);
-      if (!normalized) return res.status(400).json({ ok: false, error: 'a valid Apple Music URL is required' });
-
-      const key = `radio:${hashUrl(normalized)}`;
-      const cache = await readCache();
-      const radioEntries = cache.radioEntries || {};
-      const existing = radioEntries[key] || null;
-
-      if (existing?.hasMotion && existing?.mp4) {
-        let hit = existing;
-        if (wantH264) {
-          hit = await materializeRadioMotion(req, existing);
-        } else if (existing.sourceCodec === 'h264' && existing.mp4Source) {
-          hit = { ...existing, mp4: String(existing.mp4Source) };
-        }
-        if (hit.mp4 !== existing.mp4 || hit.sourceCodec !== existing.sourceCodec || hit.h264RetryAt !== existing.h264RetryAt) {
-          try {
-            await updateCacheFile(async (liveCache) => {
-              liveCache.radioEntries = liveCache.radioEntries || {};
-              liveCache.radioEntries[key] = hit;
-            });
-          } catch (e) {
-            console.warn('[animated-art] radio cache update failed:', e?.message || e);
-          }
-        }
-        return res.json({ ok: true, key, hit, source: hit.sourceCodec === 'h264' ? 'cache-hit-local' : 'cache-hit' });
-      }
-
-      const retryAt = Number(existing?.retryAt || 0);
-      if (!resolveOnMiss || (retryAt > Date.now())) {
-        return res.json({ ok: true, key, hit: existing, source: 'cache-miss-no-resolve' });
-      }
-
-      let p = radioMotionLookupInFlight.get(key);
-      if (!p) {
-        p = (async () => {
-          const hit = await lookupMotionForAppleUrl(normalized);
-          let nextEntry = {
-            key,
-            appleUrl: normalized,
-            mp4: String(hit?.mp4 || ''),
-            hasMotion: !!hit?.ok,
-            matchDebug: hit?.matchDebug || null,
-            reason: String(hit?.reason || ''),
-            retryAt: hit?.ok ? 0 : Date.now() + (10 * 60 * 1000),
-            updatedAt: new Date().toISOString(),
-          };
-
-          if (wantH264 && nextEntry.hasMotion) {
-            nextEntry = await materializeRadioMotion(req, nextEntry);
-          }
-
-          try {
-            await updateCacheFile(async (liveCache) => {
-              liveCache.radioEntries = liveCache.radioEntries || {};
-              const prior = liveCache.radioEntries[key] || null;
-              // Never replace a known hit with a transient provider miss.
-              if (prior?.hasMotion && prior?.mp4 && !nextEntry.hasMotion) {
-                nextEntry = prior;
-                return;
-              }
-              liveCache.radioEntries[key] = nextEntry;
-            });
-          } catch (e) {
-            console.warn('[animated-art] radio cache write failed:', e?.message || e);
-          }
-          return nextEntry;
-        })().finally(() => {
-          radioMotionLookupInFlight.delete(key);
-        });
-        radioMotionLookupInFlight.set(key, p);
-      }
-
-      const resolved = await p;
-      return res.json({ ok: true, key, hit: resolved, source: resolved?.hasMotion ? 'resolved-hit' : 'resolved-miss' });
-    } catch (e) {
-      return res.status(500).json({ ok: false, error: e?.message || String(e) });
-    }
+    if (!requireTrackKey(req, res)) return;
+    try { return res.json(await lookupRadioAnimatedArt(req)); }
+    catch (error) { return res.status(error.status || 500).json({ ok: false, error: error.message }); }
   });
 
   app.get('/config/library-health/animated-art/lookup', async (req, res) => {
-    try {
-      if (!requireTrackKey(req, res)) return;
-      const artist = String(req.query?.artist || '').trim();
-      const album = String(req.query?.album || '').trim();
-      const resolveOnMiss = String(req.query?.resolve || '1').trim().toLowerCase() !== '0';
-      if (!artist || !album) return res.status(400).json({ ok: false, error: 'artist and album are required' });
-
-      const key = albumKey(artist, album);
-      const cache = await readCache();
-      const entries = cache.entries || {};
-      const existing = entries[key] || null;
-
-      // Respect manual suppression for this album key.
-      if (existing?.suppress) {
-        return res.json({ ok: true, key, hit: { ...existing, hasMotion: false, mp4: '', mp4H264: '', reason: 'suppressed-by-user' }, source: 'cache-suppressed' });
-      }
-
-      // Fast path: cached motion hit
-      if (existing?.hasMotion && existing?.mp4) {
-        let hit = existing;
-        const wantH264 = String(req.query?.h264 || '1').trim().toLowerCase() !== '0';
-        if (wantH264 && existing?.sourceCodec === 'h264' && existing?.mp4H264) {
-          const okLocal = await h264PublicUrlExists(existing.mp4H264);
-          if (okLocal) {
-            hit = { ...existing, mp4: String(existing.mp4H264) };
-          } else {
-            // stale cache pointer to missing local file: force re-resolve below.
-            hit = null;
-          }
-        } else if (wantH264) {
-          try {
-            const outPath = await ensureH264ForSource(existing.mp4);
-            if (outPath) {
-              hit = { ...existing, mp4Source: String(existing.mp4Source || existing.mp4 || ''), mp4H264: h264PublicUrlForSource(req, existing.mp4), mp4: h264PublicUrlForSource(req, existing.mp4), sourceCodec: 'h264' };
-              const liveCache = await readCache();
-              liveCache.entries = liveCache.entries || {};
-              liveCache.entries[key] = { ...(liveCache.entries[key] || {}), ...hit, updatedAt: new Date().toISOString() };
-              liveCache.updatedAt = new Date().toISOString();
-              await writeCache(liveCache);
-            }
-          } catch (e) {
-            console.warn('[animated-art] h264 transcode failed (cache-hit):', e?.message || e);
-            // fallback to original mp4 URL
-          }
-        }
-        if (hit) return res.json({ ok: true, key, hit, source: 'cache-hit' });
-      }
-
-      // Optional miss resolution (default ON): one-shot runtime lookup for current playing album.
-      if (!resolveOnMiss) {
-        return res.json({ ok: true, key, hit: existing, source: 'cache-miss-no-resolve' });
-      }
-
-      // De-duplicate concurrent lookups by album key.
-      let p = runtimeLookupInFlight.get(key);
-      if (!p) {
-        p = (async () => {
-          try {
-            const hit = await lookupMotionForAlbum(artist, album);
-            const nextEntry = {
-              key,
-              artist,
-              album,
-              tracks: Number(existing?.tracks || 0),
-              appleUrl: String(hit?.appleUrl || ''),
-              mp4: String(hit?.mp4 || ''),
-              matchDebug: hit?.matchDebug || null,
-              hasMotion: !!hit?.ok,
-              reason: String(hit?.reason || ''),
-              updatedAt: new Date().toISOString(),
-            };
-            const liveCache = await readCache();
-            liveCache.entries = liveCache.entries || {};
-            const prior = liveCache.entries[key] || null;
-            // Never clobber a known motion hit with a no-motion probe.
-            if (prior?.hasMotion && prior?.mp4 && !nextEntry.hasMotion) {
-              return prior;
-            }
-            liveCache.entries[key] = nextEntry;
-            liveCache.updatedAt = new Date().toISOString();
-            await writeCache(liveCache);
-            return nextEntry;
-          } finally {
-            runtimeLookupInFlight.delete(key);
-          }
-        })();
-        runtimeLookupInFlight.set(key, p);
-      }
-
-      let resolved = await p;
-      const wantH264 = String(req.query?.h264 || '1').trim().toLowerCase() !== '0';
-      if (wantH264 && resolved?.hasMotion && resolved?.mp4) {
-        try {
-          const outPath = await ensureH264ForSource(resolved.mp4);
-          if (outPath) {
-            resolved = { ...resolved, mp4Source: String(resolved.mp4Source || resolved.mp4 || ''), mp4H264: h264PublicUrlForSource(req, resolved.mp4), mp4: h264PublicUrlForSource(req, resolved.mp4), sourceCodec: 'h264' };
-            const liveCache = await readCache();
-            liveCache.entries = liveCache.entries || {};
-            liveCache.entries[key] = { ...(liveCache.entries[key] || {}), ...resolved, updatedAt: new Date().toISOString() };
-            liveCache.updatedAt = new Date().toISOString();
-            await writeCache(liveCache);
-          }
-        } catch (e) {
-          console.warn('[animated-art] h264 transcode failed (resolved):', e?.message || e);
-          // fallback to original mp4 URL
-        }
-      }
-      return res.json({ ok: true, key, hit: resolved, source: resolved?.hasMotion ? 'resolved-hit' : 'resolved-miss' });
-    } catch (e) {
-      return res.status(500).json({ ok: false, error: e?.message || String(e) });
-    }
+    if (!requireTrackKey(req, res)) return;
+    try { return res.json(await lookupAlbumAnimatedArt(req)); }
+    catch (error) { return res.status(error.status || 500).json({ ok: false, error: error.message }); }
   });
 
   app.post('/config/library-health/animated-art/suppress', async (req, res) => {

@@ -20,7 +20,7 @@ const MANAGED_LABEL = 'com.sonuvi.h4c4b.managed';
 const RELEASE_LABEL = 'com.sonuvi.h4c4b.release-id';
 const EXECUTABLE_CLASSES = Object.freeze({
   startupRequired: Object.freeze(['node']),
-  buildOnly: Object.freeze(['npm']),
+  buildOnly: Object.freeze([]),
   disabledIntegration: Object.freeze(['python3', 'mpc', 'ffmpeg', 'ffprobe', 'metaflac', 'curl', 'ssh', 'scp']),
 });
 const SENSITIVE_ENVIRONMENT = /(?:token|secret|credential|password|passphrase|private.?key|api.?key|track.?key|authorization|session|ssh_auth_sock)/i;

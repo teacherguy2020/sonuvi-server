@@ -272,11 +272,11 @@
     if (!a || !b) return '';
     if (localMotionCache.has(k)) return String(localMotionCache.get(k) || '');
     try {
-      const url = `${apiBase}/config/library-health/animated-art/lookup?artist=${encodeURIComponent(a)}&album=${encodeURIComponent(b)}`;
+      const url = `${apiBase}${globalThis.SonuviControllerWeb ? "/v1/mobile/animated-art" : "/config/library-health/animated-art/lookup"}?artist=${encodeURIComponent(a)}&album=${encodeURIComponent(b)}`;
       const requestKey = currentKey();
       const r = await fetch(url, { headers: requestKey ? { 'x-track-key': requestKey } : {} });
       const j = await r.json().catch(() => ({}));
-      const mp4 = String(j?.hit?.mp4 || '').trim();
+      const mp4 = String(j?.mediaUrl || j?.hit?.mp4 || '').trim();
       // Cache only positive hits so transient misses/auth races can retry on next refresh.
       if (mp4) localMotionCache.set(k, mp4);
       return mp4;

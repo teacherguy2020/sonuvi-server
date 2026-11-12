@@ -1,8 +1,10 @@
 import http from 'node:http';
+import https from 'node:https';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { resolvePublicWebAsset } from './public-web-root.mjs';
+import { createControllerWebGateway } from './controller-web-gateway.mjs';
 
 const MIME_TYPES = Object.freeze({
   '.avif': 'image/avif',
@@ -50,7 +52,7 @@ function sendStatus(response, statusCode) {
  * Serve only assets accepted by the H2 positive allowlist. This deliberately
  * has no directory listing or catch-all checkout fallback.
  */
-export async function createPublicWebServer({ publicRoot } = {}) {
+export async function createPublicWebServer({ publicRoot, tls, ...gatewayOptions } = {}) {
   if (!String(publicRoot || '').trim() || !path.isAbsolute(publicRoot)) {
     throw new Error('public web root must be an absolute path');
   }
@@ -59,7 +61,14 @@ export async function createPublicWebServer({ publicRoot } = {}) {
   const stat = await fs.lstat(root);
   if (!stat.isDirectory()) throw new Error('public web root is not a directory');
 
-  return http.createServer(async (request, response) => {
+  const controllerGateway = createControllerWebGateway(gatewayOptions);
+  const handler = async (request, response) => {
+    if (request.url === '/__controller/config.js' && request.method === 'GET') {
+      response.writeHead(200, { 'content-type': 'text/javascript', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+      response.end('globalThis.SonuviControllerWeb = true;');
+      return;
+    }
+    if (await controllerGateway(request, response)) return;
     if (!['GET', 'HEAD'].includes(String(request.method || 'GET').toUpperCase())) {
       sendStatus(response, 405);
       return;
@@ -86,5 +95,6 @@ export async function createPublicWebServer({ publicRoot } = {}) {
     } catch {
       sendStatus(response, 404);
     }
-  });
+  };
+  return tls ? https.createServer({ ...tls, minVersion: 'TLSv1.2' }, handler) : http.createServer(handler);
 }

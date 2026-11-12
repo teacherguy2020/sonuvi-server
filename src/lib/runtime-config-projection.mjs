@@ -82,6 +82,7 @@ function projectedFeatures(cfg) {
     showAboutWhenNoPersonnel: bool(features.showAboutWhenNoPersonnel, true),
     moodeDisplayTakeover: bool(features.moodeDisplayTakeover, true),
     lastfm: bool(features.lastfm, false),
+    dlnaMediaServer: bool(features.dlnaMediaServer, false),
   };
 }
 
@@ -201,6 +202,8 @@ export function projectRuntimeAdminConfig(cfg, {
         ['notifyEnabled', 'TRACK_NOTIFY_ENABLED'], ['pollMs', 'TRACK_NOTIFY_POLL_MS'],
         ['dedupeMs', 'TRACK_NOTIFY_DEDUPE_MS'], ['alexaMaxAgeMs', 'TRACK_NOTIFY_ALEXA_MAX_AGE_MS'],
         ['pathPiMountBase', 'PI4_MOUNT_BASE'], ['pathPodcastRoot', 'PODCAST_ROOT'],
+        ['pathMusicLibraryRoot', 'MUSIC_LIBRARY_ROOT'], ['featureDlnaMediaServer', 'ENABLE_DLNA_MEDIA_SERVER'],
+        ['featureAlexaSkill', 'ENABLE_ALEXA'], ['apiPort', 'PORT'], ['uiPort', 'SONUVI_WEB_PORT'],
       ].filter(([, variable]) => text(environment[variable])).map(([id]) => id),
     },
     alexa: projectedAlexa(source),
@@ -272,6 +275,23 @@ function updateRecords(value, fields) {
 }
 
 /**
+ * Shared shape validation for both the established web configuration route
+ * and the native administrator route. This validates the persisted runtime
+ * document without accepting arbitrary fields or credentials.
+ */
+export function validateRuntimeConfigShape(cfg) {
+  const errors = [];
+  if (!cfg || typeof cfg !== 'object') errors.push('config must be an object');
+  if (!cfg?.ports || typeof cfg.ports.api !== 'number' || typeof cfg.ports.ui !== 'number') {
+    errors.push('ports.api and ports.ui must be numbers');
+  }
+  if (cfg?.alexa?.enabled && !String(cfg.alexa?.publicDomain || '').trim()) {
+    errors.push('alexa.publicDomain is required when alexa.enabled=true');
+  }
+  return errors;
+}
+
+/**
  * Permit only the editable configuration surface. Unknown incoming fields are
  * dropped before merge, preventing a browser POST from becoming a generic
  * write primitive. Credentials are not a mutable configuration surface and
@@ -307,7 +327,7 @@ export function sanitizeRuntimeConfigUpdate(value) {
   if (hasOwn(incoming, 'features')) {
     const features = object(incoming.features);
     out.features = {};
-    for (const field of ['podcasts', 'ratings', 'radio', 'albumPersonnel', 'showAboutWhenNoPersonnel', 'moodeDisplayTakeover', 'lastfm']) {
+    for (const field of ['podcasts', 'ratings', 'radio', 'albumPersonnel', 'showAboutWhenNoPersonnel', 'moodeDisplayTakeover', 'lastfm', 'dlnaMediaServer']) {
       if (hasOwn(features, field)) out.features[field] = bool(features[field], false);
     }
   }

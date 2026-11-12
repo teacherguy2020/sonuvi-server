@@ -8,6 +8,7 @@ import { log } from '../lib/log.mjs';
 import { runtimeStatePaths } from '../lib/runtime-state-paths.mjs';
 import {
   createMobileMediaTicket,
+  createMobileAnimationTicket,
   createMobileRadioTicket,
   createMobileRefreshToken,
   createMobileSessionToken,
@@ -34,6 +35,7 @@ import {
   buildMobileLocalRecentHistory,
   buildMobileHomeRows,
   mobileHomeSourcePath,
+  orderedMobileHomeRowIDs,
   sanitizeMobileHomeProfile,
 } from '../lib/mobile-home-rows.mjs';
 import {
@@ -51,6 +53,7 @@ import {
   MobilePairingError,
   MobilePairingStore,
   MOBILE_PAIRING_PROTOCOL_VERSION,
+  MOBILE_REVERSE_PAIRING_PROTOCOL_VERSION,
 } from '../lib/mobile-pairing.mjs';
 import {
   normalizeMobilePushEnvironment,
@@ -68,6 +71,8 @@ import {
   waitForQobuzRelease,
 } from '../lib/qobuz-connect-release.mjs';
 import { registerMobileUpnpRoutes } from './mobile-upnp.routes.mjs';
+import { authorizeFirstController } from '../lib/sonuvi-first-controller-handoff.mjs';
+import { requireAdministratorAuthorization } from '../lib/sonuvi-admin-authority.mjs';
 
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const REFRESH_TTL_MS = 365 * 24 * 60 * 60 * 1000;
@@ -635,12 +640,21 @@ export function registerMobileRoutes(app, deps = {}) {
     ? deps.getUpnpPlaybackQueue
     : () => deps.upnpPlaybackQueue || null;
   const expectedRendererHost = text(deps.expectedRendererHost) || '10.0.0.254';
+  const dlnaMediaServer = deps.dlnaMediaServer
+    && typeof deps.dlnaMediaServer.capabilities === 'function'
+    && typeof deps.dlnaMediaServer.resourceForFile === 'function'
+    ? deps.dlnaMediaServer : null;
   // The browser pairing widget authenticates with the existing Track Key.
   // An already-paired native device has an equivalent trusted credential in
   // its bearer session, so it can host the same QR/approval flow without
   // requiring the user to copy the Track Key into that device first.
   const pairingAuthConfigured = Boolean(apiSecret && trackIdSecret && apiSecret !== trackIdSecret);
   const pairingStore = new MobilePairingStore();
+  const administratorAuthority = deps.administratorAuthority
+    && typeof deps.administratorAuthority.verifyAccessToken === 'function'
+    ? deps.administratorAuthority
+    : null;
+  const administratorStateRoot = text(deps.administratorStateRoot);
   const getIndex = typeof deps.getBrowseIndex === 'function'
     ? deps.getBrowseIndex
     : (host) => getBrowseIndex(host);
@@ -698,6 +712,11 @@ export function registerMobileRoutes(app, deps = {}) {
     : null;
   const fetchInternalRequest = typeof deps.fetchInternalRequest === 'function'
     ? deps.fetchInternalRequest
+    : null;
+  const radioFeatures = deps.radioFeatures
+    && typeof deps.radioFeatures.options === 'function'
+    && typeof deps.radioFeatures.preview === 'function'
+    ? deps.radioFeatures
     : null;
   const fetchRadioStream = typeof deps.fetchRadioStream === 'function'
     ? deps.fetchRadioStream
@@ -927,7 +946,9 @@ export function registerMobileRoutes(app, deps = {}) {
     const profile = sanitizeMobileHomeProfile(profileResult?.json?.profile || {});
     const baseUrl = requestBaseUrl(req, mobileBaseUrl);
     const sourcePayloads = new Map();
-    const sourceIDs = [...new Set([...profile.recentRows, 'local-recenttracks'])];
+    const sourceIDs = profile.showRecent
+      ? [...new Set([...orderedMobileHomeRowIDs(profile), 'local-recenttracks'])]
+      : ['local-recenttracks'];
     await Promise.all(sourceIDs.map(async (source) => {
       if (source === 'queue') {
         const queue = await loadMobileQueue(req).catch(() => null);
@@ -2026,15 +2047,15 @@ export function registerMobileRoutes(app, deps = {}) {
   };
 
   const loadRadioStations = async (req, { genres = [], favoritesOnly = false, hqOnly = false } = {}) => {
-    const result = await internalFeatureRequest('/config/queue-wizard/radio-preview', {
-      method: 'POST',
-      body: {
+    const filters = {
         genres: Array.isArray(genres) ? genres.map(text).filter(Boolean) : [],
         favoritesOnly: Boolean(favoritesOnly),
         hqOnly: Boolean(hqOnly),
         maxStations: 2000,
-      },
-    }).catch(() => ({ ok: false }));
+      };
+    const result = radioFeatures
+      ? { ok: true, json: await radioFeatures.preview(filters).catch(() => null) }
+      : await internalFeatureRequest('/config/queue-wizard/radio-preview', { method: 'POST', body: filters }).catch(() => ({ ok: false }));
     if (result?.ok === false || result?.json?.ok === false || !Array.isArray(result?.json?.tracks)) {
       const error = new Error('Radio catalog unavailable. Please retry.'); error.code = 'RADIO_CATALOG_UNAVAILABLE'; throw error;
     }
@@ -2333,6 +2354,25 @@ export function registerMobileRoutes(app, deps = {}) {
     }
   };
 
+  app.get('/v1/mobile/dlna/capabilities', asyncRoute(async (req, res) => {
+    if (!requireSession(req, res)) return;
+    if (!dlnaMediaServer) return res.json({ ok: true, supported: false, enabled: false });
+    return res.json({ ok: true, ...(await dlnaMediaServer.capabilities()) });
+  }));
+
+  app.get('/v1/mobile/dlna/tracks/:trackId/resource', asyncRoute(async (req, res) => {
+    if (!requireSession(req, res)) return;
+    if (!dlnaMediaServer) return errorResponse(res, 404, 'native DLNA MediaServer is unavailable');
+    const catalog = await loadCatalog();
+    const track = catalog.byTrackId.get(text(req?.params?.trackId));
+    if (!track) return errorResponse(res, 404, 'track not found');
+    const capabilities = await dlnaMediaServer.capabilities();
+    if (!capabilities.enabled) return errorResponse(res, 409, 'native DLNA MediaServer is disabled');
+    const resource = await dlnaMediaServer.resourceForFile(track.file);
+    if (!resource) return errorResponse(res, 422, 'track is unavailable for DLNA delivery');
+    return res.json({ ok: true, trackId: track.id, udn: capabilities.udn, available: true, resource });
+  }));
+
   registerMobileUpnpRoutes(app, {
     requireEnabled,
     requireSession,
@@ -2343,8 +2383,9 @@ export function registerMobileRoutes(app, deps = {}) {
   });
 
   app.get('/v1/mobile/animated-art', asyncRoute(async (req, res) => {
-    if (!requireSession(req, res)) return;
-    if (!fetchInternalJson && !fetchInternalRequest) {
+    const session = requireSession(req, res);
+    if (!session) return;
+    if (!deps.animatedArt && !fetchInternalJson && !fetchInternalRequest) {
       return errorResponse(res, 503, 'mobile animated art is not configured');
     }
 
@@ -2367,16 +2408,57 @@ export function registerMobileRoutes(app, deps = {}) {
       pathname = `/config/library-health/animated-art/lookup?artist=${encodeURIComponent(artist)}&album=${encodeURIComponent(album)}&h264=1`;
     }
 
-    const result = await internalFeatureRequest(pathname);
+    const result = deps.animatedArt
+      ? { ok: true, json: await deps.animatedArt.lookup({ artist, album, appleMusicUrl, baseUrl: requestBaseUrl(req, mobileBaseUrl) }) }
+      : await internalFeatureRequest(pathname);
     if (!result?.ok) return errorResponse(res, 502, 'animated-art lookup failed');
 
-    const mediaUrl = safeAnimatedMediaUrl(req, result.json?.hit?.mp4);
+    let mediaUrl = safeAnimatedMediaUrl(req, result.json?.hit?.mp4);
+    if (deps.animatedArt && mediaUrl) {
+      const match = new URL(mediaUrl).pathname.match(/\/config\/library-health\/animated-art\/media\/([a-f0-9]{40}\.mp4)$/);
+      if (match) {
+        const ticket = createMobileAnimationTicket({ secret: apiSecret, deviceId: session.deviceId, name: match[1] });
+        mediaUrl = `${requestBaseUrl(req, mobileBaseUrl)}/v1/mobile/animated-art/media/${match[1]}?ticket=${encodeURIComponent(ticket)}`;
+      }
+    }
     return res.json({
       ok: true,
       hasMotion: Boolean(mediaUrl),
       mediaUrl,
     });
   }));
+
+  app.get('/v1/mobile/animated-art/media/:name', asyncRoute(async (req, res) => {
+    const name = text(req.params?.name);
+    const ticket = verifyMobileToken(text(req.query?.ticket), { secret: apiSecret, scope: 'mobile-animation' });
+    if (!(ticket && ticket.name === name) && !requireSession(req, res)) return;
+    const file = await deps.animatedArt?.resolveMedia(name);
+    if (!file) return errorResponse(res, 404, 'animation not found');
+    res.set('Cache-Control', 'private, no-store');
+    return serveFileWithRange(req, res, file, 'video/mp4');
+  }));
+
+  // Fresh-install-only administrative bridge. It is inert for established
+  // deployments without a protected administrator authority record.
+  app.get('/v1/admin/bootstrap/status', async (req, res) => {
+    if (!administratorAuthority || !administratorStateRoot) return errorResponse(res, 404, 'administrator bootstrap is unavailable');
+    try {
+      const claims = await requireAdministratorAuthorization({ authority: administratorAuthority, bearerToken: readBearerToken(req) });
+      return res.json({ ok: true, role: claims.role, administratorId: claims.administratorId });
+    } catch {
+      return errorResponse(res, 401, 'administrator authorization is required');
+    }
+  });
+  app.post('/v1/admin/bootstrap/first-controller', async (req, res) => {
+    if (!administratorAuthority || !administratorStateRoot || !apiSecret) return errorResponse(res, 404, 'administrator bootstrap is unavailable');
+    try {
+      const handoff = await authorizeFirstController({ authority: administratorAuthority, administratorToken: readBearerToken(req), mobileApiSecret: apiSecret, controllerDeviceId: req.body?.deviceId, stateRoot: administratorStateRoot });
+      return res.status(201).json({ ok: true, ...handoff });
+    } catch (error) {
+      if (error?.message === 'administrator_authorization_required') return errorResponse(res, 401, 'administrator authorization is required');
+      return errorResponse(res, 400, 'first-controller authorization failed');
+    }
+  });
 
   const pairingRoute = (handler) => async (req, res) => {
     if (!requireEnabled(res)) return;
@@ -2417,6 +2499,14 @@ export function registerMobileRoutes(app, deps = {}) {
     }
     return true;
   };
+
+  const requireTrustedMobilePairingCredential = (req, res) => {
+    if (!pairingAuthConfigured) { errorResponse(res, 503, 'pairing display authorization is not configured'); return false; }
+    const claims = verifyMobileToken(readBearerToken(req), { secret: apiSecret, scope: 'mobile-api' });
+    if (!claims) { errorResponse(res, 403, 'Forbidden'); return false; }
+    return true;
+  };
+  const pairingPresentationSource = (req) => text(req?.socket?.remoteAddress || req?.connection?.remoteAddress) || 'unknown';
 
   const requirePairingDisplay = (req, res) => {
     if (!requirePairingCredential(req, res)) return null;
@@ -2516,6 +2606,27 @@ export function registerMobileRoutes(app, deps = {}) {
     });
     return res.json({ ok: true, ...result });
   }));
+
+  app.post('/v1/mobile/pairing/presentations', pairingRoute(async (req, res) => {
+    const created = pairingStore.createPresentation({ baseUrl: pairingBaseUrl(req, mobileBaseUrl), source: pairingPresentationSource(req) });
+    return res.status(201).json({ ok: true, protocolVersion: MOBILE_REVERSE_PAIRING_PROTOCOL_VERSION, ...created });
+  }));
+  app.post('/v1/mobile/pairing/presentations/:presentationId/attest', pairingRoute(async (req, res) => {
+    const result = pairingStore.attestPresentation({ presentationId: req?.params?.presentationId, deviceId: req?.body?.deviceId, deviceName: req?.body?.deviceName, deviceModel: req?.body?.deviceModel, publicKey: req?.body?.publicKey, signature: req?.body?.signature, signatureAlgorithm: req?.body?.signatureAlgorithm });
+    return res.status(202).json({ ok: true, ...result });
+  }));
+  app.get('/v1/mobile/pairing/presentations/:presentationId', pairingRoute(async (req, res) => {
+    if (!requireTrustedMobilePairingCredential(req, res)) return;
+    return res.json({ ok: true, protocolVersion: MOBILE_REVERSE_PAIRING_PROTOCOL_VERSION, ...pairingStore.inspectPresentation({ presentationId: req?.params?.presentationId }) });
+  }));
+  for (const [route, method] of [['approve', 'approvePresentation'], ['reject', 'rejectPresentation']]) {
+    app.post('/v1/mobile/pairing/presentations/:presentationId/' + route, pairingRoute(async (req, res) => {
+      if (!requireTrustedMobilePairingCredential(req, res)) return;
+      return res.json({ ok: true, ...pairingStore[method]({ presentationId: req?.params?.presentationId, verificationCode: req?.body?.verificationCode }) });
+    }));
+  }
+  app.post('/v1/mobile/pairing/presentations/:presentationId/cancel', pairingRoute(async (req, res) => res.json({ ok: true, ...pairingStore.cancelPresentation({ presentationId: req?.params?.presentationId, pollToken: text(req?.headers?.['x-mobile-pairing-poll-token']) }) })));
+  app.get('/v1/mobile/pairing/presentations/:presentationId/complete', pairingRoute(async (req, res) => res.json({ ok: true, ...pairingStore.completePresentation({ presentationId: req?.params?.presentationId, pollToken: text(req?.headers?.['x-mobile-pairing-poll-token']), issueSession: ({ deviceId }) => issueMobileSession(deviceId) }) })));
 
   app.post('/v1/mobile/session', asyncRoute(async (req, res) => {
     const suppliedCode = text(req?.headers?.['x-mobile-enrollment-code']);
@@ -2921,7 +3032,9 @@ export function registerMobileRoutes(app, deps = {}) {
 
   app.get('/v1/mobile/radio/options', asyncRoute(async (req, res) => {
     if (!requireSession(req, res)) return;
-    const result = await internalFeatureRequest('/config/queue-wizard/radio-options').catch(() => ({ ok: false }));
+    const result = radioFeatures
+      ? { ok: true, json: await radioFeatures.options().catch(() => null) }
+      : await internalFeatureRequest('/config/queue-wizard/radio-options').catch(() => ({ ok: false }));
     if (result?.ok === false || result?.json?.ok === false || !Array.isArray(result?.json?.genres)) return errorResponse(res, 503, 'Radio catalog unavailable. Please retry.', 'RADIO_CATALOG_UNAVAILABLE');
     return res.json({ ok: true, genres: Array.isArray(result?.json?.genres) ? result.json.genres.map(text).filter(Boolean) : [] });
   }));
@@ -4767,9 +4880,10 @@ export function registerMobileRoutes(app, deps = {}) {
     const q = text(req?.query?.q).toLocaleLowerCase();
     if (!q) return errorResponse(res, 400, 'q is required');
     const tracks = catalog.tracks
-      .filter((track) => `${track.title} ${track.artist} ${track.album}`.toLocaleLowerCase().includes(q))
-    const enriched = await Promise.all(tracks.map((track) => enrichSourceAudio(track)));
-    return res.json({ ok: true, ...page(enriched.map((track) => publicMobileTrack(track, { baseUrl: requestBaseUrl(req, mobileBaseUrl) })), pageArgs(req.query)) });
+      .filter((track) => `${track.title} ${track.artist} ${track.album}`.toLocaleLowerCase().includes(q));
+    const result = page(tracks, pageArgs(req.query));
+    const enriched = await Promise.all(result.items.map((track) => enrichSourceAudio(track)));
+    return res.json({ ok: true, ...result, items: enriched.map((track) => publicMobileTrack(track, { baseUrl: requestBaseUrl(req, mobileBaseUrl) })) });
   }));
 
   app.get('/v1/mobile/catalog/videos', asyncRoute(async (req, res) => {

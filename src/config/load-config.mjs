@@ -1,3 +1,4 @@
+import { readEffectiveRuntimeConfig, NativeConfigurationOverlayError } from '../lib/native-configuration-store.mjs';
 import fs from 'node:fs';
 import { runtimeStatePaths } from '../lib/runtime-state-paths.mjs';
 import {
@@ -8,10 +9,6 @@ import {
 
 function configPaths() {
   return runtimeStatePaths();
-}
-
-function readJson(filePath) {
-  return JSON.parse(fs.readFileSync(filePath, 'utf8'));
 }
 
 function assertConfig(cfg) {
@@ -45,7 +42,7 @@ export function loadConfig(customPath = configPaths().configPath) {
     );
   }
 
-  const cfg = readJson(customPath);
+  const cfg = readEffectiveRuntimeConfig(customPath, { paths });
   if (paths.sharedStateEnabled) {
     assertImmutableRuntimeConfig(cfg, { context: 'immutable runtime configuration' });
   }
@@ -57,7 +54,7 @@ export function loadConfigOrNull(customPath) {
     return loadConfig(customPath);
   } catch (error) {
     if (configPaths().sharedStateEnabled
-      && (error instanceof SecretConfigFieldError || error instanceof ImmutableConfigSchemaError)) {
+      && (error instanceof SecretConfigFieldError || error instanceof ImmutableConfigSchemaError || error instanceof NativeConfigurationOverlayError)) {
       throw error;
     }
     return null;

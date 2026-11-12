@@ -1,0 +1,22 @@
+{
+  "contract": "sonuvi.gate-b2-package.v1",
+  "createdAt": "2026-11-04T20:28:44.218Z",
+  "files": [
+    {
+      "path": "sonuvi-bootstrap-helper.mjs",
+      "sha256": "e5eaf17b3d1ea9c142b4860532fece88eb1dbb27c3bea203feccdffbae6063a4"
+    },
+    {
+      "path": "package-lock.json",
+      "sha256": "c1a9056a42d9947bbef429edc7f12038c5ec03704e0a1b635e8e6014691b8f02"
+    },
+    {
+      "path": "sonuvi-api.service.in",
+      "sha256": "0e560cabca5755004a5189950a5f081f1d063acacd9610514e52f4a484d9aa47"
+    },
+    {
+      "path": "sonuvi-web.service.in",
+      "sha256": "10d77a3aaef4a6fb5e1efa4f5257d8e9653db66b88fb99b5164bb0e131536e6b"
+    }
+  ]
+}

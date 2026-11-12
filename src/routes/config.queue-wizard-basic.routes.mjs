@@ -1,13 +1,15 @@
+import { normalizeGenreLabel } from '../lib/radio-genre-label.mjs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { MPD_HOST, MOODE_SSH_HOST, MOODE_SSH, MPD_PLAYLIST_DIR } from '../config.mjs';
-import { getBrowseIndex } from '../lib/browse-index.mjs';
+import { getBrowseIndex as defaultGetBrowseIndex } from '../lib/browse-index.mjs';
 import { radioDisplayName } from '../lib/radio-display.mjs';
 import { isPodcastPlaylist } from '../lib/playlist-classification.mjs';
 import { runtimeStatePaths } from '../lib/runtime-state-paths.mjs';
 import { readMoodeRadioCatalog, filterRadioCatalog } from '../lib/moode-radio-catalog.mjs';
+import { createRadioFeatureService } from '../lib/radio-feature-service.mjs';
 
 const execFileP = promisify(execFile);
 const RADIO_DB_SEP = '__NPSEP__';
@@ -252,20 +254,6 @@ async function resolveIheartLivePage(rawUrl = '', fallbackName = '') {
   };
 }
 
-function normalizeGenreLabel(v = '') {
-  const raw = String(v || '').trim();
-  if (!raw) return '';
-  const lower = raw.toLowerCase();
-  const keepUpper = new Set(['r&b', 'edm', 'dj', 'am', 'fm']);
-  return lower
-    .split(/\s+/)
-    .map((w) => {
-      if (keepUpper.has(w)) return w.toUpperCase();
-      if (w.length <= 2) return w.toUpperCase();
-      return w.charAt(0).toUpperCase() + w.slice(1);
-    })
-    .join(' ');
-}
 
 function isGenericStationName(v = '') {
   const s = String(v || '').trim().toLowerCase();
@@ -451,7 +439,8 @@ async function saveMoodeRadioLogo({ stationName, faviconUrl }) {
 }
 
 export function registerConfigQueueWizardBasicRoutes(app, deps) {
-  const { requireTrackKey, readRadioCatalog = readMoodeRadioCatalog } = deps;
+  const { requireTrackKey, readRadioCatalog = readMoodeRadioCatalog, getBrowseIndex = defaultGetBrowseIndex } = deps;
+  const radioFeatures = deps.radioFeatures || createRadioFeatureService({ readRadioCatalog });
   const catalogUnavailable = res => res.status(503).json({ ok: false, code: 'RADIO_CATALOG_UNAVAILABLE', error: 'Radio catalog unavailable. Check the moOde connection and retry.' });
 
   // --- queue wizard options (artists/genres) ---
@@ -976,21 +965,7 @@ export function registerConfigQueueWizardBasicRoutes(app, deps) {
   app.get('/config/queue-wizard/radio-options', async (req, res) => {
     try {
       if (!requireTrackKey(req, res)) return;
-      const catalog = await readRadioCatalog();
-      const genresByKey = new Map();
-      for (const row of catalog) {
-        const gRaw = row.genre.trim();
-        if (!gRaw) continue;
-        for (const g of gRaw.split(/[;,|/]/).map((x) => String(x || '').trim()).filter(Boolean)) {
-          const key = String(g || '').toLowerCase();
-          if (!key) continue;
-          if (!genresByKey.has(key)) genresByKey.set(key, normalizeGenreLabel(g));
-        }
-      }
-      return res.json({
-        ok: true,
-        genres: Array.from(genresByKey.values()).sort((a,b)=>a.localeCompare(b, undefined, { sensitivity:'base'})),
-      });
+      return res.json(await radioFeatures.options());
     } catch (e) {
       return catalogUnavailable(res);
     }
@@ -999,17 +974,7 @@ export function registerConfigQueueWizardBasicRoutes(app, deps) {
   app.get('/config/queue-wizard/radio-favorites', async (req, res) => {
     try {
       if (!requireTrackKey(req, res)) return;
-      const favorites = (await readRadioCatalog()).filter(row => row.type.toLowerCase() === 'f').map(({ station, name, genre, bitrate, format, type }) => {
-        return {
-          file: String(station || '').trim(),
-          stationName: radioDisplayName(name),
-          genre: String(genre || '').trim(),
-          bitrate: String(bitrate || '').trim(),
-          format: String(format || '').trim(),
-          radioType: String(type || '').trim(),
-        };
-      }).filter((x)=>x.file);
-      return res.json({ ok: true, count: favorites.length, favorites });
+      return res.json(await radioFeatures.favorites());
     } catch (e) {
       return catalogUnavailable(res);
     }
@@ -1102,31 +1067,7 @@ export function registerConfigQueueWizardBasicRoutes(app, deps) {
 
       const favoriteStations = Array.isArray(req.body?.favoriteStations)
         ? req.body.favoriteStations.map(x => String(x || '').trim()).filter(Boolean) : [];
-      const catalog = filterRadioCatalog(await readRadioCatalog(), { genres, favoritesOnly, hqOnly, favoriteStations, maxStations });
-      const tracks = catalog.map(({ station, name, genre, bitrate, format, type }) => {
-        const logoName = String(name || '').trim();
-        const stationName = radioDisplayName(logoName) || 'Radio Station';
-        const file = String(station || '').trim();
-        return {
-          artist: stationName,
-          title: '',
-          album: stationName,
-          stationName,
-          // Keep the provider/catalog spelling for logo lookup. The display
-          // name intentionally strips prefixes such as "iHeart", but moOde
-          // stores those prefixes in the corresponding logo filename.
-          logoName: logoName || stationName,
-          genre: String(genre || '').trim(),
-          bitrate: String(bitrate || '').trim(),
-          format: String(format || '').trim(),
-          radioType: String(type || '').trim(),
-          isFavoriteStation: String(type || '').trim().toLowerCase() === 'f',
-          file,
-          isStream: true,
-        };
-      }).filter((x)=>x.file);
-
-      return res.json({ ok: true, count: tracks.length, tracks });
+      return res.json(await radioFeatures.preview({ genres, favoritesOnly, hqOnly, favoriteStations, maxStations }));
     } catch (e) {
       return catalogUnavailable(res);
     }

@@ -48,3 +48,9 @@ whether a change is browser-local, API-runtime, service, or moOde-host state
 before restarting anything.
 
 *Last reviewed: 2026-09-22 America/Chicago*
+
+## Optional restricted hardware HTTP listener
+
+Legacy Seeburg, Mills and Mac Mabel clients have an explicit opt-in, source-IP/role allowlisted HTTP listener. It is separate from the general API, which must remain loopback-only. A protected Track Key is required; Mills also requires Harmony identifiers. No automatic credential migration or client/DNS changes. See [hardware compatibility runbook](../runbooks/sonuvi-hardware-compatibility.md) for contracts, readiness and staged activation.
+
+Last updated: 2026-11-11
