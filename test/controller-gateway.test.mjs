@@ -130,7 +130,7 @@ test('logout wins against an in-flight renewal and remains logged out after rest
  const origin='http://127.0.0.1:'+web.address().port;const headers={cookie:'sonuvi_controller='+sessionId};
  const waiting=fetch(origin+'/__controller/session',{headers});await started;
  const logout=await fetch(origin+'/__controller/logout',{method:'POST',headers:{...headers,origin,'x-csrf-token':'csrf'}});assert.equal(logout.status,200);
- releaseRenewal();const result=await waiting;assert.equal(result.status,401);assert.deepEqual(await result.json(),{ok:false,error:'Controller authorization was revoked; pair again.'});assert.match(result.headers.get('set-cookie')||'',/sonuvi_controller=; Max-Age=0/);
+ releaseRenewal();const result=await waiting;assert.equal(result.status,401);assert.deepEqual(await result.json(),{ok:false,error:'Controller authorization was revoked; pair again.'});const clearedCookie=result.headers.get('set-cookie')||'';assert.match(clearedCookie,/^sonuvi_controller=;/);assert.match(clearedCookie,/(?:^|;\s*)Max-Age=0(?:;|$)/);
  assert.equal(JSON.parse(await fs.readFile(sessionFile,'utf8')).sessions.length,0);
  await close(web);web=createWeb();await new Promise(resolve=>web.listen(0,'127.0.0.1',resolve));
  const restarted=await fetch('http://127.0.0.1:'+web.address().port+'/__controller/session',{headers});assert.equal(restarted.status,200);assert.equal((await restarted.json()).authenticated,false);
