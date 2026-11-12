@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 import { createMobileAnimationTicket, createMobileSessionToken } from '../src/lib/mobile-auth.mjs';
 import { startControllerStack, listen, close } from './helpers/controller-stack.mjs';
 import { createControllerWebGateway } from '../src/lib/controller-web-gateway.mjs';
@@ -102,4 +103,44 @@ test('LAN browser read contracts and fresh-browser approval survive web restart 
  await s.restartWeb();
  const resumed=await fetch(s.url+'/config/browse/albums',{headers:{cookie:second.cookie}});assert.equal(resumed.status,200);assert.equal((await resumed.json()).albums[0].album,'Fixture Album');
  assert.equal((await fetch(s.url+'/config/runtime/admin',{headers:{cookie:second.cookie}})).status,404);
+});
+
+test('persistent browser grants silently renew past access, browser and yearly legacy limits',async t=>{
+ let clock=1_800_000_000_000,renewals=0;
+ const temp=await fs.mkdtemp(path.join(os.tmpdir(),'sonuvi-persistent-controller-'));const sessionFile=path.join(temp,'sessions.json');
+ const sessionId='a'.repeat(43);
+ await fs.writeFile(sessionFile,JSON.stringify({origin:'',sessions:[[sessionId,{csrf:'csrf',accessToken:'expired-access',accessExpiresAt:clock-1,refreshToken:'persistent-controller-refresh'}]]}),{mode:0o600});
+ const api=http.createServer((req,res)=>{if(req.method==='POST'&&req.url==='/v1/mobile/session/refresh'){renewals++;req.resume();res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({accessToken:'access-'+renewals,refreshToken:'persistent-controller-refresh',expiresAt:new Date(clock+12*60*60*1000).toISOString()}));return;}res.writeHead(404);res.end();});
+ await listen(api);t.after(async()=>{await close(api);await fs.rm(temp,{recursive:true,force:true});});
+ const createWeb=()=>{const gateway=createControllerWebGateway({apiPort:api.address().port,allowLoopbackFixture:true,sessionFile,now:()=>clock});return http.createServer((req,res)=>gateway(req,res));};
+ let web=createWeb();await listen(web);t.after(()=>close(web));
+ const request=()=>fetch('http://127.0.0.1:'+web.address().port+'/__controller/session',{headers:{cookie:'sonuvi_controller='+sessionId}});
+ const [first,second]=await Promise.all([request(),request()]);
+ assert.equal(first.status,200);assert.equal(second.status,200);assert.equal(renewals,1);
+ assert.match(first.headers.get('set-cookie'),/Max-Age=29808000/);
+ clock+=12*60*60*1000;
+ assert.equal((await request()).status,200);assert.equal(renewals,2);
+ await close(web);web=createWeb();await new Promise(resolve=>web.listen(0,'127.0.0.1',resolve));
+ clock+=366*24*60*60*1000;
+ assert.equal((await request()).status,200);assert.equal(renewals,3);
+ const logout=await fetch('http://127.0.0.1:'+web.address().port+'/__controller/logout',{method:'POST',headers:{cookie:'sonuvi_controller='+sessionId,origin:'http://127.0.0.1:'+web.address().port,'x-csrf-token':'csrf'}});
+ assert.equal(logout.status,200);
+ assert.equal((await request()).status,200);assert.equal((await (await request()).json()).authenticated,false);
+});
+
+test('legacy browser state migrates only through signed authority and retains grants through transient failure',async t=>{
+ let clock=1_800_000_000_000,mode='ok',migrationCalls=0;
+ const temp=await fs.mkdtemp(path.join(os.tmpdir(),'sonuvi-controller-migration-'));const sessionFile=path.join(temp,'sessions.json');
+ const sessionId='b'.repeat(43);
+ await fs.writeFile(sessionFile,JSON.stringify({origin:'',sessions:[[sessionId,{csrf:'csrf',accessToken:'legacy-signed-access',expiresAt:clock+60*60*1000}]]}),{mode:0o600});
+ const api=http.createServer((req,res)=>{if(req.method==='POST'&&req.url==='/v1/mobile/session/refresh'){migrationCalls+=req.headers['x-mobile-session-migration']==='1'?1:0;req.resume();if(mode==='failure'){res.writeHead(503);res.end();return;}if(mode==='revoked'){res.writeHead(401);res.end();return;}res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({accessToken:'renewed-access',refreshToken:'persistent-controller-refresh',expiresAt:new Date(clock+12*60*60*1000).toISOString()}));return;}res.writeHead(404);res.end();});
+ await listen(api);t.after(async()=>{await close(api);await fs.rm(temp,{recursive:true,force:true});});
+ const gateway=createControllerWebGateway({apiPort:api.address().port,allowLoopbackFixture:true,sessionFile,now:()=>clock});const web=http.createServer((req,res)=>gateway(req,res));await listen(web);t.after(()=>close(web));
+ const request=()=>fetch('http://127.0.0.1:'+web.address().port+'/__controller/session',{headers:{cookie:'sonuvi_controller='+sessionId}});
+ assert.equal((await request()).status,200);assert.equal(migrationCalls,1);
+ let stored=JSON.parse(await fs.readFile(sessionFile,'utf8'));assert.equal(stored.version,2);assert.equal(stored.sessions[0][1].refreshToken,'persistent-controller-refresh');
+ clock+=12*60*60*1000;mode='failure';assert.equal((await request()).status,502);
+ stored=JSON.parse(await fs.readFile(sessionFile,'utf8'));assert.equal(stored.sessions.length,1);
+ mode='revoked';assert.equal((await request()).status,401);
+ stored=JSON.parse(await fs.readFile(sessionFile,'utf8'));assert.equal(stored.sessions.length,0);
 });

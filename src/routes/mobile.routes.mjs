@@ -10,7 +10,8 @@ import {
   createMobileMediaTicket,
   createMobileAnimationTicket,
   createMobileRadioTicket,
-  createMobileRefreshToken,
+  createPersistentControllerRefreshToken,
+  createPersistentMobileRefreshToken,
   createMobileSessionToken,
   createMobileTrackId,
   readBearerToken,
@@ -75,7 +76,6 @@ import { authorizeFirstController } from '../lib/sonuvi-first-controller-handoff
 import { requireAdministratorAuthorization } from '../lib/sonuvi-admin-authority.mjs';
 
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
-const REFRESH_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 const MEDIA_TICKET_TTL_MS = 60 * 60 * 1000;
 const RADIO_TICKET_TTL_MS = 30 * 60 * 1000;
 const MAX_PAGE_SIZE = 100;
@@ -2329,11 +2329,13 @@ export function registerMobileRoutes(app, deps = {}) {
     return false;
   };
 
-  const issueMobileSession = (deviceId) => {
+  const issueMobileSession = (deviceId, { persistentControllerRefresh = false } = {}) => {
     const issuedAt = Date.now();
     return {
       accessToken: createMobileSessionToken({ secret: apiSecret, deviceId, ttlMs: SESSION_TTL_MS, now: issuedAt }),
-      refreshToken: createMobileRefreshToken({ secret: apiSecret, deviceId, ttlMs: REFRESH_TTL_MS, now: issuedAt }),
+      refreshToken: persistentControllerRefresh
+        ? createPersistentControllerRefreshToken({ secret: apiSecret, deviceId, now: issuedAt })
+        : createPersistentMobileRefreshToken({ secret: apiSecret, deviceId, now: issuedAt }),
       expiresAt: new Date(issuedAt + SESSION_TTL_MS).toISOString(),
       deviceId,
     };
@@ -2643,6 +2645,11 @@ export function registerMobileRoutes(app, deps = {}) {
   app.post('/v1/mobile/session/refresh', asyncRoute(async (req, res) => {
     const refreshToken = text(req?.headers?.['x-mobile-refresh-token']);
     let claims = verifyMobileToken(refreshToken, { secret: apiSecret, scope: 'mobile-refresh' });
+    let persistentControllerRefresh = false;
+    if (!claims) {
+      claims = verifyMobileToken(refreshToken, { secret: apiSecret, scope: 'controller-web-refresh' });
+      persistentControllerRefresh = Boolean(claims);
+    }
     if (!claims
       && !refreshToken
       && text(req?.headers?.['x-mobile-session-migration']) === '1') {
@@ -2654,11 +2661,14 @@ export function registerMobileRoutes(app, deps = {}) {
     }
     const deviceId = text(claims?.deviceId);
     if (!deviceId) return errorResponse(res, 401, 'mobile refresh session is missing or expired');
+    // This can only reduce a valid paired credential to the browser controller
+    // renewal scope; it never creates a non-expiring API bearer.
+    persistentControllerRefresh = persistentControllerRefresh
+      || text(req?.headers?.['x-mobile-persistent-controller-refresh']) === '1';
     return res.json({
       ok: true,
       tokenType: 'Bearer',
-      ...issueMobileSession(deviceId),
-      ...(refreshToken ? { refreshToken } : {}),
+      ...issueMobileSession(deviceId, { persistentControllerRefresh }),
     });
   }));
 

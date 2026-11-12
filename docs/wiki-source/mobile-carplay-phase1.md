@@ -65,17 +65,36 @@ The route registration is always present in source but is disabled unless
 ### Mobile session lifetime
 
 The native app receives a short-lived 12-hour bearer access token plus a
-separate one-year refresh credential during enrollment or device pairing. The
-refresh credential is stored in the iOS Keychain, never placed in the QR
+separate renewal-only refresh credential during enrollment or device pairing.
+The durable refresh credential has the mobile-refresh scope and cannot call
+ordinary mobile API routes. It is stored in the iOS Keychain, never placed in the QR
 payload, and is used automatically after an authenticated request receives a
 401. The app retries that request once with the renewed access token, so normal
 use does not require signing in every 12 hours. A new pairing is only needed
-when the refresh credential expires or the mobile API signing secret is
-rotated. The refresh route is `POST /v1/mobile/session/refresh` with the
+when the credential is revoked, browser/device storage is cleared, or the
+mobile API signing secret is rotated. The refresh route is `POST /v1/mobile/session/refresh` with the
 credential in `X-Mobile-Refresh-Token`. During the rollout, an updated app can
 also migrate an existing signed-but-expired legacy access token once, so
 current installations do not need to pair again merely to receive the new
 refresh credential.
+
+### Remembered browser controllers
+
+An approved ordinary browser controller has a separate, tightly restricted
+renewal contract. Its browser receives only an opaque HttpOnly, same-site
+cookie. The associated durable controller-refresh credential remains in the
+private server session file and can issue only fresh 12-hour controller access
+bearers; it is not accepted as a mobile API bearer, ticket, administrator
+credential, pairing approval, or general non-expiring token.
+
+The server reissues the cookie during ordinary same-origin use within browser
+cookie retention limits and silently renews the short-lived access bearer.
+There is no scheduled server-side expiry for an approved remembered ordinary
+controller. Logout and a rejected or revoked renewal remove the server grant
+and clear its cookie. Clearing browser website data, deleting the cookie, or
+rotating the mobile signing secret still requires approved pairing again.
+Pairing QR/challenge expiry, same-origin CSRF, and administrator boundaries are
+unchanged.
 
 ## Environment configuration
 
@@ -163,7 +182,7 @@ Content-Type: application/json
 ```
 
 The response contains a short-lived 12-hour bearer access token and a separate
-one-year refresh token. The native app must store both in the iOS Keychain and
+durable renewal-only refresh token. The native app must store both in the iOS Keychain and
 must never place the refresh token in a QR payload or display-side response.
 The enrollment code remains an operator-managed bootstrap credential; it is not
 used as a bearer token.
@@ -175,9 +194,9 @@ POST /v1/mobile/session/refresh
 X-Mobile-Refresh-Token: <refresh token>
 ```
 
-The refresh route verifies the HMAC signature, `mobile-refresh` scope,
-expiration, and device ID using `MOBILE_API_SECRET`. It returns a fresh
-12-hour `accessToken`, its `expiresAt`, the device ID, and the refresh token.
+The refresh route verifies the HMAC signature, `mobile-refresh` scope, and
+device ID using `MOBILE_API_SECRET`. It returns a fresh 12-hour `accessToken`,
+its `expiresAt`, the device ID, and a renewed durable refresh token.
 It does not require a Track Key. Native clients should call it after a normal
 mobile request receives `401 mobile session is missing or expired`, update the
 Keychain access token, and retry the original request once.

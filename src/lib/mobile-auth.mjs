@@ -22,18 +22,18 @@ export function timingSafeEqualText(a, b) {
   return left.length === right.length && crypto.timingSafeEqual(left, right);
 }
 
-function createSignedToken({ secret, scope, claims = {}, ttlMs, now = Date.now() }) {
+function createSignedToken({ secret, scope, claims = {}, ttlMs, now = Date.now(), persistent = false }) {
   const key = String(secret || '');
   if (!key) throw new Error('mobile token secret is not configured');
 
   const issuedAt = Math.floor(Number(now) / 1000);
-  const expiresAt = issuedAt + Math.max(1, Math.floor(Number(ttlMs || 0) / 1000));
+  const expiresAt = persistent ? null : issuedAt + Math.max(1, Math.floor(Number(ttlMs || 0) / 1000));
   const header = { typ: TOKEN_TYPE, v: TOKEN_VERSION, alg: 'HS256' };
   const payload = {
     ...claims,
     scope: String(scope || ''),
     iat: issuedAt,
-    exp: expiresAt,
+    ...(persistent ? { persistent: true } : { exp: expiresAt }),
     jti: crypto.randomBytes(16).toString('hex'),
   };
   const encodedHeader = base64urlEncode(JSON.stringify(header));
@@ -63,6 +63,36 @@ export function createMobileRefreshToken({ secret, deviceId, ttlMs = 365 * 24 * 
     claims: { deviceId: normalizedDeviceId },
     ttlMs,
     now,
+  });
+}
+
+/** A durable renewal-only replacement for the legacy expiring mobile refresh token. */
+export function createPersistentMobileRefreshToken({ secret, deviceId, now } = {}) {
+  const normalizedDeviceId = String(deviceId || '').trim();
+  if (!normalizedDeviceId) throw new Error('deviceId is required');
+  return createSignedToken({
+    secret,
+    scope: 'mobile-refresh',
+    claims: { deviceId: normalizedDeviceId },
+    now,
+    persistent: true,
+  });
+}
+
+/**
+ * A durable credential is deliberately limited to the browser-controller
+ * renewal endpoint. It is never an API bearer, media ticket, or general
+ * replacement for expiring mobile refresh tokens.
+ */
+export function createPersistentControllerRefreshToken({ secret, deviceId, now } = {}) {
+  const normalizedDeviceId = String(deviceId || '').trim();
+  if (!normalizedDeviceId) throw new Error('deviceId is required');
+  return createSignedToken({
+    secret,
+    scope: 'controller-web-refresh',
+    claims: { deviceId: normalizedDeviceId },
+    now,
+    persistent: true,
   });
 }
 
@@ -130,9 +160,14 @@ export function verifyMobileToken(token, { secret, scope, now = Date.now(), allo
   if (scope && payload?.scope !== scope) return null;
 
   const nowSec = Math.floor(Number(now) / 1000);
+  const persistentRefresh = ['mobile-refresh', 'controller-web-refresh'].includes(scope)
+    && payload?.scope === scope
+    && payload?.persistent === true
+    && payload?.exp === undefined;
   const exp = Number(payload?.exp || 0);
   const iat = Number(payload?.iat || 0);
-  if (!Number.isFinite(exp) || !Number.isFinite(iat) || exp <= 0 || (!allowExpired && exp <= nowSec) || iat > nowSec + 60) return null;
+  if (!Number.isFinite(iat) || iat > nowSec + 60) return null;
+  if (!persistentRefresh && (!Number.isFinite(exp) || exp <= 0 || (!allowExpired && exp <= nowSec))) return null;
 
   return payload;
 }

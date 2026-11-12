@@ -12,8 +12,8 @@ architecture without presenting that future as implemented.
 ## Authentication boundary
 
 - Native callers use `Authorization: Bearer <mobile-api access token>` for
-  `/v1/mobile/*`. The access token currently lasts 12 hours; the refresh token
-  uses the separate `mobile-refresh` scope and lasts up to 365 days.
+  `/v1/mobile/*`. The access token currently lasts 12 hours; the durable
+  refresh token uses the separate `mobile-refresh` scope only for renewal.
 - `POST /v1/mobile/session` accepts `{ "deviceId": "..." }` with
   `X-Mobile-Enrollment-Code`. `POST /v1/mobile/session/refresh` uses
   `X-Mobile-Refresh-Token`; the explicit legacy migration header is

@@ -46,7 +46,7 @@
       if(r.ok&&j.status==='approved'){location.reload();return;}
       if(!r.ok||['expired','rejected','cancelled','completed'].includes(j.status)){overlay().querySelector('#sonuviPairStatus').textContent=j.error||'Pairing ended. Start again.';return;}
       timer=setTimeout(()=>poll(id),1000);
-    }catch{overlay().querySelector('#sonuviPairStatus').textContent='Connection lost. Start pairing again.';}
+    }catch{overlay().querySelector('#sonuviPairStatus').textContent='Connection lost. Retrying the approved pairing…';timer=setTimeout(()=>poll(id),2000);}
   }
   async function start() {
     clearTimeout(timer);const box=overlay(),status=box.querySelector('#sonuviPairStatus');
@@ -77,8 +77,9 @@
       };refresh.onclick=load;await load();
     };
   }
-  document.addEventListener('DOMContentLoaded',async()=>{
+  async function checkSession(){
     try{const r=await request('session'),j=await r.json();if(r.ok&&j.authenticated){auth.csrfToken=j.csrfToken;complete(true);browserApproval();return;}overlay().querySelector('#sonuviPairStatus').textContent=j.error||'Trusted-device approval is required.';}
-    catch{overlay().querySelector('#sonuviPairStatus').textContent='Controller service unavailable.';}
-  });
+    catch{overlay().querySelector('#sonuviPairStatus').textContent='Controller service is temporarily unavailable. Retry shortly; do not pair again unless this browser grant was revoked or browser data was cleared.';}
+  }
+  document.addEventListener('DOMContentLoaded',checkSession);
 })();

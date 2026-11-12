@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { registerMobileRoutes } from '../src/routes/mobile.routes.mjs';
-import { createMobileRefreshToken, createMobileSessionToken, verifyMobileToken } from '../src/lib/mobile-auth.mjs';
+import { createMobileRefreshToken, createMobileSessionToken, createPersistentControllerRefreshToken, verifyMobileToken } from '../src/lib/mobile-auth.mjs';
 import { MOBILE_HOME_ROW_IDS } from '../src/lib/mobile-home-rows.mjs';
 
 function createApp() {
@@ -146,7 +146,12 @@ test('mobile session refresh silently replaces an expired access token', async (
 
   assert.equal(refreshed.statusCode, 200);
   assert.ok(refreshed.body.accessToken);
-  assert.equal(refreshed.body.refreshToken, enrolled.body.refreshToken);
+  assert.notEqual(refreshed.body.refreshToken, enrolled.body.refreshToken);
+  assert.ok(verifyMobileToken(refreshed.body.refreshToken, {
+    secret: 'api-secret-for-test',
+    scope: 'mobile-refresh',
+    now: Date.now() + (2 * 365 * 24 * 60 * 60 * 1_000),
+  }));
   assert.equal(verifyMobileToken(refreshed.body.accessToken, {
     secret: 'api-secret-for-test',
     scope: 'mobile-api',
@@ -157,6 +162,62 @@ test('mobile session refresh silently replaces an expired access token', async (
     headers: { 'x-mobile-refresh-token': 'not-a-refresh-token' },
   }), invalid);
   assert.equal(invalid.statusCode, 401);
+});
+
+test('persistent controller refresh is renewal-only while normal refresh credentials still expire', async () => {
+  const app = registerFixture();
+  const enrolled = createResponse();
+  await app.routes.get('POST /v1/mobile/session')?.(request({
+    headers: { 'x-mobile-enrollment-code': 'one-time-code' },
+    body: { deviceId: 'ipad-browser' },
+  }), enrolled);
+  assert.ok(verifyMobileToken(enrolled.body.refreshToken, {
+    secret: 'api-secret-for-test',
+    scope: 'mobile-refresh',
+    now: Date.now() + (2 * 365 * 24 * 60 * 60 * 1_000),
+  }));
+
+  const durable = createResponse();
+  await app.routes.get('POST /v1/mobile/session/refresh')?.(request({
+    headers: {
+      'x-mobile-refresh-token': enrolled.body.refreshToken,
+      'x-mobile-persistent-controller-refresh': '1',
+    },
+  }), durable);
+  assert.equal(durable.statusCode, 200);
+  assert.ok(verifyMobileToken(durable.body.refreshToken, {
+    secret: 'api-secret-for-test',
+    scope: 'controller-web-refresh',
+    now: Date.now() + (2 * 365 * 24 * 60 * 60 * 1_000),
+  }));
+  assert.equal(verifyMobileToken(durable.body.refreshToken, {
+    secret: 'api-secret-for-test',
+    scope: 'mobile-api',
+  }), null);
+  assert.equal(verifyMobileToken(durable.body.accessToken, {
+    secret: 'api-secret-for-test',
+    scope: 'mobile-api',
+    now: Date.now() + (13 * 60 * 60 * 1_000),
+  }), null);
+
+  const ordinary = createMobileRefreshToken({
+    secret: 'api-secret-for-test',
+    deviceId: 'ipad-browser',
+    now: Date.now() - (366 * 24 * 60 * 60 * 1_000),
+  });
+  assert.equal(verifyMobileToken(ordinary, {
+    secret: 'api-secret-for-test',
+    scope: 'mobile-refresh',
+  }), null);
+  const manuallyPersistent = createPersistentControllerRefreshToken({
+    secret: 'api-secret-for-test',
+    deviceId: 'ipad-browser',
+    now: Date.now() - (366 * 24 * 60 * 60 * 1_000),
+  });
+  assert.ok(verifyMobileToken(manuallyPersistent, {
+    secret: 'api-secret-for-test',
+    scope: 'controller-web-refresh',
+  }));
 });
 
 test('mobile session refresh rejects expired refresh tokens and ordinary routes reject expired access tokens', async () => {
