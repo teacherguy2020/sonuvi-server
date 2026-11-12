@@ -29,13 +29,15 @@ jobs:
       - name: Verify test container prerequisites
         run: |
           test "$(id -u)" -eq 0
+          command -v runuser
+          runuser -u node -g root -- sh -c 'test "$(id -u)" -ne 0 && test "$(id -g)" -eq 0'
           python3 --version
 
       - name: Install locked dependencies
         run: npm ci
 
       - name: Run Node application tests
-        run: npm test
+        run: runuser -u node -g root -- npm test
 
       - name: Run pure-Python Vibe planner tests
-        run: npm run test:vibe-planner
+        run: runuser -u node -g root -- npm run test:vibe-planner
