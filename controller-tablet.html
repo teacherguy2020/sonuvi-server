@@ -362,7 +362,7 @@
     :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .recentWrap{grid-row:4;min-height:0;overflow:hidden}
     :is(body.ipad11, body.tablet) .card{margin-bottom:0}
     :is(body.ipad11, body.tablet) .np{grid-template-columns:94px 1fr;gap:12px}
-    :is(body.ipad11, body.tablet) .artWrap, :is(body.ipad11, body.tablet) .np img{width:94px;height:94px}
+    :is(body.ipad11, body.tablet) .artWrap, :is(body.ipad11, body.tablet) .np > .artWrap #art{width:94px;height:94px}
     :is(body.ipad11, body.tablet) #line1{font-size:22px;line-height:1.1;max-width:none}
     :is(body.ipad11, body.tablet) #line2{font-size:14px}
     :is(body.ipad11, body.tablet) #line3{font-size:13px;opacity:.92}
@@ -372,7 +372,7 @@
     :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .np > .artWrap{grid-column:1;grid-row:1}
     :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .np > .npMeta{grid-column:2;grid-row:1;align-self:start}
     :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .artWrap,
-    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .np img{width:184px;height:184px}
+    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .np > .artWrap #art{width:184px;height:184px}
     :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .npMeta{padding-top:2px}
     :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) #line1{font-size:30px;line-height:1.06}
     :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) #line2{font-size:18px;line-height:1.14}
@@ -467,7 +467,7 @@
     :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) .recentWrap{grid-area:recent;min-height:0;display:flex;flex-direction:column}
     :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) .npTap .card{display:flex;flex-direction:column;padding-top:14px}
     :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) .np{position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:10px;order:1}
-    :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) .artWrap, :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) .np img{width:220px;height:220px}
+    :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) .artWrap, :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) .np > .artWrap #art{width:220px;height:220px}
     :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) .artWrap{overflow:visible;cursor:pointer}
     :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) .personnelCard{padding:14px}
     :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) .personnelTitle{font-size:12px}
@@ -523,7 +523,7 @@
     body.ipadModern .recentWrap{grid-area:recent;min-height:0;display:flex;flex-direction:column}
     body.ipadModern .npTap .card{padding:10px;display:flex;flex-direction:column;padding-top:12px}
     body.ipadModern .np{position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:8px;order:1}
-    body.ipadModern .artWrap, body.ipadModern .np img{width:196px;height:196px}
+    body.ipadModern .artWrap, body.ipadModern .np > .artWrap #art{width:196px;height:196px}
     body.ipadModern .npMeta{width:100%;padding-top:2px;margin-top:0}
     body.ipadModern #line1{font-size:28px;line-height:1.08}
     body.ipadModern #line2{font-size:17px;line-height:1.14}
@@ -546,7 +546,7 @@
     body.ipadAir .npTap .card{padding:10px;display:flex;flex-direction:column;padding-top:12px}
     body.ipadAir .np{position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:8px;order:1}
     body.ipadAir .artWrap,
-    body.ipadAir .np img{width:170px;height:170px}
+    body.ipadAir .np > .artWrap #art{width:170px;height:170px}
     body.ipadAir .npMeta{width:100%;padding-top:2px;margin-top:0}
     body.ipadAir #line1{font-size:26px;line-height:1.08}
     body.ipadAir #line2{font-size:16px;line-height:1.14}
@@ -582,7 +582,7 @@
     :is(body.ipad11Landscape, body.tabletLandscape) .np > .npProgress{grid-area:prog;width:100%;margin:2px 0 0 !important}
     :is(body.ipad11Landscape, body.tabletLandscape) .np > .npMeta{grid-area:meta;width:100% !important}
     :is(body.ipad11Landscape, body.tabletLandscape) .artWrap,
-    :is(body.ipad11Landscape, body.tabletLandscape) .np img{width:min(100%,var(--np-art-size)) !important;height:auto !important;aspect-ratio:1/1}
+    :is(body.ipad11Landscape, body.tabletLandscape) .np > .artWrap #art{width:min(100%,var(--np-art-size)) !important;height:auto !important;aspect-ratio:1/1}
     :is(body.ipad11Landscape, body.tabletLandscape) .npCtrls{
       grid-area:ctrls;
       position:static !important;
@@ -616,7 +616,7 @@
     :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) .npTap .card{width:100%;height:100%;padding:10px}
     :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) .npTap .title{display:none !important}
     :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) .np{width:100%;height:100%;grid-template-columns:minmax(0,3fr) minmax(0,2fr) !important;grid-template-rows:minmax(0,1fr) auto auto;grid-template-areas:'art ctrls' 'prog prog' 'meta meta';column-gap:8px;row-gap:6px}
-    :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) .artWrap,:is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) .np img{width:100% !important;height:auto !important;aspect-ratio:1/1}
+    :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) .artWrap,:is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) .np > .artWrap #art{width:100% !important;height:auto !important;aspect-ratio:1/1}
     :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) .npCtrls{height:var(--np-art-live,100%) !important;min-height:0}
     :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) .npMeta{padding-top:0;margin:0;min-height:0}
     :is(body.ipad11.ipad11Landscape, body.tablet.tabletLandscape) #line1{font-size:clamp(18px,1.9vw,23px);line-height:1.08;transform:none}
@@ -637,16 +637,20 @@
     :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .npTap,:is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .quickWrap,:is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) #libraryList,:is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .recentWrap{width:min(100%,var(--tablet-portrait-card-size));margin-left:auto;margin-right:auto}
     :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .npTap{height:var(--tablet-portrait-card-size);max-height:none}
     :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .npTap .card{width:100%;height:100%;padding:10px}
-    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .np{width:100%;height:100%;grid-template-columns:minmax(0,3fr) minmax(0,2fr) !important;grid-template-rows:minmax(0,1fr) auto auto;grid-template-areas:'art ctrls' 'prog prog' 'meta meta';column-gap:8px;row-gap:6px}
+    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .npTap .title{display:none !important}
+    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .np{width:100%;height:100%;min-width:0;min-height:0;overflow:hidden;grid-template-columns:minmax(0,3fr) minmax(0,2fr) !important;grid-template-rows:minmax(0,1fr) 2px minmax(0,auto);grid-template-areas:'art ctrls' 'prog prog' 'meta meta';column-gap:8px;row-gap:6px;align-items:stretch}
     :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .np > .artWrap{grid-area:art}
-    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .artWrap,:is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .np img{width:100% !important;height:auto !important;aspect-ratio:1/1}
-    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .npCtrls{grid-area:ctrls;position:static !important;display:grid !important;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:minmax(34px,1fr);gap:6px;width:100%;height:100%;padding:0 !important;background:transparent !important;border:0 !important}
-    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .npCtrls .ctl{width:100% !important;height:100% !important;min-width:34px !important;min-height:34px !important}
+    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .artWrap,:is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .np > .artWrap #art{width:100% !important;height:auto !important;aspect-ratio:1/1}
+    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .npCtrls{grid-area:ctrls;position:static !important;left:auto !important;right:auto !important;top:auto !important;bottom:auto !important;transform:none !important;display:grid !important;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:minmax(34px,1fr);gap:6px;width:100%;height:100%;min-width:0;min-height:0;padding:0 !important;background:transparent !important;border:0 !important;backdrop-filter:none !important;-webkit-backdrop-filter:none !important;opacity:1 !important}
+    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .npCtrls .ctl{width:100% !important;height:100% !important;min-width:34px !important;min-height:34px !important;border-radius:999px}
     :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .npCtrls .ctl svg{width:clamp(14px,2.4vw,22px) !important;height:clamp(14px,2.4vw,22px) !important}
     :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .npCtrls .ctlPause,:is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .npCtrls .ctlPlay{display:grid}
     :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .npCtrls .ctlToggle{display:none}
     :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .np > .npProgress{grid-area:prog;width:100%;margin:2px 0 0 !important}
-    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .np > .npMeta{grid-area:meta;width:100%;padding-top:0;margin:0;min-height:0}
+    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .np > .npMeta{grid-area:meta;width:100%;min-width:0;padding-top:0;margin:0;min-height:0;overflow:hidden}
+    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) #line2,:is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) #line3{display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .tabletNextUpInline{width:100%;min-width:0;margin-top:6px;padding-top:5px}
+    :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .tabletNextUpInline .nextUpArt{width:22px !important;height:22px !important;min-width:22px !important;min-height:22px !important;aspect-ratio:1/1 !important;flex:0 0 22px !important}
     :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) .quickWrap{height:auto;margin-top:0}
     :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) #libraryList{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 8px;overflow:visible}
     :is(body.ipad11:not(.ipad11Landscape), body.tablet:not(.tabletLandscape)) #libraryList .row{min-width:0}

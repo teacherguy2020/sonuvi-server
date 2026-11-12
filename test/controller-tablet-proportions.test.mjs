@@ -25,3 +25,15 @@ test('tablet portrait uses the reduced square with a scrolling page fallback', (
   assert.match(page, /overflow-y:auto/);
   assert.match(page, /@media \(max-width:540px\)/);
 });
+
+test('tablet portrait contains its metadata and transport controls inside the card grid', () => {
+  const portrait = page.match(/\/\* Portrait keeps the same reduced native card[\s\S]*?(?=\n    @media \(max-width:540px\))/)?.[0] ?? '';
+
+  assert.match(portrait, /\.npTap \.title\{display:none !important\}/);
+  assert.match(portrait, /grid-template-rows:minmax\(0,1fr\) 2px minmax\(0,auto\)/);
+  assert.match(portrait, /\.np > \.artWrap #art\{width:100% !important;height:auto !important;aspect-ratio:1\/1\}/);
+  assert.doesNotMatch(portrait, /\.np img\{width:100% !important/);
+  assert.match(portrait, /\.tabletNextUpInline \.nextUpArt\{width:22px !important;height:22px !important/);
+  assert.match(portrait, /\.npCtrls\{grid-area:ctrls;position:static !important;left:auto !important;right:auto !important;top:auto !important;bottom:auto !important;transform:none !important/);
+  assert.match(portrait, /backdrop-filter:none !important;-webkit-backdrop-filter:none !important;opacity:1 !important/);
+});
