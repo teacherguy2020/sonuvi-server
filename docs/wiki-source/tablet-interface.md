@@ -198,3 +198,5 @@ That is intentional.
 Its role is to establish the tablet interface as a first-class branch of the knowledge base and to connect it to the richer drill-down pages that already exist.
 
 As the wiki grows, this page should become one of the main starting points for understanding how humans actually interact with the system in a controller-heavy, pane-rich, tablet-sized context.
+
+*Last reviewed: 2026-11-12 America/Chicago*
