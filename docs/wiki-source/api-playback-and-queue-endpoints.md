@@ -199,3 +199,7 @@ That is the right tradeoff for now:
 - real route families
 - explicit known endpoints
 - honest gaps called out for later deeper mapping
+
+## Native Home transport authentication (2026-11-12)
+
+`POST /v1/mobile/now-playing/control` forwards its validated paired-controller bearer to the fixed loopback diagnostics endpoint. Internal dispatch rechecks the token, device session, exact route, and typed operation. No operator Track Key is required. Redirects, arbitrary targets, operator actions, and unrecognized fields remain blocked. iPad, iPhone, and Apple TV share this path. Consume accepts its existing toggle or explicit on/off state. Native queue Shuffle/Undo/Crop and canonical Queue Wizard application also use this bridge. Native queue application has a separate route/body allowlist; it does not expand the browser proxy. All other legacy internal feature adapters are unchanged.

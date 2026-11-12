@@ -25,6 +25,7 @@
 // network, and state-write boundaries before legacy route modules capture
 // Node built-in helpers.
 import './src/lib/rehearsal-runtime-boundary.mjs';
+import { createMobileControllerBridge } from './src/lib/mobile-controller-bridge.mjs';
 import { readEffectiveRuntimeConfig, writeNativeRuntimeConfig } from './src/lib/native-configuration-store.mjs';
 import { startLibraryHealthScan, waitForLibraryHealthScan } from './src/routes/config.library-health-read.routes.mjs';
 import { runtimeDiagnostics as nativeRuntimeDiagnostics } from './src/lib/config-runtime-diagnostics.mjs';
@@ -9321,6 +9322,7 @@ registerMobileRoutes(app, {
   fetchPibuzQobuzArtwork: (artworkRef) => pibuzQobuz.fetchArtwork(artworkRef),
   savedQobuzQueueService,
   savedQobuzQueuePlayService,
+  fetchControllerRequest: createMobileControllerBridge({ port: Number(PORT || 3101) }),
   fetchInternalRequest: async (pathname, options = {}) => {
     const routePath = String(pathname || '').startsWith('/') ? String(pathname) : `/${String(pathname || '')}`;
     const method = String(options?.method || 'GET').toUpperCase();

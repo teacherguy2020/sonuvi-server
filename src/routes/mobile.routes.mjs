@@ -715,6 +715,9 @@ export function registerMobileRoutes(app, deps = {}) {
   const fetchInternalRequest = typeof deps.fetchInternalRequest === 'function'
     ? deps.fetchInternalRequest
     : null;
+  const fetchControllerRequest = typeof deps.fetchControllerRequest === 'function'
+    ? deps.fetchControllerRequest
+    : null;
   const radioFeatures = deps.radioFeatures
     && typeof deps.radioFeatures.options === 'function'
     && typeof deps.radioFeatures.preview === 'function'
@@ -3439,7 +3442,7 @@ export function registerMobileRoutes(app, deps = {}) {
     if (!requireSession(req, res)) return;
     const { tracks } = await resolveWizardTracks(req, req?.body || {});
     if (!tracks.length) return errorResponse(res, 400, 'trackIds is required');
-    const result = await internalFeatureRequest('/config/queue-wizard/apply', {
+    const result = await (fetchControllerRequest || internalFeatureRequest)('/config/queue-wizard/apply', {
       method: 'POST',
       body: {
         mode: text(req?.body?.mode).toLocaleLowerCase() === 'append' ? 'append' : 'replace',
@@ -3455,7 +3458,7 @@ export function registerMobileRoutes(app, deps = {}) {
         previewCoverBase64: text(req?.body?.previewCoverBase64),
         previewCoverMimeType: text(req?.body?.previewCoverMimeType) || 'image/jpeg',
       },
-    });
+    }, readBearerToken(req));
     if (result?.ok === false) {
       if (req?.body?.saveOnly) return res.status(Number(result.status) || 502).json({
         ok: false, error: result?.json?.error || 'playlist save failed',
@@ -4034,11 +4037,11 @@ export function registerMobileRoutes(app, deps = {}) {
     // queues that still have items but no current song (for example after a
     // stop or an Alexa handoff); the diagnostics route keeps the queue head
     // in that case and returns a clean result to both clients.
-    if (action === 'crop' && fetchInternalRequest) {
-      const reliableCrop = await internalFeatureRequest('/config/diagnostics/playback', {
+    if (action === 'crop' && (fetchControllerRequest || fetchInternalRequest)) {
+      const reliableCrop = await (fetchControllerRequest || internalFeatureRequest)('/config/diagnostics/playback', {
         method: 'POST',
         body: { action: 'crop' },
-      });
+      }, readBearerToken(req));
       if (!reliableCrop?.ok) {
         return errorResponse(
           res,
@@ -4053,12 +4056,12 @@ export function registerMobileRoutes(app, deps = {}) {
     // visible queue and Alexa's next-track order aligned and never enables
     // Physical queue shuffle. Keep shufflequeue as a compatibility alias.
     if (action === 'shuffle' || action === 'shufflequeue' || action === 'undoshuffle') {
-      if (!fetchInternalRequest) return errorResponse(res, 503, 'mobile queue shuffle is not configured');
+      if (!fetchControllerRequest && !fetchInternalRequest) return errorResponse(res, 503, 'mobile queue shuffle is not configured');
       const diagnosticsAction = action === 'undoshuffle' ? 'undoshuffle' : 'shufflequeue';
-      const reliableShuffle = await internalFeatureRequest('/config/diagnostics/playback', {
+      const reliableShuffle = await (fetchControllerRequest || internalFeatureRequest)('/config/diagnostics/playback', {
         method: 'POST',
         body: { action: diagnosticsAction },
-      });
+      }, readBearerToken(req));
       if (!reliableShuffle?.ok) {
         return mobileInternalFailure(
           res,
@@ -4086,7 +4089,7 @@ export function registerMobileRoutes(app, deps = {}) {
 
   app.post('/v1/mobile/now-playing/control', asyncRoute(async (req, res) => {
     if (!requireSession(req, res)) return;
-    if (!fetchInternalRequest) return errorResponse(res, 503, 'mobile Home playback control is not configured');
+    if (!fetchControllerRequest && !fetchInternalRequest) return errorResponse(res, 503, 'mobile Home playback control is not configured');
     if (!isPlainObject(req?.body)) {
       return errorResponse(res, 400, 'request body must be an object', 'MOBILE_CONTROL_INVALID_REQUEST');
     }
@@ -4179,10 +4182,10 @@ export function registerMobileRoutes(app, deps = {}) {
     } else if (definition.field) {
       diagnosticsBody[definition.field] = parameter;
     }
-    const result = await internalFeatureRequest('/config/diagnostics/playback', {
+    const result = await (fetchControllerRequest || internalFeatureRequest)('/config/diagnostics/playback', {
       method: 'POST',
       body: diagnosticsBody,
-    });
+    }, readBearerToken(req));
     if (!result?.ok) {
       const failureCode = definition.field === 'mode'
         && text(result?.json?.code) === 'REPEAT_MODE_READBACK_MISMATCH'

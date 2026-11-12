@@ -63,6 +63,34 @@ export function validControllerTarget(target, method = 'GET') {
     return true;
   } catch { return false; }
 }
+const nativeQueueApply = '/config/queue-wizard/apply';
+export function validNativeControllerTarget(target, method = 'GET') {
+  return validControllerTarget(target, method) || (method === 'POST' && target === nativeQueueApply);
+}
+export function validNativeControllerBody({method = 'GET', pathname, body} = {}) {
+  if (method === 'POST' && pathname === playback && body?.action === 'consume') {
+    return Object.keys(body).every(k => ['action','setTo'].includes(k)) && (body.setTo === undefined || ['on','off'].includes(body.setTo));
+  }
+  if (method === 'POST' && pathname === playback && body?.action === 'crop') {
+    return Object.keys(body).length === 1;
+  }
+  if (pathname !== nativeQueueApply) return validControllerBody({method, pathname, body});
+  if (method !== 'POST' || !body || typeof body !== 'object' || Array.isArray(body)) return false;
+  const fields = new Set(['mode','keepNowPlaying','tracks','shuffle','forceRandomOff','fastStart','play','playlistName','saveOnly','generateCollage','previewCoverBase64','previewCoverMimeType']);
+  if (Object.keys(body).some(k => !fields.has(k)) || !['append','replace'].includes(body.mode)) return false;
+  if (!Array.isArray(body.tracks) || !body.tracks.length || body.tracks.length > 50000) return false;
+  if (body.tracks.some(file => {
+    if (typeof file !== 'string' || !file || file.length > 4096 || /[\x00-\x1f\\]/.test(file)) return true;
+    if (/^https?:/.test(file)) { try { const u = new URL(file); return !!(u.username || u.password); } catch { return true; } }
+    return file.startsWith('/') || /^[a-z][a-z0-9+.-]*:/i.test(file) || file.split('/').some(p => p === '.' || p === '..');
+  })) return false;
+  for (const key of ['keepNowPlaying','shuffle','forceRandomOff','fastStart','play','saveOnly','generateCollage']) {
+    if (body[key] !== undefined && typeof body[key] !== 'boolean') return false;
+  }
+  if (body.playlistName !== undefined && (typeof body.playlistName !== 'string' || body.playlistName.length > 200 || /[\x00-\x1f/\\]/.test(body.playlistName) || ['.','..'].includes(body.playlistName))) return false;
+  if (body.previewCoverBase64 !== undefined && (typeof body.previewCoverBase64 !== 'string' || body.previewCoverBase64.length > 15000000 || !/^[A-Za-z0-9+/=]*$/.test(body.previewCoverBase64))) return false;
+  return body.previewCoverMimeType === undefined || ['image/jpeg','image/png','image/webp'].includes(body.previewCoverMimeType);
+}
 const material = (method, target, timestamp, nonce) => `${method.toUpperCase()}\n${target}\n${timestamp}\n${nonce}`;
 export function controllerDispatchHeader({ secret, method = 'GET', pathname, target = pathname, now = Date.now(), nonce = crypto.randomBytes(18).toString('base64url') } = {}) {
   if (!secret) return '';
@@ -84,10 +112,13 @@ export function createControllerDispatchAuthorizer({ secret, apiSecret, sessionR
     const now = Date.now();
     for (const [key,expires] of used) if (expires < now) used.delete(key);
     const header = String(req.headers?.['x-sonuvi-controller-dispatch'] || '');
-    if (!isLoopbackAddress(req.socket?.remoteAddress) || !isControllerDispatchable({method:req.method,pathname:req.path || target?.split('?')[0]}) || !validControllerTarget(target, req.method) || !validControllerBody({method:req.method, pathname:req.path || target?.split('?')[0], body:req.body})) return false;
+    const native = header === 'native-mobile-session';
+    const validTarget = native ? validNativeControllerTarget : validControllerTarget;
+    const validBody = native ? validNativeControllerBody : validControllerBody;
+    if (!isLoopbackAddress(req.socket?.remoteAddress) || !validTarget(target, req.method) || !validBody({method:req.method, pathname:req.path || target?.split('?')[0], body:req.body})) return false;
     // Fresh installations reuse the existing paired-controller grant; no additional
     // shared secret or administrator credential has to be provisioned to the web service.
-    if (header === 'mobile-session') return Boolean(verifyMobileToken(readBearerToken(req), { secret: apiSecret, scope: 'mobile-api', now, sessionRegistry }));
+    if (native || header === 'mobile-session') return Boolean(verifyMobileToken(readBearerToken(req), { secret: apiSecret, scope: 'mobile-api', now, sessionRegistry }));
     if (req.method !== 'GET') return false;
     if (used.has(header) || used.size >= 10000 || !verifyControllerDispatch({secret,header,method:req.method,target,now})) return false;
     used.set(header, now+MAX_AGE_MS); return true;
