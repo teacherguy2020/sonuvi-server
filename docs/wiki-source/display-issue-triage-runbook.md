@@ -348,3 +348,13 @@ It turns “the display looks wrong” into a better debugging order:
 - decide which layer likely owns the symptom
 - check known fragile display paths
 - verify on the host where the real effect should appear
+
+## moOde VM HTTPS wake/blanking repair (2026-11-11)
+
+For the approved VM display origin `https://10.0.0.65:8443`, use the
+version-bound patches and staging verifier in `docs/references/moode/`. Local
+MPD play and active ALSA remain wake authority when the VM returns health-only,
+paused, error, or expired-session data. The root-only VM curl configuration is
+restricted to that exact origin; other display hosts retain the unauthenticated
+bounded port-3101 probe. This does not restore display-only Mills after a VM
+browser session expiry.

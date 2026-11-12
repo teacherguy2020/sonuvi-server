@@ -1,0 +1,53 @@
+--- watchdog.sh
++++ watchdog.sh
+@@ -178,24 +178,39 @@
+ 			fi
+ 		else
+ 			debug_log "check wake on play"
+-			WEBUI_DISPLAY_HOST=$(sqlite3 $SQLDB "SELECT value FROM cfg_system WHERE param='local_display_url'" | awk -F"/" '{print $3}')
++			WEBUI_DISPLAY_URL=$(sqlite3 $SQLDB "SELECT value FROM cfg_system WHERE param='local_display_url'")
++			WEBUI_DISPLAY_HOST=$(printf '%s' "$WEBUI_DISPLAY_URL" | awk -F"/" '{print $3}')
+ 			if  [[ $WEBUI_DISPLAY_HOST = "localhost" ]]; then
+ 				TYPE="local"
+ 				CARD_NUM=$(sqlite3 $SQLDB "SELECT value FROM cfg_mpd WHERE param='device'")
+ 				HW_PARAMS=$(cat /proc/asound/card$CARD_NUM/pcm0p/sub0/hw_params)
+ 			else
+-				TYPE="remote"
+-				# Remote display host does not expose moOde's /command/ endpoint.
+-				# Query Sonuvi's now-playing API and wake only for active playback.
+-				REMOTE_HOST=${WEBUI_DISPLAY_HOST%%:*}
+-				NP_JSON=$(curl -s --max-time 1 "http://$REMOTE_HOST:3101/now-playing")
+-				NP_STATE=$(printf '%s' "$NP_JSON" | awk -F'"state":"' '{print $2}' | awk -F'"' '{print $1}')
+-				NP_ACTIVE=$(printf '%s' "$NP_JSON" | grep -E -c '"isAirplay":true|"isUpnp":true')
+-				NP_MILLS=$(printf '%s' "$NP_JSON" | grep -E -c '"millsMode":true|"displayMode":"mills"')
+-				if [[ "$NP_STATE" = "play" || "$NP_ACTIVE" != "0" || "$NP_MILLS" != "0" ]]; then
++				# Local MPD/ALSA is authoritative. Do not let an expired remote
++				# browser session suppress a wake for ordinary local playback.
++				CARD_NUM=$(sqlite3 $SQLDB "SELECT value FROM cfg_mpd WHERE param='device'")
++				LOCAL_HW_PARAMS=$(cat /proc/asound/card$CARD_NUM/pcm0p/sub0/hw_params 2>/dev/null)
++				LOCAL_MPD_PLAYING=$(mpc status | grep -c '\[playing\]')
++				if [[ $LOCAL_MPD_PLAYING != "0" || ($LOCAL_HW_PARAMS != "closed" && $LOCAL_HW_PARAMS != "") ]]; then
++					TYPE="local"
+ 					HW_PARAMS="playing"
+ 				else
+-					HW_PARAMS="closed"
++					TYPE="remote"
++					# Remote display host does not expose moOde's /command/ endpoint.
++					# The VM HTTPS origin alone may use its root-only CA/cookie config.
++					REMOTE_HOST=${WEBUI_DISPLAY_HOST%%:*}
++					if [[ $WEBUI_DISPLAY_URL == https://10.0.0.65:8443/* ]]; then
++						NP_JSON=$(curl -s --max-time 1 --config /etc/sonuvi-moode-vm/led-curl.conf 'https://10.0.0.65:8443/now-playing')
++					else
++						NP_JSON=$(curl -s --max-time 1 "http://$REMOTE_HOST:3101/now-playing")
++					fi
++					NP_STATE=$(printf '%s' "$NP_JSON" | sed -n 's/.*"state"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
++					NP_ACTIVE=$(printf '%s' "$NP_JSON" | grep -E -c '"isAirplay"[[:space:]]*:[[:space:]]*true|"isUpnp"[[:space:]]*:[[:space:]]*true')
++					NP_MILLS=$(printf '%s' "$NP_JSON" | grep -E -c '"millsMode"[[:space:]]*:[[:space:]]*true|"displayMode"[[:space:]]*:[[:space:]]*"mills"')
++					if [[ "$NP_STATE" = "play" || "$NP_ACTIVE" != "0" || "$NP_MILLS" != "0" ]]; then
++						HW_PARAMS="playing"
++					else
++						HW_PARAMS="closed"
++					fi
+ 				fi
+ 			fi
+ 

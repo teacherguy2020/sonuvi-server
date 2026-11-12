@@ -171,3 +171,19 @@ See `docs/references/moode/README.md` and `THIRD_PARTY_LICENSES.md`.
 
 ## Rollback
 Restore backup copy (created before patch) from `/var/www/daemon/watchdog.sh.bak.*` and restart watchdog.
+
+## VM HTTPS controller repair (2026-11-11)
+
+The VM target is `https://10.0.0.65:8443/display.html?mode=index&kiosk=1`.
+Port 3101 at that host now returns health-only JSON, so it cannot be the only
+wake authority. Apply the separately staged VM-specific patches documented in
+`docs/references/moode/README.md`: local MPD `play` and active local ALSA wake
+independently of remote health, pause, error, or an expired browser cookie.
+
+Only the exact VM HTTPS origin may use the existing root-only curl config (CA
+and browser cookie); do not copy it into scripts, logs, or a generic host
+probe. Other hosts retain the legacy bounded unauthenticated probe. After a
+reviewed application, syntax-check both files, run the supplied target PHP and
+shell regression runners, then reload the existing worker/watchdog by the
+release-appropriate method. Startup output/volume initialization is unchanged:
+do not restart MPD or mutate mixer/queue/volume for this repair.

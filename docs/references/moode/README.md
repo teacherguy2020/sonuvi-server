@@ -70,3 +70,22 @@ Do not relicense them under this repository's root Unlicense.
 Prefer applying a patch/diff to a matching moOde version rather than blindly
 replacing `worker.php` or `watchdog.sh`. moOde updates can change their
 internals across releases.
+
+## VM display wake repair (2026-11-11)
+
+`worker-vm-display-wake-20261111.patch` and
+`watchdog-vm-display-wake-20261111.patch` apply only to the captured baselines
+in `test/fixtures/moode-vm-display-20261111/`:
+
+- worker.php: `e81a2ab17607d17913cc6ba2f5b2e9694238392ee9d63e9f982c8d66bcc6d5a1`
+- watchdog.sh: `d0ac04a6894745bd1467ed61736e4d402089390a6998e07d65430400866e46f2`
+
+Use `stage-vm-display-wake-20261111.sh STAGED_DIRECTORY` first. It checks
+regular files, hashes, expected source blocks, patch dry runs, resulting hashes,
+and preserves modes. It never installs, backs up, reloads, or restarts anything.
+
+The repair keeps local MPD playback and active local ALSA authoritative. It
+uses `/etc/sonuvi-moode-vm/led-curl.conf` only when the configured target has
+exactly the approved origin `https://10.0.0.65:8443`; all other valid target
+hosts retain the bounded unauthenticated `http://HOST:3101/now-playing` probe.
+It does not solve display-only Mills after that VM browser session expires.
