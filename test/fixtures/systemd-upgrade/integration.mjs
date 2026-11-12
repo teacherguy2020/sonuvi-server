@@ -56,6 +56,8 @@ async function makeSource(root) {
     'scripts/sonuvi-release-stage.mjs': 'console.log("stage fixture");\n',
     'scripts/sonuvi-admin-bootstrap.mjs': 'console.log("admin fixture");\n',
     'scripts/sonuvi-admin-session.mjs': 'console.log("session fixture");\n',
+    'scripts/sonuvi-music-setup.mjs': 'console.log("session fixture");\n',
+    'scripts/sonuvi-music-index.mjs': 'console.log("session fixture");\n',
     'scripts/sonuvi-debian-node-bootstrap.sh': '#!/bin/sh\nexit 0\n',
     'scripts/sonuvi-target-installer.mjs': 'console.log("target fixture");\n',
     'config/now-playing.config.example.json': '{}\n',

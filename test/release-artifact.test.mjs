@@ -55,6 +55,8 @@ async function sourceFixture(t) {
   await write(root, 'scripts/sonuvi-release-stage.mjs', 'console.log("fixture release stage");\n');
   await write(root, 'scripts/sonuvi-admin-bootstrap.mjs', 'console.log("fixture administrator bootstrap");\n');
   await write(root, 'scripts/sonuvi-admin-session.mjs', 'console.log("fixture administrator session");\n');
+  await write(root, 'scripts/sonuvi-music-setup.mjs', 'console.log("fixture administrator session");\n');
+  await write(root, 'scripts/sonuvi-music-index.mjs', 'console.log("fixture administrator session");\n');
   await write(root, 'scripts/sonuvi-debian-node-bootstrap.sh', '#!/bin/sh\nexit 0\n');
   await write(root, 'scripts/sonuvi-target-installer.mjs', 'console.log("fixture target installer");\n');
   await write(root, 'ops/systemd/sonuvi-api.service.in', '[Service]\nUser=@SERVICE_ACCOUNT@\nExecStart=node @RELEASE_ID@\n');
@@ -106,6 +108,10 @@ async function releaseFixture(t, { label = 'one' } = {}) {
   assert.deepEqual(built.manifest.requiredServices, ['sonuvi-api.service', 'sonuvi-web.service']);
   assert.equal(built.manifest.verifier.runtimeContract, 'sonuvi.release-runtime.v2');
   assert.equal(built.manifest.verifier.requiredRuntimeEntrypoints.includes('scripts/sonuvi-admin-session.mjs'), true);
+  for (const helper of ['scripts/sonuvi-music-setup.mjs', 'scripts/sonuvi-music-index.mjs']) {
+    assert.equal(built.manifest.verifier.requiredRuntimeEntrypoints.includes(helper), true);
+    assert.ok((await fs.readFile(path.join(output, helper), 'utf8')).length > 0);
+  }
   assert.match(built.manifest.requirements.configurationFiles.join(' '), /SONUVI_CONFIG_ROOT/);
   assert.equal(await fs.readFile(path.join(output, 'vibe_planner.py'), 'utf8'), 'print("fixture planner")\n');
   assert.match(await fs.readFile(path.join(output, 'ops', 'systemd', 'sonuvi-api.service.in'), 'utf8'), /@SERVICE_ACCOUNT@/);
@@ -346,4 +352,15 @@ test('host promotion verifies an immediate staged artifact, makes only that rele
     promoteStagedHostRelease({ layoutRoot: hostRoot, stagingRoot: duplicate }),
     /already exists/,
   );
+});
+
+test('release builder refuses a source missing the guided music helper', async (t) => {
+  const source = await sourceFixture(t);
+  const dependencies = await dependencyFixture(t, source);
+  await fs.unlink(path.join(source, 'scripts/sonuvi-music-setup.mjs'));
+  await run('git', ['add', '-u'], source);
+  await run('git', ['commit', '-m', 'missing required music helper'], source);
+  const parent = await fs.mkdtemp(path.join(os.tmpdir(), 'sonuvi-missing-music-'));
+  t.after(() => fs.rm(parent, { recursive: true, force: true }));
+  await assert.rejects(buildReleaseArtifact({ sourceWorktree: source, dependencyRoot: dependencies, outputRoot: path.join(parent, 'release') }), /sonuvi-music-setup|entrypoint/i);
 });
