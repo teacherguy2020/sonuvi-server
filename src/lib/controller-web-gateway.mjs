@@ -24,6 +24,17 @@ async function readJson(req) {
 }
 const mobileRead = path => path === '/v1/mobile/playlists' || /^\/v1\/mobile\/playlists\/pl_[\w-]{32}\/artwork$/.test(path) || path === '/v1/mobile/animated-art' || /^\/v1\/mobile\/animated-art\/media\/[a-f0-9]{40}\.mp4$/.test(path);
 
+// Settings keeps the existing Track Key as its operator credential. These
+// routes therefore use the browser session only as the transport/CSRF gate;
+// they must not be folded into the ordinary paired-controller dispatch list,
+// which intentionally excludes administration.
+const browserKeyRoutes = new Map([
+  ['/config/runtime/admin', new Set(['GET'])],
+  ['/config/runtime', new Set(['POST'])],
+]);
+const isBrowserKeyRoute = (method, pathname, hasQuery = false) => !hasQuery
+  && browserKeyRoutes.get(pathname)?.has(String(method || 'GET').toUpperCase()) === true;
+
 /** Browser cookies grant only the explicitly listed ordinary controller operations. */
 export function createControllerWebGateway({ secret=process.env.SONUVI_CONTROLLER_WEB_SECRET, origin=process.env.SONUVI_CONTROLLER_WEB_ORIGIN, apiPort=Number(process.env.SONUVI_CONTROLLER_API_PORT||3101), allowLoopbackFixture=false, trustLoopbackProxy=process.env.SONUVI_CONTROLLER_TRUST_LOOPBACK_PROXY==='1', sessionFile=process.env.SONUVI_CONTROLLER_SESSION_FILE, now=()=>Date.now() }={}) {
   let configured='';
@@ -90,7 +101,8 @@ export function createControllerWebGateway({ secret=process.env.SONUVI_CONTROLLE
     let url;try{url=new URL(req.url,'http://web.invalid');}catch{send(res,400,{ok:false});return true;}
     const legacy=isControllerDispatchable({method:req.method,pathname:url.pathname});
     const mobile=req.method==='GET'&&mobileRead(url.pathname);
-    if(!url.pathname.startsWith('/__controller/')&&!legacy&&!mobile)return false;
+    const browserKey=isBrowserKeyRoute(req.method,url.pathname,url.search.length>0);
+    if(!url.pathname.startsWith('/__controller/')&&!legacy&&!mobile&&!browserKey)return false;
     prune();
     const local=isLoopbackAddress(req.socket.remoteAddress);
     const fixture=allowLoopbackFixture&&local&&/^(127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/.test(req.headers.host||'');
@@ -212,7 +224,7 @@ export function createControllerWebGateway({ secret=process.env.SONUVI_CONTROLLE
         }
         else {session=await ensureAccess(id,session,{force:true});if(!session){send(res,401,{ok:false,error:'Controller authorization was revoked; pair again.'},{'set-cookie':setCookie('sonuvi_controller','',secure,0)});return true;}send(res,200,{ok:true,expiresAt:session.accessExpiresAt},{'set-cookie':controllerCookie(id,secure)});}return true;
       }
-      if(legacy||mobile){
+      if(legacy||mobile||browserKey){
         if(session)session=await ensureAccess(id,session);
         if(!session){send(res,401,{ok:false,error:'Controller pairing required.'});return true;}
         if(mobile && url.pathname.startsWith('/v1/mobile/playlists')) {
@@ -228,10 +240,11 @@ export function createControllerWebGateway({ secret=process.env.SONUVI_CONTROLLE
         if(req.method==='POST'){
           if(!equal(session.csrf,req.headers['x-csrf-token'])){send(res,403,{ok:false,error:'CSRF validation failed.'});return true;}
           try{body=await readJson(req);}catch{send(res,400,{ok:false,error:'Invalid controller body.'});return true;}
-          if(!validControllerBody({method:req.method,pathname:url.pathname,body})){send(res,400,{ok:false,error:'Controller body rejected.'});return true;}
+          if(legacy&&!validControllerBody({method:req.method,pathname:url.pathname,body})){send(res,400,{ok:false,error:'Controller body rejected.'});return true;}
         }
         const headers={authorization:`Bearer ${session.accessToken}`, ...(legacy?{'x-sonuvi-controller-dispatch':'mobile-session'}:{})};
         if(req.headers.range)headers.range=req.headers.range;
+        if(browserKey&&typeof req.headers['x-track-key']==='string')headers['x-track-key']=req.headers['x-track-key'];
         let up=await api(req.method,url.pathname+url.search,{headers,body});
         // An access bearer can expire between the preflight and the upstream
         // request. Renew once; never turn an upstream outage into a logout.

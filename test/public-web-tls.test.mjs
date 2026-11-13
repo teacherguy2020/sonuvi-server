@@ -15,7 +15,7 @@ test('direct HTTPS validates its certificate; HTTP redirects without changing im
  const health=await get(`http://127.0.0.1:${port}/release.json`);assert.equal(health.status,200);assert.equal(JSON.parse(health.body).releaseId,'fixture-release');
  const publicCA=await get(`http://127.0.0.1:${port}/sonuvi-browser-ca.crt`);assert.equal(publicCA.status,200);assert.match(publicCA.body,/BEGIN CERTIFICATE/);assert.doesNotMatch(publicCA.body,/PRIVATE KEY/);
  assert.equal((await get(origin+'/__controller/session',{ca})).status,200);
- assert.equal((await get(origin+'/config/runtime/admin',{ca})).status,404);
+ assert.equal((await get(origin+'/config/runtime/admin',{ca})).status,401);
  // An incomplete active HTTP request must not wedge the real service shutdown.
  const socket=net.createConnection({host:'127.0.0.1',port});
  socket.on('error',()=>{});t.after(()=>socket.destroy());await once(socket,'connect');

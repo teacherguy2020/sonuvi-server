@@ -10,6 +10,33 @@ import { createControllerWebGateway } from '../src/lib/controller-web-gateway.mj
 import { controllerDispatchHeader, createControllerDispatchAuthorizer } from '../src/lib/controller-browser-dispatch.mjs';
 
 const raw = (port,headers={}) => new Promise((resolve,reject)=>{http.get({host:'127.0.0.1',port,path:'/__controller/session',headers},r=>{r.resume();r.on('end',()=>resolve(r.statusCode));}).on('error',reject);});
+test('Settings keeps Track Key administration outside ordinary controller dispatch',async t=>{
+ const temp=await fs.mkdtemp(path.join(os.tmpdir(),'sonuvi-settings-gateway-'));t.after(()=>fs.rm(temp,{recursive:true,force:true}));
+ const sessionId='s'.repeat(43),csrf='c'.repeat(43),trackKey='fixture-settings-track-key';
+ const sessionFile=path.join(temp,'sessions.json');
+ await fs.writeFile(sessionFile,JSON.stringify({version:2,origin:'',sessions:[[sessionId,{csrf,accessToken:'fixture-access',refreshToken:'fixture-refresh',accessExpiresAt:Date.now()+3600000,role:'controller'}]]}),{mode:0o600});
+ const calls=[];
+ const api=http.createServer((req,res)=>{let body='';req.on('data',chunk=>body+=chunk);req.on('end',()=>{
+   calls.push({method:req.method,path:req.url,trackKey:req.headers['x-track-key']||'',dispatch:req.headers['x-sonuvi-controller-dispatch']||'',body});
+   const key=req.headers['x-track-key']===trackKey;
+   if(req.url==='/config/runtime/admin'&&req.method==='GET'&&key){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true,config:{contract:'sonuvi.runtime-admin-config.v1'}}));return;}
+   if(req.url==='/config/runtime'&&req.method==='POST'&&key){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true,changed:true}));return;}
+   res.writeHead(403,{'content-type':'application/json'});res.end(JSON.stringify({ok:false,error:'Forbidden'}));
+ });});
+ const apiPort=await listen(api);t.after(()=>close(api));
+ const gateway=createControllerWebGateway({apiPort,allowLoopbackFixture:true,sessionFile});
+ const web=http.createServer((req,res)=>gateway(req,res));const webPort=await listen(web);t.after(()=>close(web));
+ const origin=`http://127.0.0.1:${webPort}`,cookie=`sonuvi_controller=${sessionId}`;
+ const request=(path,options={})=>fetch(origin+path,{...options,headers:{cookie,...(options.headers||{})}});
+ const admin=await request('/config/runtime/admin',{headers:{'x-track-key':trackKey}});assert.equal(admin.status,200);assert.equal((await admin.json()).config.contract,'sonuvi.runtime-admin-config.v1');
+ const denied=await request('/config/runtime/admin');assert.equal(denied.status,403);
+ const save=await request('/config/runtime',{method:'POST',headers:{origin,'content-type':'application/json','x-csrf-token':csrf,'x-track-key':trackKey},body:JSON.stringify({config:{paths:{musicLibraryRoot:'/fixture'}}})});assert.equal(save.status,200);
+ assert.deepEqual(calls.map(({method,path,trackKey:forwarded,dispatch})=>({method,path,trackKey:forwarded,dispatch})),[
+   {method:'GET',path:'/config/runtime/admin',trackKey,dispatch:''},
+   {method:'GET',path:'/config/runtime/admin',trackKey:'',dispatch:''},
+   {method:'POST',path:'/config/runtime',trackKey,dispatch:''},
+ ]);
+});
 test('HTTPS transport, Host and Origin are independently required',async t=>{
  const gateway=createControllerWebGateway({secret:'fixture',origin:'https://controller.test'});const s=http.createServer((req,res)=>gateway(req,res));await listen(s);t.after(()=>close(s));
  assert.equal(await raw(s.address().port,{host:'controller.test',origin:'https://controller.test','x-forwarded-proto':'https'}),503);
