@@ -17,7 +17,7 @@ export function alexaPublicCaddyfile(document){
 https://${host} {
  tls {
   issuer acme {
-   ca https://acme-v02.api.letsencrypt.org/directory
+   dir https://acme-v02.api.letsencrypt.org/directory
    disable_http_challenge
   }
  }

@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import {alexaPublicCaddyfile,alexaPublicReadPaths,alexaPublicWritePaths} from '../src/lib/alexa-public-https.mjs';
 const doc={core:{ports:{api:3101}},plugins:{alexa:{enabled:true,publicDomain:'music.example.com'}}};
 test('public proxy preserves local443, provisions public TLS and uses explicit methods/routes',()=>{
- const value=alexaPublicCaddyfile(doc);assert.match(value,/https_port 9443/);assert.match(value,/disable_http_challenge/);assert.match(value,/acme-v02.api.letsencrypt.org/);assert.match(value,/respond 404/);
+ const value=alexaPublicCaddyfile(doc);assert.match(value,/https_port 9443/);assert.match(value,/disable_http_challenge/);assert.match(value,/dir https:\/\/acme-v02.api.letsencrypt.org/);assert.match(value,/respond 404/);
  assert.ok(!alexaPublicReadPaths.includes('/config/runtime/admin'));
  assert.ok(!alexaPublicWritePaths.includes('/config/runtime'));
  assert.ok(!value.includes('/v1/'));assert.ok(!value.includes('/__controller/'));assert.ok(!value.includes('/config.html'));
