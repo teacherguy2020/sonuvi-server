@@ -220,3 +220,17 @@ Remaining acceptance: genuine Last.fm Vibe/scrobble service responses, APNs
 registration/delivery, Alexa skill connectivity, hardware bridge operation,
 Safari/iOS physical cross-client behavior, and the next physical-iPad clean
 Debian installation. Fixture success is not physical or external acceptance.
+
+### Packaged module MIME correction (2026-11-13)
+
+Source 829d374cdadddf382955843afd91fb39d58db89e corrects `.mjs` to
+`text/javascript` in the actual public web server. The previous browser fixture
+supplied MIME headers itself and therefore missed the packaged-product defect.
+Regression coverage now checks both module responses through the real server;
+retained Playwright evidence exercises actual packaged assets inside
+`app.html?page=config.html`, including form/JSON validation and persistence.
+The authorized current VM upgrade committed successfully; trusted HTTPS checks
+confirm both module MIME types and exact packaged bytes. Configuration and
+protected credentials remain byte-identical. Physical browser acceptance is
+still Brian's. This documentation-only successor provides a distinct v1 fresh
+candidate ID from the deployed v2 upgrade candidate; runtime code is identical.
