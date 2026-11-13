@@ -211,8 +211,10 @@ test('MPD history remains mpdscribble-authoritative and does not invoke non-MPD 
   }
 });
 
-test('MPD shadow mode records centralized qualification without submitting Last.fm', async () => {
+test('MPD shadow mode records centralized qualification without submitting Last.fm', { timeout: 5000 }, async () => {
   let hookCalls = 0;
+  let qualified;
+  const qualification = new Promise(resolve => { qualified = resolve; });
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'now-playing-history-mpd-shadow-'));
   try {
     const store = createListeningHistoryStore({
@@ -223,6 +225,7 @@ test('MPD shadow mode records centralized qualification without submitting Last.
         assert.equal(event.source, 'mpd');
         assert.equal(event.lastfmEligible, true);
         await updateEvent(event.sessionId, { lastfmScrobbleState: 'mpd-shadow-qualified' });
+        qualified();
       },
     });
     const result = await store.observe({
@@ -234,7 +237,7 @@ test('MPD shadow mode records centralized qualification without submitting Last.
     assert.equal(result.recorded, true);
     assert.equal(result.event.trackKey, 'trk_mpd_shadow');
     assert.equal(result.event.lastfmScrobbleState, 'mpd-shadow-pending');
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await qualification;
     assert.equal(hookCalls, 1);
     const raw = await fs.readFile(path.join(dir, 'history.jsonl'), 'utf8');
     assert.match(raw, /"lastfmScrobbleState":"mpd-shadow-qualified"/);

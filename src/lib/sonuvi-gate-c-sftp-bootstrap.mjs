@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import { gateCBootstrapKitReplacementCommand } from './sonuvi-gate-c-bootstrap-replacement-contract.mjs';
+import { gateCBootstrapKitReplacementCommand, GATE_C_BOOTSTRAP_REPLACEMENT_CAPSULE_SHA256 } from './sonuvi-gate-c-bootstrap-replacement-contract.mjs';
 
 export const GATE_C_SFTP_BOOTSTRAP_CONTRACT = 'sonuvi.gate-c-sftp-bootstrap.v1';
 export const GATE_C_SFTP_BOOTSTRAP_MAX_BYTES = 16 * 1024 * 1024;
@@ -15,7 +15,7 @@ export const GATE_C_SFTP_UPGRADE_BOOTSTRAP_FILE_PREFIX = 'sonuvi-bootstrap-kit-v
 export const GATE_C_SFTP_UPGRADE_BOOTSTRAP_PARTIAL_SUFFIX = '.tar.partial';
 export const GATE_C_SFTP_UPGRADE_BOOTSTRAP_FINAL_SUFFIX = '.tar';
 export const GATE_C_SFTP_UPGRADE_BOOTSTRAP_ACTIVATOR = 'sonuvi_bootstrap_kit_replacement_v1';
-export const GATE_C_SFTP_UPGRADE_BOOTSTRAP_ACTIVATOR_SHA256 = 'e78fc5d346b261fdedf3df3204b1f29cba1e86cb2e3467bedc4e7f1d90624210';
+export const GATE_C_SFTP_UPGRADE_BOOTSTRAP_ACTIVATOR_SHA256 = GATE_C_BOOTSTRAP_REPLACEMENT_CAPSULE_SHA256;
 
 const STAGING_SEGMENTS = Object.freeze(GATE_C_SFTP_STAGING_RELATIVE_DIRECTORY.split('/'));
 const UPGRADE_STAGING_SEGMENTS = Object.freeze(GATE_C_SFTP_UPGRADE_STAGING_RELATIVE_DIRECTORY.split('/'));
