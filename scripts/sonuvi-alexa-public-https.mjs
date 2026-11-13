@@ -6,8 +6,9 @@ import {alexaPublicCaddyfile} from '../src/lib/alexa-public-https.mjs';
 if(process.getuid?.()!==0)throw Error('root_required');
 const config='/var/lib/sonuvi/config/now-playing.config.json';
 const target='/etc/sonuvi/alexa-public.Caddyfile';
-const marker='/var/lib/sonuvi/config/alexa-public-https-status.json';
+const marker='/run/sonuvi-alexa-public/status.json';
 const unit='sonuvi-alexa-public.service';
+await fs.mkdir('/run/sonuvi-alexa-public',{recursive:true,mode:0o755});
 try{
  const next=alexaPublicCaddyfile(JSON.parse(await fs.readFile(config,'utf8')));
  if(next===null){execFileSync('/usr/bin/systemctl',['stop',unit]);await fs.writeFile(marker,JSON.stringify({managed:true,state:'disabled'})+'\n',{mode:0o644});}

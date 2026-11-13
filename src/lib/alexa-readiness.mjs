@@ -61,7 +61,7 @@ export function createAlexaReadiness({resolve=lookup,request=https.request,timeo
  };
  const provisioning=async()=>{
   try{
-   const saved=JSON.parse(await fs.readFile('/var/lib/sonuvi/config/alexa-public-https-status.json','utf8'));
+   const saved=JSON.parse(await fs.readFile('/run/sonuvi-alexa-public/status.json','utf8'));
    if(saved.managed!==true)return null;
    return {managed:true,state:['disabled','configuration-error','awaiting-public-verification'].includes(saved.state)?saved.state:'unknown',internalPort:9443,externalPort:443};
   }catch{return null;}
