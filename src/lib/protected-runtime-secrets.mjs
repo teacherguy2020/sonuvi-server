@@ -51,6 +51,16 @@ export function loadProtectedLastfmEnvironment({
   } catch {
     // Missing/unreadable protected credentials fail closed for this feature.
   }
+  // Explicit owner edits supersede legacy files/environment without modifying them.
+  if (statePaths.lastfmAdminEnvPath && statePaths.lastfmAdminEnvPath !== statePaths.lastfmEnvPath) {
+    try {
+      const contents = readFileSync(statePaths.lastfmAdminEnvPath, 'utf8');
+      if (String(contents).split(/\r?\n/).includes('# sonuvi-lastfm-admin-v1')) {
+        fileValues = {...fileValues, ...parseEnvironment(contents)};
+        ownerManaged = true;
+      }
+    } catch { /* No owner edits yet; retain legacy configuration. */ }
+  }
   for (const name of LASTFM_NAMES) {
     if (ownerManaged && Object.hasOwn(fileValues,name)) values[name]=text(fileValues[name]);
     else if (!values[name]) values[name] = text(fileValues[name]);

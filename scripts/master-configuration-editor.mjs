@@ -17,7 +17,13 @@ export async function mountMasterConfigurationEditor(root, {request, refreshMs =
   const credentialDraft = {apiKey:'',apiSecret:''};
   const otherCredentials = {};
   const credentialsDirty = () => Boolean(credentialDraft.apiKey || credentialDraft.apiSecret || Object.values(otherCredentials).some(fields=>Object.keys(fields).length));
-  let authorizationUrl = '', credentialBusy = false;
+  let authorizationUrl = '', credentialBusy = false, lastfmMessage = '';
+  const lastfmError = error => ({
+    EACCES: 'Server cannot save Last.fm credentials. The credential storage permissions need repair.',
+    lastfm_api_key_and_secret_required: 'Enter both a valid API key and a different API secret, then save them.',
+    lastfm_api_credentials_required: 'Save your API key and secret before connecting Last.fm.',
+    lastfm_authorization_expired: 'Choose Connect Last.fm, open the authorization link and approve access, then complete authorization.'
+  }[error.message] || error.message);
   let saving = false, disposed = false;
   const render = () => {
     const openPanels = new Set([...panels.querySelectorAll('details[open]')].map(node=>node.closest('fieldset').dataset.plugin+':'+node.querySelector('summary').textContent));
@@ -111,6 +117,8 @@ export async function mountMasterConfigurationEditor(root, {request, refreshMs =
         const account=element('details');account.append(element('summary','Vibe, shelves and scrobbling'));
         account.append(element('p','API credentials are stored separately from exported configuration. These explicit account actions save immediately.'));
         account.append(element('p',status?.authorized ? `Authorized account: ${status.username || 'connected'}` : 'Connect Last.fm once for personal shelves and scrobbling. Vibe uses the API key without account authorization. Migrated shelf usernames remain a compatibility fallback.'));
+        account.append(element('p',`API key: ${status?.apiKeyConfigured ? 'saved' : 'not saved'} · API secret: ${status?.apiSecretConfigured ? 'saved' : 'not saved'}. Saved values are hidden.`));
+        const feedback=element('p',lastfmMessage);feedback.setAttribute('role','status');account.append(feedback);
         for(const key of ['apiKey','apiSecret']){
           const label=element('label',key==='apiKey'?'API key ':'API secret '),input=element('input');
           input.type='password';input.autocomplete='new-password';input.value=credentialDraft[key];
@@ -121,16 +129,16 @@ export async function mountMasterConfigurationEditor(root, {request, refreshMs =
           const button=element('button',title);button.type='button';button.disabled=credentialBusy;
           button.addEventListener('click',async()=>{
             if(credentialBusy)return;
-            credentialBusy=true;button.disabled=true;
+            credentialBusy=true;button.disabled=true;feedback.textContent='Working…';
             try{
               const result=await request('POST','/plugins/lastfm/'+action,action==='credentials'?{...credentialDraft}:{});
-              if(result.authorizationUrl){authorizationUrl=result.authorizationUrl;message.textContent='Open Last.fm authorization below, approve access, then choose Complete authorization.';}
+              if(result.authorizationUrl){authorizationUrl=result.authorizationUrl;lastfmMessage='Open Last.fm authorization below, approve access, then choose Complete authorization.';}
               else{
                 loaded.status??={};loaded.status.lastfm=result;
                 if(action==='credentials'){credentialDraft.apiKey='';credentialDraft.apiSecret='';}
-                authorizationUrl='';message.textContent=result.restartRequired?'Account settings saved. Restart Server to apply startup credentials.':'Account settings saved.';
+                authorizationUrl='';lastfmMessage=result.restartRequired?'Account settings saved. Restart Server to apply startup credentials.':'Account settings saved.';
               }
-            }catch(error){message.textContent=error.message;}
+            }catch(error){lastfmMessage=lastfmError(error);}
             finally{credentialBusy=false;render();}
           });account.append(button);
         }

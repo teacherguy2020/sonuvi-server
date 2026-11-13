@@ -158,6 +158,9 @@ export function createRuntimeStatePaths({ cwd = process.cwd(), env = process.env
       fallback: resolveWithin(configRoot, 'now-playing.config.json', 'runtime config'),
     }),
     exampleConfigPath: resolveWithin(releaseRoot, 'config/now-playing.config.example.json', 'example config'),
+    // Owner edits use the dedicated service-owned directory, even when an older
+    // systemd unit still names the read-only legacy credential file.
+    lastfmAdminEnvPath: sharedStateEnabled ? path.join(protectedRoot, 'integrations/lastfm/credentials.env') : null,
     lastfmEnvPath: protectedFile({
       env,
       name: 'LASTFM_ENV_FILE',

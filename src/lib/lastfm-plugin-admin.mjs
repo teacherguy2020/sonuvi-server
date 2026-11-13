@@ -22,7 +22,7 @@ export function createLastfmPluginAdministration({statePaths,env=process.env,req
       operational:null,error:c.LASTFM_API_KEY?null:'Configure Last.fm API access to use metadata and Vibe.'};
   };
   async function persist(updates){
-    const target=statePaths.lastfmEnvPath,temporary=`${target}.${randomUUID()}.tmp`;
+    const target=statePaths.lastfmAdminEnvPath || statePaths.lastfmEnvPath,temporary=`${target}.${randomUUID()}.tmp`;
     let original='';
     try{const stat=await fs.lstat(target);if(!stat.isFile()||stat.isSymbolicLink())throw failure('lastfm_credentials_invalid_file',500);original=await fs.readFile(target,'utf8');}
     catch(error){if(error.code!=='ENOENT')throw error;}
