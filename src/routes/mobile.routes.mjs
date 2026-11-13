@@ -611,6 +611,12 @@ export function registerMobileRoutes(app, deps = {}) {
   const enrollmentCode = text(deps.enrollmentCode);
   const mpdHost = text(deps.mpdHost) || 'moode.local';
   const mobileBaseUrl = text(deps.mobileBaseUrl);
+  const getMillsIntegrationState = typeof deps.getMillsIntegrationState === 'function'
+    ? deps.getMillsIntegrationState
+    : null;
+  // Mills is an optional private overlay. Generic installations must not
+  // advertise the integration merely because this route knows its schema.
+  const millsIntegrationConfigured = deps.millsIntegrationConfigured === true;
   const mobileTrackCacheDir = text(deps.mobileTrackCacheDir) || runtimeStatePaths().mobileTrackCacheDir;
   const transcodeTracks = deps.transcodeTracks !== false;
   const musicLibraryRoot = text(deps.musicLibraryRoot) ? path.resolve(text(deps.musicLibraryRoot)) : '';
@@ -1570,10 +1576,20 @@ export function registerMobileRoutes(app, deps = {}) {
       )
       : null;
 
+    const millsState = getMillsIntegrationState ? getMillsIntegrationState() : null;
+    const millsActive = millsIntegrationConfigured && millsState?.active === true;
+    const isMillsDisplay = millsActive
+      && payload.millsMode === true
+      && payload.displayOnly === true
+      && text(payload.displayMode).toLowerCase() === 'mills';
+
     // Catalog-backed queue items already have a bearer-protected opaque art
     // URL. Streams, AirPlay, and rich /now-playing art are proxied through the
     // bearer-protected home artwork route so the client never receives a
     // Track-Key/admin URL or has to fetch moOde directly.
+    // Mills is a physical display-only source. Its canonical payload points
+    // at moOde's current cover art, so it must take precedence over any
+    // paused MPD queue item's catalog artwork.
     // A verified radio match is the exception to the queue-row preference:
     // the queue only knows the station logo, while canonical /now-playing
     // carries the matched iTunes artwork in displayArtUrl.
@@ -1581,7 +1597,7 @@ export function registerMobileRoutes(app, deps = {}) {
       || text(payload.source).toLowerCase() === 'qobuz-connect'
       || text(payload.streamKind).toLowerCase() === 'qobuz-connect';
     const prefersCanonicalArtwork = (isRadio && appleMusicUrl) || isQobuz;
-    const canonicalArtwork = prefersCanonicalArtwork
+    const canonicalArtwork = (isMillsDisplay || prefersCanonicalArtwork)
       ? [payload.displayArtUrl, payload.albumArtUrl, payload.altArtUrl]
         .map((value) => safeArtworkReference(req, value))
         .find(Boolean)
@@ -1710,6 +1726,18 @@ export function registerMobileRoutes(app, deps = {}) {
       isUpnp,
       animatedArt,
       ...sanitizeMobileNowPlaying(payload),
+      integrations: millsIntegrationConfigured
+        ? {
+          mills: {
+            installed: true,
+            enabled: true,
+            active: millsActive,
+          },
+        }
+        : null,
+      millsMode: isMillsDisplay,
+      displayMode: isMillsDisplay ? (text(payload.displayMode) || 'mills') : null,
+      displayOnly: isMillsDisplay,
       isYoutube: Boolean(payload.isYoutube) || Boolean(currentItem?.isYoutube),
       personnel,
       about,

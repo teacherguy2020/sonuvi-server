@@ -1067,6 +1067,67 @@ test('mobile radio station artwork uses the catalog logo name behind an opaque U
   assert.deepEqual(artworkDescriptor, { kind: 'radio', reference: 'iHeart Rat Pack Radio' });
 });
 
+test('mobile Mills now-playing exposes display state and proxies canonical artwork', async () => {
+  let artworkDescriptor = null;
+  const millsArtwork = 'http://moode.local/coverart.php/Mills%20Track.flac';
+  const app = registerFixture({
+    millsIntegrationConfigured: true,
+    getMillsIntegrationState: () => ({ active: true }),
+    fetchInternalJson: async (pathname) => pathname === '/now-playing'
+      ? {
+        ok: true,
+        status: 200,
+        json: {
+          state: 'pause',
+          displayTitle: 'Mills Track',
+          displayArtist: 'Mills Artist',
+          displayLine3: 'Mills Album',
+          file: 'USB/SamsungMoode/Mills Playlist/Mills Track.flac',
+          displayArtUrl: millsArtwork,
+          albumArtUrl: millsArtwork,
+          millsMode: true,
+          displayOnly: true,
+          displayMode: 'mills',
+        },
+      }
+      : { ok: true, json: {} },
+    serveHomeArtwork: async (res, descriptor) => {
+      artworkDescriptor = descriptor;
+      return res.json({ ok: true, descriptor });
+    },
+  });
+
+  const sessionRes = createResponse();
+  await app.routes.get('POST /v1/mobile/session')?.(request({
+    headers: { 'x-mobile-enrollment-code': 'one-time-code' },
+    body: { deviceId: 'appletv-brian' },
+  }), sessionRes);
+
+  const response = createResponse();
+  await app.routes.get('GET /v1/mobile/now-playing')?.(request({
+    headers: { authorization: `Bearer ${sessionRes.body.accessToken}` },
+  }), response);
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.body.integrations, {
+    mills: { installed: true, enabled: true, active: true },
+  });
+  assert.equal(response.body.millsMode, true);
+  assert.equal(response.body.displayMode, 'mills');
+  assert.equal(response.body.displayOnly, true);
+  assert.equal(response.body.title, 'Mills Track');
+  assert.match(response.body.artworkUrl, /\/v1\/mobile\/home\/artwork\/har_/);
+
+  const artworkId = response.body.artworkUrl.split('/').at(-1);
+  const artworkResponse = createResponse();
+  await app.routes.get('GET /v1/mobile/home/artwork/:artworkId')?.(request({
+    headers: { authorization: `Bearer ${sessionRes.body.accessToken}` },
+    params: { artworkId },
+  }), artworkResponse);
+  assert.equal(artworkResponse.statusCode, 200);
+  assert.deepEqual(artworkDescriptor, { kind: 'url', reference: millsArtwork });
+});
+
 test('mobile direct radio metadata returns enriched art and a safe Apple Music link', async () => {
   const app = registerFixture({
     fetchInternalJson: async (pathname) => pathname === '/now-playing'

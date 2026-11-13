@@ -9285,6 +9285,10 @@ registerMobileRoutes(app, {
   trackIdSecret: MOBILE_TRACK_ID_SECRET,
   enrollmentCode: MOBILE_API_ENROLLMENT_CODE,
   mobileBaseUrl: MOBILE_PUBLIC_BASE_URL,
+  // Keep the optional Mills projection dormant on generic installations. The
+  // private hardware overlay supplies these Harmony values only on Brian's VM.
+  millsIntegrationConfigured: Boolean(HARMONY_HOST && HARMONY_HUB_ID && HARMONY_DENON_DEVICE_ID),
+  getMillsIntegrationState,
   mobileTrackCacheDir: MOBILE_TRACK_CACHE_DIR,
   transcodeTracks: MOBILE_TRANSCODE_TRACKS,
   animatedArt: { lookup: lookupAnimatedArt, resolveMedia: resolveAnimatedMediaFile },
