@@ -196,3 +196,27 @@ real service-user master Save and credential persistence across a fresh process,
 root-owned verifier protection, bundled assets, and packaged config.html browser
 interaction. It predates the latest upgrade/hardware changes and is not the RC.
 Actual v1 capsule acceptance passed in disposable Debian ARM64 (4/4 tests).
+
+### Local immutable candidate verification
+
+The implementation checkpoint is fead04e804a4f0a251acc13e6cdce20388522b4f.
+Two clean ARM64 builds using identical inputs have identical manifests; the
+fresh-install artifact is
+sonuvi-c9e70d85d5d28e9d5bcbe3969211f3cc665b8fe46d366d28056e4446d645f89a.
+The v1 fresh-install kit and envelope are locally signed and verified, not
+published. Clean packaged Node/Sharp, actual sonuvi-user atomic Save, Last.fm
+and notification credential persistence after a new process, verifier-file
+protection and UI asset checks passed. Native full regression and Simulator
+build passed after the capsule update; final acquisition pin validation follows.
+
+The existing product deliberately has independent v1 fresh-install and v2
+upgrade inventories. A documentation-only successor revision is used for the
+v2 companion artifact so those fixed acquisition contracts have distinct
+immutable release IDs and do not require conflicting envelopes at one URL.
+Runtime implementation is unchanged from the fresh-install checkpoint. Both
+remain local candidates until separate publication authorization.
+
+Remaining acceptance: genuine Last.fm Vibe/scrobble service responses, APNs
+registration/delivery, Alexa skill connectivity, hardware bridge operation,
+Safari/iOS physical cross-client behavior, and the next physical-iPad clean
+Debian installation. Fixture success is not physical or external acceptance.
