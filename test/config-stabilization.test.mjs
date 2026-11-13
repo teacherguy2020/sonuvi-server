@@ -17,6 +17,13 @@ const html = await fs.readFile(new URL('../config.html', import.meta.url), 'utf8
 test('required Config helper is included by the existing public asset allowlist', () => {
   assert.equal(isPublicWebAsset('scripts/config-editable.js'), true);
 });
+test('app shell and embedded config page bootstrap browser controller authentication', async () => {
+  for (const page of ['app.html', 'config.html']) {
+    const source = await fs.readFile(new URL('../' + page, import.meta.url), 'utf8');
+    assert.match(source, /\/__controller\/config\.js/);
+    assert.match(source, /scripts\/controller-browser-auth\.js/);
+  }
+});
 const editable = await fs.readFile(new URL('../scripts/config-editable.js', import.meta.url), 'utf8');
 function response() {
   return Object.assign(new EventEmitter(), { code: 200, status(n) { this.code = n; return this; }, json(body) { this.body = body; return this; } });
