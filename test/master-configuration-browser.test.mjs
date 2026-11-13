@@ -18,6 +18,7 @@ test('actual configuration page synchronizes forms and JSON through real validat
   try {
     const page = await browser.newPage();
     let saves = 0;
+    document.plugins.alexa.enabled=true;document.plugins.alexa.publicDomain="music.example.com";await fs.writeFile(file,JSON.stringify(document));
     await page.route('http://configuration.test/**', async route => {
       const url = new URL(route.request().url());
       if(url.pathname.startsWith('/__controller/configuration')) {
@@ -37,6 +38,10 @@ test('actual configuration page synchronizes forms and JSON through real validat
     const radio=page.locator('fieldset').filter({has:page.locator('legend',{hasText:/^Radio$/})});
     await radio.locator('summary',{hasText:'Plugin Config'}).click();
     await radio.locator('input[type=checkbox]').check();
+    const alexa=page.locator('[data-plugin=alexa]');
+    assert.match(await alexa.innerText(),/Saved settings do not mean Alexa is ready/);
+    await alexa.getByRole('button',{name:'Check Alexa connection'}).click();
+    assert.match(await alexa.innerText(),/Save your settings before checking/);
     const master=page.getByRole('textbox',{name:'Complete master configuration JSON'});
     assert.equal(JSON.parse(await master.inputValue()).plugins.radio.enabled,true);
     await radio.locator('summary',{hasText:'JSON Config'}).click();

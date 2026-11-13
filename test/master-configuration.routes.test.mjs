@@ -63,3 +63,12 @@ test('invalid whole-document validation provides actionable field locations',asy
   assert.equal(response.statusCode,422);
   assert.ok(response.body.errors.some(e=>e.path==='/plugins/mpd/port'));
 });
+test('Alexa connectivity action requires authorization and uses saved domain, not request body',async()=>{
+ let probes=0;
+ const document=initializeMasterConfiguration();document.plugins.alexa.publicDomain='saved.example.com';
+ const options={store:{read:async()=>({document})},alexaReadiness:{check:async settings=>{probes++;assert.equal(settings.publicDomain,'saved.example.com');return {setupState:'connection-failed'};}}};
+ let call=harness({...options,authorize:async(req,res)=>{res.status(401).json({ok:false});return false;}});
+ assert.equal((await call('post','/plugins/alexa/check',{})).statusCode,401);assert.equal(probes,0);
+ call=harness({...options,authorize:async()=>true});
+ assert.equal((await call('post','/plugins/alexa/check',{publicDomain:'127.0.0.1'})).body.setupState,'connection-failed');assert.equal(probes,1);
+});

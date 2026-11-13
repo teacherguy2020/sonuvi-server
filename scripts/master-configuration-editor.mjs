@@ -90,7 +90,19 @@ export async function mountMasterConfigurationEditor(root, {request, refreshMs =
       const enabled = draft.document.plugins?.[module.id]?.enabled;
       section.append(element('p',enabled === undefined ? 'Core capability' : enabled ? 'Enabled' : 'Disabled'));
       const status = loaded.status?.[module.id];
-      section.append(element('p',status ? `Configured: ${status.configured ?? 'unknown'} · Operational: ${status.operational ?? 'not checked'}${status.error ? ' · '+status.error : ''}` : 'Operational status has not been checked.'));
+      section.append(element('p',module.id==='alexa' ? `Public domain saved: ${status?.configured ? 'yes' : 'no'} · Playback: not verified${status?.error ? ' · '+status.error : ''}` : status ? `Configured: ${status.configured ?? 'unknown'} · Operational: ${status.operational ?? 'not checked'}${status.error ? ' · '+status.error : ''}` : 'Operational status has not been checked.'));
+      if(module.id==='alexa'){
+        section.append(element('p',status?.guidance || 'A saved domain is not proof of public HTTPS readiness.'));
+        const connection=element('p',`Alexa setup: ${status?.setupState || 'not-checked'}`);connection.setAttribute('role','status');section.append(connection);
+        const check=element('button','Check Alexa connection');check.type='button';section.append(check);
+        check.addEventListener('click',async()=>{
+          if(draft.dirty||pendingPlugins.size){connection.textContent='Save your settings before checking the connection.';return;}
+          check.disabled=true;connection.textContent='Checking public DNS, HTTPS certificate, and API response…';
+          try{const result=await request('POST','/plugins/alexa/check',{});loaded.status??={};loaded.status.alexa={...loaded.status.alexa,...result};render();}
+          catch(error){connection.textContent=error.message;}
+          finally{check.disabled=false;}
+        });
+      }
       const settings = element('details');
       settings.append(element('summary','Plugin Config'));
       for (const [key, schema] of Object.entries(module.schema.properties)) {
@@ -237,8 +249,9 @@ export async function mountMasterConfigurationEditor(root, {request, refreshMs =
       const pending = draft.saveRequest(); saving=true; save.disabled=true;
       await request('POST','/validate',{document:pending.document});
       const result = await request('PUT','',{document:pending.document,revision:pending.revision});
-      draft.savedResponse(result,pending); json.value=draft.text; render();
+      draft.savedResponse(result,pending); if(result.setup?.alexa){loaded.status??={};loaded.status.alexa={...loaded.status.alexa,...result.setup.alexa};} json.value=draft.text; render();
       message.textContent=`Saved revision ${result.revision}. ${result.application?.error || (result.application?.restartRequired ? 'Server restart required.' : 'Applied.')} ${draft.dirty ? 'Newer unsaved edits remain.' : ''}`;
+      if(result.setup?.alexa?.enabled)message.textContent+=' Alexa public HTTPS setup must be verified separately; use Check Alexa connection.';
       if(result.application?.restartRequired)promptRestart();
     } catch(error) { message.textContent=error.message; }
     finally { saving=false; save.disabled=false; }

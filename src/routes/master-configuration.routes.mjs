@@ -1,8 +1,10 @@
+import { createAlexaReadiness } from '../lib/alexa-readiness.mjs';
 import { configurationPlugins, validateMasterConfiguration, MasterConfigurationError } from '../lib/master-configuration.mjs';
 
 /** One API for both editors. Authorization is supplied by the existing owner API. */
 export function registerMasterConfigurationRoutes(app, {
   store, authorize, applyConfiguration, lastfm, credentials, pluginStatus = async () => ({}),
+  alexaReadiness = createAlexaReadiness(),
   prefix = '/v1/admin/configuration/master',
 }) {
   if (!store || typeof authorize !== 'function') throw new Error('Master configuration requires store and authorization');
@@ -33,7 +35,12 @@ export function registerMasterConfigurationRoutes(app, {
         capabilities:{skillEndpoint:{configured:skillConfigured,operational:null},homebridgeRouting:{configured:alexa.configured,operational:null}},
         error:plugins.alexa.enabled&&!skillConfigured?'Configure the public Alexa endpoint. External skill connectivity has not been verified.':null};
     }
+    status.alexa={...status.alexa,...alexaReadiness.status(state.document.plugins.alexa)};
     return res.json({ok:true, contract:'sonuvi.master-configuration.v1', ...state, plugins:configurationPlugins, status});
+  }));
+  app.post(`${prefix}/plugins/alexa/check`,handler(async(req,res)=>{
+    const state=await store.read();
+    return res.json({ok:true,...await alexaReadiness.check(state.document.plugins.alexa)});
   }));
   app.post(`${prefix}/validate`, handler(async (req, res) => {
     const errors = validateMasterConfiguration(req.body?.document);
@@ -54,6 +61,6 @@ export function registerMasterConfigurationRoutes(app, {
       try { application = await applyConfiguration({before:before.document, after:saved.document, revision:saved.revision}); }
       catch { application = {state:'apply-failed', restartRequired:true, error:'Settings were saved, but runtime application failed.'}; }
     }
-    return res.json({ok:true, contract:'sonuvi.master-configuration.v1', ...saved, application});
+    return res.json({ok:true, contract:'sonuvi.master-configuration.v1', ...saved, application, setup:{alexa:alexaReadiness.status(saved.document.plugins.alexa)}});
   }));
 }

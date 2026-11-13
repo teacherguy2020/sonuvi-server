@@ -218,3 +218,19 @@ test('restart bridge requires cookie and CSRF and forwards only owner restart ro
  assert.deepEqual(calls.map(x=>x.path),['/v1/admin/configuration/master/restart/status','/v1/admin/configuration/master/restart']);
  assert.ok(calls.every(x=>x.authorization==='Bearer owner-fixture'));
 });
+
+test('Alexa check bridge requires cookie and CSRF and forwards only saved-settings check',async t=>{
+ const temp=await fs.mkdtemp(path.join(os.tmpdir(),'sonuvi-restart-gateway-'));t.after(()=>fs.rm(temp,{recursive:true,force:true}));
+ const sessionFile=path.join(temp,'sessions.json'),sessionId='r'.repeat(43),csrf='restart-csrf',calls=[];
+ await fs.writeFile(sessionFile,JSON.stringify({version:2,origin:'',sessions:[[sessionId,{csrf,accessToken:'owner-fixture',refreshToken:'refresh-fixture',accessExpiresAt:Date.now()+3600000,role:'administrator'}]]}),{mode:0o600});
+ const api=http.createServer((req,res)=>{req.resume();calls.push({path:req.url,authorization:req.headers.authorization});res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true}));});await listen(api);t.after(()=>close(api));
+ const gateway=createControllerWebGateway({apiPort:api.address().port,allowLoopbackFixture:true,sessionFile});const web=http.createServer((req,res)=>gateway(req,res));await listen(web);t.after(()=>close(web));
+ const origin='http://127.0.0.1:'+web.address().port,headers={origin,cookie:'sonuvi_controller='+sessionId,'content-type':'application/json','x-csrf-token':csrf};
+ assert.equal((await fetch(origin+'/__controller/configuration/plugins/alexa/check',{method:'POST',headers:{origin,'content-type':'application/json'},body:'{}'})).status,401);
+ assert.equal((await fetch(origin+'/__controller/configuration/plugins/alexa/check',{method:'POST',headers:{...headers,'x-csrf-token':''},body:'{}'})).status,403);
+ assert.equal(calls.length,0);
+
+ assert.equal((await fetch(origin+'/__controller/configuration/plugins/alexa/check',{method:'POST',headers,body:'{}'})).status,200);
+ assert.deepEqual(calls.map(x=>x.path),['/v1/admin/configuration/master/plugins/alexa/check']);
+ assert.ok(calls.every(x=>x.authorization==='Bearer owner-fixture'));
+});
