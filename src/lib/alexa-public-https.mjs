@@ -26,14 +26,18 @@ https://${host} {
   path ${alexaPublicReadPaths.join(' ')}
  }
  handle @read {
-  reverse_proxy 127.0.0.1:${port}
+  reverse_proxy 127.0.0.1:${port} {
+   header_up Host 127.0.0.1:${port}
+  }
  }
  @write {
   method POST
   path ${alexaPublicWritePaths.join(' ')}
  }
  handle @write {
-  reverse_proxy 127.0.0.1:${port}
+  reverse_proxy 127.0.0.1:${port} {
+   header_up Host 127.0.0.1:${port}
+  }
  }
  respond 404
 }

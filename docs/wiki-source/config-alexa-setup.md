@@ -303,3 +303,5 @@ Last updated: 2026-11-13
 ### Managed public endpoint
 
 On a host provisioned with `sonuvi-alexa-public.service` and `sonuvi-alexa-public-reconcile.timer`, the saved JSON hostname and enable flag are reconciled every minute by `scripts/sonuvi-alexa-public-https.mjs`. Caddy obtains/renews a public certificate using TLS-ALPN-01 and serves only the explicit Alexa route/method allowlist. The private local browser stays on 443; Eero maps external TCP443 to internal TCP9443. No port80 is required. Invalid or disabled Alexa config stops the public listener. The service marker means provisioning is installed, not that issuance or external playback succeeded. Ordinary hosts without this provisioning continue to show the explicit missing-setup guidance.
+
+Public proxy upstream Host is pinned to the loopback API authority. Artwork handlers perform same-origin internal lookups; forwarding the public Host causes a public HTTP detour and can exceed the iOS notification extension eight-second image deadline. Verified symptom: local thumbnail5ms, publictimeout8002ms.
