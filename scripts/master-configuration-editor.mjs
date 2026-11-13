@@ -118,10 +118,12 @@ export async function mountMasterConfigurationEditor(root, {request, refreshMs =
         account.append(element('p','API credentials are stored separately from exported configuration. These explicit account actions save immediately.'));
         account.append(element('p',status?.authorized ? `Authorized account: ${status.username || 'connected'}` : 'Connect Last.fm once for personal shelves and scrobbling. Vibe uses the API key without account authorization. Migrated shelf usernames remain a compatibility fallback.'));
         account.append(element('p',`API key: ${status?.apiKeyConfigured ? 'saved' : 'not saved'} · API secret: ${status?.apiSecretConfigured ? 'saved' : 'not saved'}. Saved values are hidden.`));
+        if(status?.apiKeyConfigured && status?.apiSecretConfigured) account.append(element('p','Your API credentials are saved. No need to enter them again. To replace them, enter both a new key and secret.'));
         const feedback=element('p',lastfmMessage);feedback.setAttribute('role','status');account.append(feedback);
         for(const key of ['apiKey','apiSecret']){
           const label=element('label',key==='apiKey'?'API key ':'API secret '),input=element('input');
           input.type='password';input.autocomplete='new-password';input.value=credentialDraft[key];
+          input.placeholder=status?.[key+'Configured'] ? 'Saved ••••••••' : (key==='apiKey' ? 'Enter API key' : 'Enter API secret');
           input.addEventListener('input',()=>{credentialDraft[key]=input.value;});
           label.append(input);account.append(label,element('br'));
         }
