@@ -24,10 +24,12 @@ test('actual configuration page synchronizes forms and JSON through real validat
   try {
     const hostPage = await browser.newPage();
     let page=hostPage;
-    let saves = 0;
+    let saves = 0, restarts = 0;
     await page.route(origin+'/**', async route => {
       const url = new URL(route.request().url());
       if(url.pathname.startsWith('/__controller/configuration')) {
+        if(url.pathname.endsWith('/restart/status'))return route.fulfill({json:{ok:true,available:true,instanceId:restarts?'after':'before'}});
+        if(url.pathname.endsWith('/restart')){restarts++;return route.fulfill({status:202,json:{ok:true,restartAccepted:true}});}
         const method=route.request().method(),target=url.pathname.replace('/__controller/configuration','/v1/admin/configuration/master');
         const handler=routes.get(method+' '+target);assert.ok(handler);
         const response={statusCode:200,setHeader(){},status(code){this.statusCode=code;return this;},json(body){this.body=body;return this;}};
@@ -49,10 +51,13 @@ test('actual configuration page synchronizes forms and JSON through real validat
     await lastfm.locator('input[type=password]').nth(1).fill('fixture-secret');
     await lastfm.getByRole('button',{name:'Save API credentials'}).click();
     await lastfm.getByText('API key: saved · API secret: saved.',{exact:false}).waitFor();
+    await hostPage.getByRole('button',{name:'Later',exact:true}).click();
+    assert.equal(restarts,0);
     await lastfm.getByRole('button',{name:'Connect Last.fm',exact:true}).click();
     await lastfm.getByRole('link',{name:'Open Last.fm authorization'}).waitFor();
     await lastfm.getByRole('button',{name:'Complete authorization',exact:true}).click();
     await lastfm.getByText('Authorized account: fixture-user').waitFor();
+    await hostPage.getByRole('button',{name:'Later',exact:true}).click();
     assert.match(await fs.readFile(path.join(root,'credentials.env'),'utf8'),/LASTFM_SESSION_KEY=fixture-session/);
     const radio=page.locator('fieldset').filter({has:page.locator('legend',{hasText:/^Radio$/})});
     await radio.locator('summary',{hasText:'Plugin Config'}).click();
@@ -73,7 +78,10 @@ test('actual configuration page synchronizes forms and JSON through real validat
     await master.fill(JSON.stringify(edited));
     assert.equal(await radio.locator('input[type=checkbox]').isChecked(),true);
     await page.getByRole('button',{name:'Save / Update'}).click();
-    await page.getByRole('status').filter({hasText:'Saved revision'}).waitFor();
+    await page.locator('[role=status]').filter({hasText:'Saved revision'}).waitFor();
     assert.equal(saves,1);assert.equal((await store.read()).document.plugins.radio.enabled,true);
+    await hostPage.getByRole('button',{name:'Restart now',exact:true}).click();
+    await hostPage.getByRole('heading',{name:'Server restarted',exact:true}).waitFor();
+    assert.equal(restarts,1);
   } finally { await browser.close(); }
 });

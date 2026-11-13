@@ -1,3 +1,5 @@
+import {randomUUID} from 'node:crypto';
+const restartInstanceId = randomUUID();
 export const SONUVI_SERVICES = Object.freeze(['sonuvi-api.service', 'sonuvi-web.service']);
 export const SONUVI_RESTART_POLICY = 'sonuvi-pair-polkit-v1';
 const OPTIONS = Object.freeze({ timeout: 5000 });
@@ -21,18 +23,19 @@ export async function checkSonuviRestart(execFileP, policyFor = () => process.en
 
 export function registerSonuviRestartRoutes(app, {
   requireTrackKey, execFileP, policyFor, log = { error() {} },
+  statusPath = '/config/restart-services/status', restartPaths = ['/config/restart-api', '/config/restart-services'],
 }) {
   let pending = false;
-  app.get('/config/restart-services/status', async (req, res) => {
-    if (!requireTrackKey(req, res)) return;
+  app.get(statusPath, async (req, res) => {
+    if (await requireTrackKey(req, res) !== true) return;
     try {
-      return res.json({ ok: true, ...await checkSonuviRestart(execFileP, policyFor) });
+      return res.json({ ok: true, instanceId: restartInstanceId, ...await checkSonuviRestart(execFileP, policyFor) });
     } catch {
       return res.json({ ok: true, available: false, services: [...SONUVI_SERVICES], reason: UNAVAILABLE });
     }
   });
   const handler = async (req, res) => {
-    if (!requireTrackKey(req, res)) return;
+    if (await requireTrackKey(req, res) !== true) return;
     if (Object.keys(req.body || {}).length) return res.status(400).json({ ok: false, error: 'Restart accepts no targets or options' });
     if (pending) return res.status(409).json({ ok: false, error: 'Restart already pending' });
     pending = true;
@@ -50,7 +53,7 @@ export function registerSonuviRestartRoutes(app, {
         });
       });
       return res.status(202).json({
-        ok: true, restartAccepted: true, restartQueued: false, restarted: false,
+        ok: true, instanceId: restartInstanceId, restartAccepted: true, restartQueued: false, restarted: false,
         services: [...SONUVI_SERVICES], message: 'Restart accepted; verify both services recover.',
       });
     } catch {
@@ -58,6 +61,5 @@ export function registerSonuviRestartRoutes(app, {
       return res.status(503).json({ ok: false, restartAccepted: false, restarted: false, error: UNAVAILABLE });
     }
   };
-  app.post('/config/restart-api', handler);
-  app.post('/config/restart-services', handler);
+  for (const route of restartPaths) app.post(route, handler);
 }

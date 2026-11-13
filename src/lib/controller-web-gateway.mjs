@@ -137,16 +137,18 @@ export function createControllerWebGateway({ secret=process.env.SONUVI_CONTROLLE
       const deviceRemoval=url.pathname.match(/^\/__controller\/devices\/([A-Za-z0-9._:-]{1,200})$/);
       const qobuzStatus = url.pathname === '/__controller/configuration/plugins/qobuz/account/status' && req.method === 'GET';
       const qobuzRelease = url.pathname === '/__controller/configuration/plugins/qobuz/session/release' && req.method === 'POST';
-      const masterRead = (url.pathname === '/__controller/configuration' && req.method === 'GET') || qobuzStatus;
+      const restartStatus = url.pathname === '/__controller/configuration/restart/status' && req.method === 'GET';
+      const restartAction = url.pathname === '/__controller/configuration/restart' && req.method === 'POST';
+      const masterRead = (url.pathname === '/__controller/configuration' && req.method === 'GET') || qobuzStatus || restartStatus;
       const masterSave = url.pathname === '/__controller/configuration' && req.method === 'PUT';
       const masterValidate = url.pathname === '/__controller/configuration/validate' && req.method === 'POST';
       const masterAction = req.method === 'POST' && url.pathname.match(/^\/__controller\/configuration\/plugins\/lastfm\/(credentials|authorize\/start|authorize\/complete|disconnect)$/);
       const credentialAction = req.method === 'POST' && url.pathname.match(/^\/__controller\/configuration\/plugins\/(apns|notifications|alexa)\/credentials$/);
-      if ((masterRead || masterSave || masterValidate || masterAction || qobuzRelease || credentialAction) && !url.search) {
+      if ((masterRead || masterSave || masterValidate || masterAction || qobuzRelease || credentialAction || restartAction) && !url.search) {
         if (session) session = await ensureAccess(id, session);
         if (!session) { send(res,401,{ok:false,error:'Sign in as an administrator to configure Sonuvi.'}); return true; }
         if (!masterRead && !equal(session.csrf,req.headers['x-csrf-token'])) { send(res,403,{ok:false,error:'CSRF validation failed.'}); return true; }
-        const target = '/v1/admin/configuration/master' + (credentialAction ? '/plugins/'+credentialAction[1]+'/credentials' : qobuzStatus ? '/plugins/qobuz/account/status' : qobuzRelease ? '/plugins/qobuz/session/release' : masterValidate ? '/validate' : masterAction ? '/plugins/lastfm/'+masterAction[1] : '');
+        const target = '/v1/admin/configuration/master' + (restartStatus ? '/restart/status' : restartAction ? '/restart' : credentialAction ? '/plugins/'+credentialAction[1]+'/credentials' : qobuzStatus ? '/plugins/qobuz/account/status' : qobuzRelease ? '/plugins/qobuz/session/release' : masterValidate ? '/validate' : masterAction ? '/plugins/lastfm/'+masterAction[1] : '');
         const body = masterRead ? undefined : await readJson(req);
         // API authorization checks current ownership/revocation, not cached UI role.
         const up = await api(req.method,target,{headers:{authorization:`Bearer ${session.accessToken}`},body});

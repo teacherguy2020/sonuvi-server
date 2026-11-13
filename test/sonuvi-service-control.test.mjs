@@ -131,3 +131,15 @@ test('optional Echo Link unit uses release code and external protected environme
   assert.match(unit, /\/opt\/sonuvi\/current\/integrations\/echo-link\/echo_link_volume.py/);
   assert.doesNotMatch(unit, /\/opt\/now-playing/);
 });
+
+test('owner restart route awaits administrator authorization and rejects arbitrary targets',async()=>{
+ const routes=new Map(),calls=[];
+ registerSonuviRestartRoutes({get(p,h){routes.set(p,h)},post(p,h){routes.set(p,h)}},{
+  requireTrackKey:async(req,res)=>{await Promise.resolve();if(!req.admin){res.status(401).json({ok:false});return false;}return true;},
+  execFileP:async(...args)=>{calls.push(args);return {stdout:active}},policyFor,
+  statusPath:'/owner/restart/status',restartPaths:['/owner/restart']});
+ const response=()=>Object.assign(new EventEmitter(),{code:200,status(code){this.code=code;return this},json(body){this.body=body;return this}});
+ let res=response();await routes.get('/owner/restart')({admin:false,body:{}},res);assert.equal(res.code,401);assert.equal(calls.length,0);
+ res=response();await routes.get('/owner/restart')({admin:true,body:{unit:'ssh.service'}},res);assert.equal(res.code,400);assert.equal(calls.length,0);
+ res=response();await routes.get('/owner/restart/status')({admin:true},res);assert.equal(res.body.available,true);assert.ok(res.body.instanceId);
+});

@@ -25,6 +25,59 @@ export async function mountMasterConfigurationEditor(root, {request, refreshMs =
     lastfm_authorization_expired: 'Choose Connect Last.fm, open the authorization link and approve access, then complete authorization.'
   }[error.message] || error.message);
   let saving = false, disposed = false;
+  let restarting = false;
+  const restartButton=element('button','Restart Server');restartButton.type='button';
+  root.append(restartButton);
+  const restartDialog=element('dialog');restartDialog.setAttribute('aria-label','Server restart required');
+  const restartTitle=element('h2','Server restart required');
+  const restartStatus=element('p');restartStatus.setAttribute('role','status');
+  const restartNow=element('button','Restart now');restartNow.type='button';
+  const restartLater=element('button','Later');restartLater.type='button';
+  restartDialog.append(restartTitle,restartStatus,restartNow,restartLater);
+  restartDialog.style.cssText='max-width:480px;width:calc(100% - 48px);box-sizing:border-box;border-radius:14px;padding:24px;font:16px system-ui;color-scheme:dark light';
+  for(const button of [restartNow,restartLater])button.style.cssText='font:inherit;padding:10px 16px;margin:8px 12px 0 0;cursor:pointer';
+  // The app shell grows its iframe to the entire document height. A dialog in
+  // that iframe would be centered far outside the visible screen.
+  let dialogDocument=document;try{if(window.parent.location.origin===location.origin)dialogDocument=window.parent.document;}catch{}
+  dialogDocument.body.append(restartDialog);
+  window.addEventListener('pagehide',()=>{disposed=true;restartDialog.remove();},{once:true});
+  const promptRestart=()=>{
+    restartTitle.textContent='Server restart required';
+    restartStatus.textContent='Your changes are saved, but a restart is needed to apply them. Restarting Sonuvi briefly disconnects this page and connected apps. You can restart now or choose Later and use Restart Server when ready.';
+    restartNow.hidden=false;restartNow.disabled=false;restartLater.textContent='Later';
+    if(!restartDialog.open)restartDialog.showModal();
+  };
+  restartButton.addEventListener('click',promptRestart);
+  restartLater.addEventListener('click',()=>restartDialog.close());
+  restartDialog.addEventListener('cancel',event=>{if(restarting)event.preventDefault();});
+  restartNow.addEventListener('click',async()=>{
+    if(restarting)return;
+    if(draft.dirty || pendingPlugins.size || credentialsDirty()){
+      restartStatus.textContent='Save or discard your remaining edits before restarting. Your saved settings are safe.';return;
+    }
+    restarting=true;restartNow.disabled=true;restartLater.disabled=true;
+    try{
+      restartStatus.textContent='Checking restart availability…';
+      const before=await request('GET','/restart/status');
+      if(!before.available)throw new Error(before.reason || 'Restart is unavailable on this Server.');
+      const accepted=await request('POST','/restart',{});
+      if(!accepted.restartAccepted)throw new Error('The Server did not accept the restart.');
+      restartStatus.textContent='Restart requested. Waiting for Sonuvi to reconnect…';
+      const deadline=Date.now()+60000;let recovered=false;
+      while(Date.now()<deadline && !disposed){
+        await new Promise(resolve=>setTimeout(resolve,1500));
+        try{
+          const after=await request('GET','/restart/status');
+          if(after.available && after.instanceId && after.instanceId!==before.instanceId){recovered=true;break;}
+        }catch{/* A brief disconnect is expected while both services restart. */}
+      }
+      if(!recovered)throw new Error('Restart recovery could not be confirmed. Your settings are saved. Wait briefly and reload; do not assume the restart completed.');
+      restartTitle.textContent='Server restarted';restartStatus.textContent='Sonuvi has reconnected. Your saved settings are now applied.';
+      restartNow.hidden=true;message.textContent='Server restarted and reconnected.';
+    }catch(error){restartStatus.textContent=error.message;}
+    finally{restarting=false;restartNow.disabled=false;restartLater.disabled=false;restartLater.textContent='Close';}
+  });
+
   const render = () => {
     const openPanels = new Set([...panels.querySelectorAll('details[open]')].map(node=>node.closest('fieldset').dataset.plugin+':'+node.querySelector('summary').textContent));
     panels.replaceChildren();
@@ -83,7 +136,7 @@ export async function mountMasterConfigurationEditor(root, {request, refreshMs =
         const button=element('button','Save '+module.title+' credentials');button.type='button';button.disabled=credentialBusy;
         button.addEventListener('click',async()=>{
           if(credentialBusy)return;credentialBusy=true;button.disabled=true;
-          try{const result=await request('POST','/plugins/'+module.id+'/credentials',otherCredentials[module.id]||{});otherCredentials[module.id]={};loaded.status??={};loaded.status[module.id]=result;message.textContent='Credentials saved. Restart Server to apply provider changes.';}
+          try{const result=await request('POST','/plugins/'+module.id+'/credentials',otherCredentials[module.id]||{});otherCredentials[module.id]={};loaded.status??={};loaded.status[module.id]=result;message.textContent='Credentials saved. Restart Server to apply provider changes.';if(result.restartRequired)promptRestart();}
           catch(error){message.textContent=error.message;}finally{credentialBusy=false;render();}
         });account.append(button);section.append(account);
       }
@@ -138,7 +191,7 @@ export async function mountMasterConfigurationEditor(root, {request, refreshMs =
               else{
                 loaded.status??={};loaded.status.lastfm=result;
                 if(action==='credentials'){credentialDraft.apiKey='';credentialDraft.apiSecret='';}
-                authorizationUrl='';lastfmMessage=result.restartRequired?'Account settings saved. Restart Server to apply startup credentials.':'Account settings saved.';
+                authorizationUrl='';lastfmMessage=result.restartRequired?'Account settings saved. Restart Server to apply startup credentials.':'Account settings saved.';if(result.restartRequired)promptRestart();
               }
             }catch(error){lastfmMessage=lastfmError(error);}
             finally{credentialBusy=false;render();}
@@ -184,6 +237,7 @@ export async function mountMasterConfigurationEditor(root, {request, refreshMs =
       const result = await request('PUT','',{document:pending.document,revision:pending.revision});
       draft.savedResponse(result,pending); json.value=draft.text; render();
       message.textContent=`Saved revision ${result.revision}. ${result.application?.error || (result.application?.restartRequired ? 'Server restart required.' : 'Applied.')} ${draft.dirty ? 'Newer unsaved edits remain.' : ''}`;
+      if(result.application?.restartRequired)promptRestart();
     } catch(error) { message.textContent=error.message; }
     finally { saving=false; save.disabled=false; }
   });
@@ -198,12 +252,12 @@ export async function mountMasterConfigurationEditor(root, {request, refreshMs =
   const refresh = async()=>{
     if(disposed)return;
     try {
-      if(!saving && !credentialBusy && !credentialsDirty() && !pendingPlugins.size){const result=await request('GET',''); draft.receive(result); Object.assign(loaded,result);
+      if(!saving && !credentialBusy && !restarting && !credentialsDirty() && !pendingPlugins.size){const result=await request('GET',''); draft.receive(result); Object.assign(loaded,result);
         if(draft.external) message.textContent='Configuration changed elsewhere. Your draft is preserved; reconcile it before saving.';
         else if(!draft.dirty){json.value=draft.text;render();}}
     } catch(error){message.textContent=`Refresh failed: ${error.message}. Your draft is preserved.`;}
     finally {if(!disposed)timer=setTimeout(refresh,refreshMs);}
   };
   timer=setTimeout(refresh,refreshMs);
-  return {draft,dispose(){disposed=true;clearTimeout(timer);window.removeEventListener('beforeunload',leave);}};
+  return {draft,dispose(){disposed=true;restartDialog.remove();clearTimeout(timer);window.removeEventListener('beforeunload',leave);}};
 }

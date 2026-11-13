@@ -1,3 +1,6 @@
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
+import {registerSonuviRestartRoutes} from '../lib/sonuvi-service-control.mjs';
 import { projectNativeDlnaStatus } from '../lib/native-configuration-workspace.mjs';
 import { registerConfigurationWorkspaceRoutes } from './admin-configuration-workspace.routes.mjs';
 import { requireAdministratorAuthorization } from '../lib/sonuvi-admin-authority.mjs';
@@ -243,6 +246,8 @@ export function registerNativeAdministratorConfigurationRoutes(app, {
     }
   };
 
+  registerSonuviRestartRoutes(app, {requireTrackKey:authorize, execFileP:promisify(execFile),
+    statusPath:'/v1/admin/configuration/master/restart/status', restartPaths:['/v1/admin/configuration/master/restart']});
   registerMasterConfigurationRoutes(app, {
     authorize,
     store: createMasterConfigurationStore(runtimeStatePaths().configPath),
