@@ -61,6 +61,7 @@ async function sourceFixture(t) {
   await write(root, 'scripts/sonuvi-debian-node-bootstrap.sh', '#!/bin/sh\nexit 0\n');
   await write(root, 'scripts/sonuvi-target-installer.mjs', 'console.log("fixture target installer");\n');
   await write(root, 'ops/systemd/sonuvi-api.service.in', '[Service]\nUser=@SERVICE_ACCOUNT@\nExecStart=node @RELEASE_ID@\n');
+  for(const name of ['sonuvi-alexa-public.service','sonuvi-alexa-public-reconcile.service','sonuvi-alexa-public-reconcile.timer']) await write(root, 'ops/systemd/'+name, '[Unit]\nDescription=Fixture Alexa service\n');
   await write(root, 'ops/systemd/sonuvi-web.service.in', '[Service]\nUser=@SERVICE_ACCOUNT@\nExecStart=node @RELEASE_ID@\n');
   await write(root, 'config/now-playing.config.example.json', '{"ports":{"api":3101,"ui":8101}}\n');
   await write(root, 'config/radio-logo-aliases.json', '{"fixture.example":"Fixture Radio"}\n');
