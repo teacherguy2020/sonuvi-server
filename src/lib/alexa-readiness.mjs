@@ -1,3 +1,4 @@
+import fs from 'node:fs/promises';
 import https from 'node:https';
 import { lookup } from 'node:dns/promises';
 
@@ -58,5 +59,12 @@ export function createAlexaReadiness({resolve=lookup,request=https.request,timeo
    cache.set(settings.publicDomain,{value,expires:now()+60000});return alexaSetupStatus(settings,value);
   })();pending.set(host,run);try{return await run;}finally{pending.delete(host);}
  };
- return {status,check};
+ const provisioning=async()=>{
+  try{
+   const saved=JSON.parse(await fs.readFile('/var/lib/sonuvi/config/alexa-public-https-status.json','utf8'));
+   if(saved.managed!==true)return null;
+   return {managed:true,state:['disabled','configuration-error','awaiting-public-verification'].includes(saved.state)?saved.state:'unknown',internalPort:9443,externalPort:443};
+  }catch{return null;}
+ };
+ return {status,check,provisioning};
 }

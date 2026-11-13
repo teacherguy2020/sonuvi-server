@@ -8,6 +8,11 @@ export function registerMasterConfigurationRoutes(app, {
   prefix = '/v1/admin/configuration/master',
 }) {
   if (!store || typeof authorize !== 'function') throw new Error('Master configuration requires store and authorization');
+  const alexaStatus=async(settings,probe=false)=>{
+    const value=await (probe?alexaReadiness.check(settings):alexaReadiness.status(settings));
+    const provisioning=await alexaReadiness.provisioning?.();
+    return {...value,provisioning,...(provisioning?.managed?{guidance:'Public HTTPS is managed from the saved Alexa JSON settings. Domain changes are applied within one minute. Forward router external TCP 443 to this Server internal TCP 9443, not its private sonuvi.local port 443. Public certificate issuance and renewal require that forwarding and matching public DNS. No port 80 is needed. Check the connection after forwarding; Alexa playback remains a separate test.'}: {})};
+  };
   const handler = action => async (req, res) => {
     try {
       if (await authorize(req, res) !== true) return;
@@ -35,12 +40,12 @@ export function registerMasterConfigurationRoutes(app, {
         capabilities:{skillEndpoint:{configured:skillConfigured,operational:null},homebridgeRouting:{configured:alexa.configured,operational:null}},
         error:plugins.alexa.enabled&&!skillConfigured?'Configure the public Alexa endpoint. External skill connectivity has not been verified.':null};
     }
-    status.alexa={...status.alexa,...alexaReadiness.status(state.document.plugins.alexa)};
+    status.alexa={...status.alexa,...await alexaStatus(state.document.plugins.alexa)};
     return res.json({ok:true, contract:'sonuvi.master-configuration.v1', ...state, plugins:configurationPlugins, status});
   }));
   app.post(`${prefix}/plugins/alexa/check`,handler(async(req,res)=>{
     const state=await store.read();
-    return res.json({ok:true,...await alexaReadiness.check(state.document.plugins.alexa)});
+    return res.json({ok:true,...await alexaStatus(state.document.plugins.alexa,true)});
   }));
   app.post(`${prefix}/validate`, handler(async (req, res) => {
     const errors = validateMasterConfiguration(req.body?.document);
@@ -61,6 +66,6 @@ export function registerMasterConfigurationRoutes(app, {
       try { application = await applyConfiguration({before:before.document, after:saved.document, revision:saved.revision}); }
       catch { application = {state:'apply-failed', restartRequired:true, error:'Settings were saved, but runtime application failed.'}; }
     }
-    return res.json({ok:true, contract:'sonuvi.master-configuration.v1', ...saved, application, setup:{alexa:alexaReadiness.status(saved.document.plugins.alexa)}});
+    return res.json({ok:true, contract:'sonuvi.master-configuration.v1', ...saved, application, setup:{alexa:await alexaStatus(saved.document.plugins.alexa)}});
   }));
 }
