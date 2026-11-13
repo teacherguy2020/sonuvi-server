@@ -1,3 +1,4 @@
+import { createPibuzQobuzControlAdapter } from '../src/lib/pibuz-qobuz-control.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
@@ -535,4 +536,25 @@ test('PiBuZ stop aborts a pending SSE connection attempt without retrying', asyn
     await adapter.stopEvents();
     await closeSseFixture(fixture);
   }
+});
+
+// A clean installation has no receiver yet: startup must remain available
+// for Guided Setup, without probing a fabricated/default network target.
+test('unconfigured receiver is unavailable without network calls or event retries', async () => {
+  let calls = 0;
+  const adapter = createPibuzQobuzAdapter({ host: '', fetchImpl: async () => { calls++; throw new Error('unexpected network call'); } });
+  assert.equal(adapter.endpoint, '');
+  await adapter.startEvents();
+  const snapshot = await adapter.getSnapshot();
+  assert.equal(snapshot.available, false);
+  assert.equal(adapter.getEventState().connectionAttempts, 0);
+  assert.equal(calls, 0);
+  await adapter.stopEvents();
+});
+
+test('unconfigured receiver exposes unavailable controls without a fabricated endpoint', async () => {
+  const read = createPibuzQobuzAdapter({host: ''});
+  const control = createPibuzQobuzControlAdapter({adapter: read, fetchImpl: async () => { throw Error('must not request'); }});
+  assert.equal((await control.getSnapshot()).available, false);
+  assert.equal((await control.control('play')).errorCode, 'QOBUZ_OWNERSHIP_UNKNOWN');
 });

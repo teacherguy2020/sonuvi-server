@@ -128,7 +128,7 @@ export function createPibuzQobuzControlAdapter({
   verifyMs = DEFAULT_VERIFY_MS,
   pollMs = DEFAULT_POLL_MS,
 } = {}) {
-  if (!adapter || typeof adapter.getSnapshot !== 'function' || !adapter.endpoint) {
+  if (!adapter || typeof adapter.getSnapshot !== 'function' || typeof adapter.endpoint !== 'string') {
     throw new Error('PiBuZ snapshot adapter is required for Qobuz controls');
   }
   if (typeof fetchImpl !== 'function') throw new Error('PiBuZ control fetch implementation is unavailable');

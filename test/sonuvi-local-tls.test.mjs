@@ -93,3 +93,16 @@ test('real local HTTPS handshake enforces trust, hostname, Host and origin; relo
   next={...bundle,serverId:'sonuvi-'+'b'.repeat(43)};await runtime.refresh();assert.equal(errors,1);
   assert.equal(await request(),200);
 });
+
+test('TLS maintenance accepts only the service-group sticky shared configuration directory', async t => {
+  const f = await fixture(t);
+  await provisionLocalTLS(f.options);
+  const before = await f.read();
+  await fs.chmod(path.join(f.stateRoot, 'config'), 0o1770);
+  assert.equal((await provisionLocalTLS(f.options)).renewed, false);
+  assert.deepEqual(await f.read(), before);
+  await fs.chmod(path.join(f.stateRoot, 'config'), 0o0770);
+  await assert.rejects(provisionLocalTLS(f.options), /local_tls_directory_unsafe/);
+  await fs.chmod(path.join(f.stateRoot, 'config'), 0o1777);
+  await assert.rejects(provisionLocalTLS(f.options), /local_tls_directory_unsafe/);
+});

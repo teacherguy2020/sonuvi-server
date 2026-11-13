@@ -15,10 +15,15 @@ export function localTLSHostname(serverId) {
   return `sonuvi-${crypto.createHash('sha256').update(serverId).digest('hex').slice(0,24)}.local`;
 }
 
-async function directory(target, ownerUID, mode) {
+async function directory(target, ownerUID, mode, sharedGroup = null) {
   await fs.mkdir(target, { mode, recursive: true });
   const s = await fs.lstat(target);
-  if (!s.isDirectory() || s.isSymbolicLink() || s.uid !== ownerUID || (s.mode & 0o022) || await fs.realpath(target) !== target) throw new Error('local_tls_directory_unsafe');
+  // Only the root-owned sticky configuration directory permits the service
+  // group to create master-document replacements. Root-owned TLS files remain
+  // protected from unlink/rename by the sticky bit. Private key roots stay strict.
+  const sharedConfig = sharedGroup !== null && s.gid === sharedGroup
+    && (s.mode & 0o1777) === 0o1770;
+  if (!s.isDirectory() || s.isSymbolicLink() || s.uid !== ownerUID || ((s.mode & 0o022) && !sharedConfig) || await fs.realpath(target) !== target) throw new Error('local_tls_directory_unsafe');
 }
 
 async function readProtected(file, ownerUID, maximum = 65536) {
@@ -74,7 +79,7 @@ export async function provisionLocalTLS({ stateRoot = '/var/lib/sonuvi', serverI
   const config = path.join(stateRoot, 'config');
   await directory(protectedRoot, ownerUID, 0o700);
   await directory(root, ownerUID, 0o700);
-  await directory(config, ownerUID, 0o750);
+  await directory(config, ownerUID, 0o750, serviceGID);
   const lockFile = path.join(root, 'provision.lock');
   const lock = await fs.open(lockFile, 'wx', 0o600);
   let staging;
