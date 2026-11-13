@@ -8,12 +8,13 @@ const LASTFM_NAMES = Object.freeze([
   'LASTFM_API_KEY',
   'LASTFM_API_SECRET',
   'LASTFM_SESSION_KEY',
+  'LASTFM_USERNAME',
 ]);
 
 function parseEnvironment(textValue) {
   const values = {};
   for (const line of String(textValue || '').split(/\r?\n/)) {
-    const match = line.match(/^\s*(LASTFM_API_KEY|LASTFM_API_SECRET|LASTFM_SESSION_KEY)\s*=\s*(.*?)\s*$/);
+    const match = line.match(/^\s*(LASTFM_API_KEY|LASTFM_API_SECRET|LASTFM_SESSION_KEY|LASTFM_USERNAME)\s*=\s*(.*?)\s*$/);
     if (!match) continue;
     let value = match[2];
     if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
@@ -37,18 +38,23 @@ export function loadProtectedLastfmEnvironment({
 } = {}) {
   const values = {};
   for (const name of LASTFM_NAMES) values[name] = text(env?.[name]);
-  if (!statePaths?.sharedStateEnabled || LASTFM_NAMES.every((name) => values[name])) {
+  if (!statePaths?.sharedStateEnabled) {
     return Object.freeze(values);
   }
 
   let fileValues = {};
+  let ownerManaged = false;
   try {
-    fileValues = parseEnvironment(readFileSync(statePaths.lastfmEnvPath, 'utf8'));
+    const contents=readFileSync(statePaths.lastfmEnvPath, 'utf8');
+    ownerManaged=String(contents).split(/\r?\n/).includes('# sonuvi-lastfm-admin-v1');
+    fileValues = parseEnvironment(contents);
   } catch {
     // Missing/unreadable protected credentials fail closed for this feature.
   }
   for (const name of LASTFM_NAMES) {
-    if (!values[name]) values[name] = text(fileValues[name]);
+    if (ownerManaged && Object.hasOwn(fileValues,name)) values[name]=text(fileValues[name]);
+    else if (!values[name]) values[name] = text(fileValues[name]);
   }
+  Object.defineProperty(values,'ownerManaged',{value:ownerManaged,enumerable:false});
   return Object.freeze(values);
 }

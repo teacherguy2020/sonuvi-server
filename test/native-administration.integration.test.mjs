@@ -35,6 +35,7 @@ function createApp() {
     get(route, handler) { routes.set(`GET ${route}`, handler); },
     post(route, handler) { routes.set(`POST ${route}`, handler); },
     patch(route, handler) { routes.set(`PATCH ${route}`, handler); },
+    put(route, handler) { routes.set(`PUT ${route}`, handler); },
   };
 }
 

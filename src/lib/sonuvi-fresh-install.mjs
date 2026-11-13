@@ -5,6 +5,8 @@ import path from 'node:path';
 import { writeJsonAtomically } from './atomic-file.mjs';
 import { assertImmutableRuntimeConfig } from './runtime-config-security.mjs';
 import { bootstrapEvent } from './sonuvi-bootstrap-contract.mjs';
+import { planMasterConfigurationMigration } from './master-configuration-migration.mjs';
+import { validateMasterConfiguration } from './master-configuration.mjs';
 
 export const FRESH_INSTALL_STATE_CONTRACT = 'sonuvi.fresh-install-state.v1';
 export const FRESH_INSTALL_JOURNAL_CONTRACT = 'sonuvi.fresh-install-journal.v1';
@@ -56,7 +58,17 @@ export async function initializeFreshMobileEnvironment({ stateRoot } = {}) {
 /** Create only Sonuvi-owned directories. Existing partial state is rejected. */
 export async function initializeFreshHostLayout({ layoutRoot, stateRoot, serverIdentity, config = null } = {}) {
   const layout = absolute(layoutRoot, 'release layout root'); const state = absolute(stateRoot, 'state root'); const inspection = await classifyFreshInstallHost({ layoutRoot: layout, stateRoot: state, platform: 'linux', architecture: 'arm64', hasSystemd: true, uid: 0, availableBytes: Number.MAX_SAFE_INTEGER }); if (inspection.classification !== FreshInstallClassification.FRESH_ELIGIBLE) throw new Error(`fresh layout initialization refused: ${inspection.classification}`);
-  await fs.mkdir(path.join(layout, 'releases'), { recursive: true, mode: 0o755 }); for (const directory of REQUIRED_SHARED_DIRECTORIES) await fs.mkdir(path.join(state, directory), { recursive: true, mode: 0o700 }); const resolvedConfig = config || freshRuntimeConfig({ serverIdentity }); assertImmutableRuntimeConfig(resolvedConfig, { context: 'fresh installation configuration' }); const configPath = path.join(state, 'config', 'now-playing.config.json'); await writeJsonAtomically(configPath, resolvedConfig, { mode: 0o600 }); await fs.mkdir(path.join(state, 'empty-library', 'podcasts'), { recursive: true, mode: 0o700 }); return Object.freeze({ layoutRoot: layout, stateRoot: state, configPath, journalPath: path.join(state, 'install', 'journal.jsonl'), statePath: path.join(state, 'install', 'state.json') });
+  const plan = planMasterConfigurationMigration({base:config || freshRuntimeConfig({serverIdentity})});
+  if(plan.errors.length || plan.credentialTransfers?.length)throw new Error('fresh configuration is invalid or contains inline credentials');
+  const resolvedConfig=plan.document;
+  if(!config){resolvedConfig.plugins.mpd.enabled=false;resolvedConfig.plugins.moode.enabled=false;}
+  if(validateMasterConfiguration(resolvedConfig).length)throw new Error('fresh master configuration is invalid');
+  await fs.mkdir(path.join(layout, 'releases'), { recursive: true, mode: 0o755 });
+  for (const directory of REQUIRED_SHARED_DIRECTORIES) await fs.mkdir(path.join(state, directory), { recursive: true, mode: 0o700 });
+  const configPath=path.join(state,'config','now-playing.config.json');
+  await writeJsonAtomically(configPath,resolvedConfig,{mode:0o600});
+  await fs.mkdir(path.join(state,'empty-library','podcasts'),{recursive:true,mode:0o700});
+  return Object.freeze({layoutRoot:layout,stateRoot:state,configPath,journalPath:path.join(state,'install','journal.jsonl'),statePath:path.join(state,'install','state.json')});
 }
 function redacted(value) { if (!value || typeof value !== 'object') return value; if (Array.isArray(value)) return value.map(redacted); return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, SENSITIVE_FIELD.test(key) ? '[redacted]' : redacted(item)])); }
 export async function appendFreshInstallJournal({ journalPath, attemptId, targetIdentity, event } = {}) { const target = absolute(journalPath, 'journal path'); if (!String(attemptId || '').trim() || !String(targetIdentity || '').trim()) throw new Error('attempt ID and target identity are required'); const normalized = bootstrapEvent(event); const record = Object.freeze({ contract: FRESH_INSTALL_JOURNAL_CONTRACT, eventId: crypto.randomUUID(), attemptId: String(attemptId), targetIdentity: String(targetIdentity), ...redacted(normalized) }); await fs.mkdir(path.dirname(target), { recursive: true, mode: 0o700 }); const handle = await fs.open(target, 'a', 0o600); try { await handle.writeFile(`${JSON.stringify(record)}\n`, 'utf8'); await handle.sync(); } finally { await handle.close(); } return record; }

@@ -1,5 +1,6 @@
 import { readEffectiveRuntimeConfig, NativeConfigurationOverlayError } from '../lib/native-configuration-store.mjs';
 import fs from 'node:fs';
+import { MasterConfigurationError } from '../lib/master-configuration.mjs';
 import { runtimeStatePaths } from '../lib/runtime-state-paths.mjs';
 import {
   assertImmutableRuntimeConfig,
@@ -22,7 +23,7 @@ function assertConfig(cfg) {
     errors.push('ports.api and ports.ui must be numbers');
   }
 
-  if (cfg.alexa?.enabled && !cfg.alexa?.publicDomain) {
+  if (!cfg[Symbol.for('sonuvi.master.document')] && cfg.alexa?.enabled && !cfg.alexa?.publicDomain) {
     errors.push('alexa.publicDomain is required when alexa.enabled = true');
   }
 
@@ -43,7 +44,7 @@ export function loadConfig(customPath = configPaths().configPath) {
   }
 
   const cfg = readEffectiveRuntimeConfig(customPath, { paths });
-  if (paths.sharedStateEnabled) {
+  if (paths.sharedStateEnabled && !cfg[Symbol.for('sonuvi.master.document')]) {
     assertImmutableRuntimeConfig(cfg, { context: 'immutable runtime configuration' });
   }
   return assertConfig(cfg);
@@ -53,6 +54,7 @@ export function loadConfigOrNull(customPath) {
   try {
     return loadConfig(customPath);
   } catch (error) {
+    if(error instanceof MasterConfigurationError)throw error;
     if (configPaths().sharedStateEnabled
       && (error instanceof SecretConfigFieldError || error instanceof ImmutableConfigSchemaError || error instanceof NativeConfigurationOverlayError)) {
       throw error;

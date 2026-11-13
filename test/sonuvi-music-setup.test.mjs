@@ -2,6 +2,27 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MUSIC_SETUP_CONTRACT, privateIPv4, resolvePlayer, validateMusicSetupRequest, catalogFiles, mappingCandidates, safeRelative, runMusicSetup } from '../src/lib/sonuvi-music-setup.mjs';
 const target='sonuvi-target-v1-'+'a'.repeat(64);
+test('Guided Setup saves the shared master and detects concurrent administrator edits',async t=>{
+ const fs=await import('node:fs/promises'),os=await import('node:os'),path=await import('node:path');
+ const {initializeMasterConfiguration,createMasterConfigurationStore}=await import('../src/lib/master-configuration.mjs');
+ const {musicSetupMasterDraft}=await import('../src/lib/sonuvi-music-setup.mjs');
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'sonuvi-setup-master-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ const file=path.join(root,'config.json'),initial=initializeMasterConfiguration();
+ initial.plugins.display.idleBrandLine='My room';initial.core.custom={preserved:true};
+ await fs.writeFile(file,JSON.stringify(initial),{mode:0o600});
+ const store=createMasterConfigurationStore(file),before=await store.read();
+ const draft=musicSetupMasterDraft(before.document,{address:'10.0.0.2',port:6601,prefix:'USB/Music/'});
+ assert.equal(before.document.plugins.mpd.enabled,false);
+ await store.save(draft,before.revision);
+ const restarted=await createMasterConfigurationStore(file).read();
+ assert.equal(restarted.document.plugins.mpd.host,'10.0.0.2');
+ assert.equal(restarted.document.plugins.mpd.port,6601);
+ assert.equal(restarted.document.plugins.moode.usbPrefix,'USB/Music/');
+ assert.equal(restarted.document.plugins.library.musicLibraryRoot,'/var/lib/sonuvi/music');
+ assert.equal(restarted.document.plugins.display.idleBrandLine,'My room');
+ assert.deepEqual(restarted.document.core.custom,{preserved:true});
+ await assert.rejects(store.save(draft,before.revision),{code:'configuration_conflict'});
+});
 const base={contract:MUSIC_SETUP_CONTRACT,targetIdentity:target,operation:'inspect',host:'moode.local',port:6600};
 test('LAN discovery excludes loopback, public, mapped IPv6, malformed and link-local endpoints',async()=>{
  for(const ip of ['127.0.0.1','8.8.8.8','169.254.169.254','::ffff:10.0.0.4','010.0.0.1','10.0.0.256','172.32.0.1','192.169.0.1'])assert.equal(privateIPv4(ip),false,ip);

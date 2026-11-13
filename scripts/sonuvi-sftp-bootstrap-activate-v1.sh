@@ -147,6 +147,9 @@ expected_tree='.
 ./src
 ./src/lib
 ./src/lib/atomic-file.mjs
+./src/lib/master-configuration-migration.mjs
+./src/lib/master-configuration.mjs
+./src/lib/master-runtime-options.mjs
 ./src/lib/public-web-root.mjs
 ./src/lib/release-artifact.mjs
 ./src/lib/runtime-capabilities.mjs

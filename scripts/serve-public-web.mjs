@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import '../src/config/master-runtime-bootstrap.mjs';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import http from 'node:http';

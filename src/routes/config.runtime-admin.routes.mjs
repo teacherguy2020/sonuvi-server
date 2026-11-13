@@ -1,4 +1,5 @@
 import { readEffectiveRuntimeConfig } from '../lib/native-configuration-store.mjs';
+import { loadProtectedLastfmEnvironment } from '../lib/protected-runtime-secrets.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { lookup as dnsLookup } from 'node:dns/promises';
@@ -266,11 +267,15 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
     });
   }
   const lastfmEnvPath = () => runtimeStatePaths().lastfmEnvPath;
-  const lastfmApiKeyFor = (cfg = {}) => String(
-    process.env.LASTFM_API_KEY
-      || (!immutableRuntime() ? cfg?.lastfm?.apiKey : '')
-      || '',
-  ).trim();
+  const lastfmUsername = cfg => {
+    const credentials=loadProtectedLastfmEnvironment({statePaths});
+    return credentials.LASTFM_USERNAME || (!credentials.ownerManaged ? String(cfg?.lastfm?.username || '').trim() : '');
+  };
+  const lastfmApiKeyFor = (cfg = {}) => {
+    const master=cfg[Symbol.for('sonuvi.master.document')];
+    if(master&&(!master.plugins.lastfm.enabled||!master.plugins.lastfm.metadataEnabled))return '';
+    return String(loadProtectedLastfmEnvironment({statePaths}).LASTFM_API_KEY || (!immutableRuntime() ? cfg?.lastfm?.apiKey : '') || '').trim();
+  };
   const rejectProtectedCredentialMutation = (res) => res.status(403).json({
     ok: false,
     error: 'Protected credentials are operator-managed in immutable releases',
@@ -334,10 +339,9 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
   app.get('/config/lastfm/top-tracks', async (req, res) => {
     try {
       if (!requireTrackKey(req, res)) return;
-      const raw = await fs.readFile(configPath, 'utf8');
-      const cfg = JSON.parse(raw || '{}');
+      const cfg = await readConfig();
       const apiKey = lastfmApiKeyFor(cfg);
-      const username = String(cfg?.lastfm?.username || '').trim();
+      const username = lastfmUsername(cfg);
       if (!apiKey || !username) {
         const fallback = await localHistoryFallback(req, {
           kind: 'top-tracks',
@@ -462,10 +466,9 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
   app.get('/config/lastfm/recent-tracks', async (req, res) => {
     try {
       if (!requireTrackKey(req, res)) return;
-      const raw = await fs.readFile(configPath, 'utf8');
-      const cfg = JSON.parse(raw || '{}');
+      const cfg = await readConfig();
       const apiKey = lastfmApiKeyFor(cfg);
-      const username = String(cfg?.lastfm?.username || '').trim();
+      const username = lastfmUsername(cfg);
       if (!apiKey || !username) {
         const fallback = await localHistoryFallback(req, {
           kind: 'recent-tracks',
@@ -525,10 +528,9 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
   app.get('/config/lastfm/top-artists', async (req, res) => {
     try {
       if (!requireTrackKey(req, res)) return;
-      const raw = await fs.readFile(configPath, 'utf8');
-      const cfg = JSON.parse(raw || '{}');
+      const cfg = await readConfig();
       const apiKey = lastfmApiKeyFor(cfg);
-      const username = String(cfg?.lastfm?.username || '').trim();
+      const username = lastfmUsername(cfg);
       if (!apiKey || !username) {
         const fallback = await localHistoryFallback(req, {
           kind: 'top-artists',
@@ -587,10 +589,9 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
   app.get('/config/lastfm/top-albums', async (req, res) => {
     try {
       if (!requireTrackKey(req, res)) return;
-      const raw = await fs.readFile(configPath, 'utf8');
-      const cfg = JSON.parse(raw || '{}');
+      const cfg = await readConfig();
       const apiKey = lastfmApiKeyFor(cfg);
-      const username = String(cfg?.lastfm?.username || '').trim();
+      const username = lastfmUsername(cfg);
       if (!apiKey || !username) {
         const fallback = await localHistoryFallback(req, {
           kind: 'top-albums',
@@ -931,6 +932,9 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
         return res.status(503).json({ ok: false, error: 'Existing configuration unavailable; nothing was written' });
       }
 
+      if (current[Symbol.for('sonuvi.master.document')]) {
+        return res.status(409).json({ok:false, code:'configuration_master_api_required', error:'This Server uses master configuration. Reload Settings or update the client; use the revision-checked master configuration API.'});
+      }
       const next = mergeRuntimeConfig(current, incoming);
 
       if (Object.hasOwn(incoming.moode || {}, 'baseUrl')) {

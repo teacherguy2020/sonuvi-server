@@ -120,6 +120,8 @@ async function inspectQobuzMediaServer({ controlPoint, force = false, timeoutMs 
 export function registerConfigQobuzAccountRoutes(app, {
   controlPoint,
   requireTrackKey,
+  authorize,
+  routePrefix = '/config/qobuz',
   statusProbeTimeoutMs = Number(process.env.QOBUZ_STATUS_PROBE_TIMEOUT_MS || DEFAULT_STATUS_PROBE_TIMEOUT_MS),
   releaseQobuzConnect,
   getQobuzNowPlaying,
@@ -128,8 +130,8 @@ export function registerConfigQobuzAccountRoutes(app, {
 } = {}) {
   if (!app || !controlPoint) throw new Error('Qobuz account routes require an app and UPnP control point');
 
-  app.get('/config/qobuz/account/status', async (req, res) => {
-    if (typeof requireTrackKey === 'function' && !requireTrackKey(req, res)) return;
+  app.get(`${routePrefix}/account/status`, async (req, res) => {
+    if (authorize ? !await authorize(req,res) : typeof requireTrackKey === 'function' && !requireTrackKey(req, res)) return;
     try {
       const result = await inspectQobuzMediaServer({
         controlPoint,
@@ -142,8 +144,8 @@ export function registerConfigQobuzAccountRoutes(app, {
     }
   });
 
-  app.post('/config/qobuz/session/release', async (req, res) => {
-    if (typeof requireTrackKey === 'function' && !requireTrackKey(req, res)) return;
+  app.post(`${routePrefix}/session/release`, async (req, res) => {
+    if (authorize ? !await authorize(req,res) : typeof requireTrackKey === 'function' && !requireTrackKey(req, res)) return;
     if (typeof releaseQobuzConnect !== 'function') {
       return res.status(503).json({
         ok: false,

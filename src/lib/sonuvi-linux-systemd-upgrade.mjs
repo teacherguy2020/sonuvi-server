@@ -4,6 +4,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
+import {createMasterConfigurationUpgrade} from './master-configuration-upgrade.mjs';
+
 const execFile = promisify(execFileCallback);
 
 export const SONUVI_UPGRADE_SYSTEMD_UNITS = Object.freeze([
@@ -255,7 +257,7 @@ function parseEnvironment(buffer) {
     const index = item.indexOf('=');
     if (index <= 0) continue;
     const key = item.slice(0, index);
-    if (key === 'SONUVI_RELEASE_ID' || key === 'SONUVI_RELEASE_ROOT') values.set(key, item.slice(index + 1));
+    values.set(key, item.slice(index + 1));
   }
   return values;
 }
@@ -327,8 +329,9 @@ function backupDocumentValid(value, context) {
 /**
  * Linux/systemd adapter for the existing release transaction. It changes only
  * the release-bound environment lines in the two installed units and the
- * release-specific startup checkpoint. All other unit bytes, drop-ins,
- * enablement, identity/configuration, and authority files remain untouched.
+ * release-specific startup checkpoint. Master-aware candidates additionally
+ * migrate configuration while quiescent, with a transaction-bound rollback
+ * journal. Other unit bytes, drop-ins, enablement and authority files remain unchanged.
  */
 export function createLinuxSystemdUpgradeAdapter({
   paths: configuredPaths = SONUVI_UPGRADE_SYSTEMD_PATHS,
@@ -346,6 +349,7 @@ export function createLinuxSystemdUpgradeAdapter({
   });
   const checkpoints = path.join(paths.stateRoot, 'checkpoints');
   const startupCheckpoint = path.join(checkpoints, 'release-activation-state.json');
+  const configurationUpgrade=createMasterConfigurationUpgrade({stateRoot:paths.stateRoot});
 
   async function show(unit) {
     unitFileName(unit);
@@ -569,6 +573,7 @@ export function createLinuxSystemdUpgradeAdapter({
 
   async function restoreSnapshot(context, backup) {
     await stopServices();
+    await configurationUpgrade.rollback(context);
     for (const unit of SONUVI_UPGRADE_SYSTEMD_UNITS) {
       const entry = backup.descriptor.units[unit];
       await restoreFilePreservingMetadata({
@@ -599,7 +604,10 @@ export function createLinuxSystemdUpgradeAdapter({
         throw fail('upgrade_release_identity_invalid');
       }
       await readSnapshot(context, { persist: true });
+      const properties=await show('sonuvi-api.service');
+      const effectiveEnvironment=Object.fromEntries(parseEnvironment(await readProcessEnvironment(properties.MainPID)));
       await stopServices();
+      await configurationUpgrade.prepare(context,effectiveEnvironment);
       return Object.freeze({ quiesced: true });
     },
 

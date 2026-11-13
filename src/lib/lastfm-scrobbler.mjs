@@ -42,31 +42,34 @@ export function createLastfmScrobbler({
   capabilities = runtimeCapabilities(),
   endpoint = ENDPOINT,
   log = null,
+  getCredentials = null,
 } = {}) {
-  const configured = !!(text(apiKey) && text(apiSecret) && text(sessionKey) && typeof fetchImpl === 'function');
+  const credentials = () => getCredentials ? getCredentials() : {apiKey,apiSecret,sessionKey};
+  const isConfigured = c => !!(text(c?.apiKey) && text(c?.apiSecret) && text(c?.sessionKey) && typeof fetchImpl === 'function');
 
   async function submit(event) {
     const artist = text(event?.artist || event?.albumArtist);
     const track = text(event?.title);
     const duration = Math.max(0, Math.floor(number(event?.durationSec)));
     const timestamp = Math.max(0, Math.floor(number(event?.startedAtMs, Date.now()) / 1000));
-    if (!configured) return { state: 'not-configured', attempted: false };
+    const current = credentials();
+    if (!isConfigured(current)) return { state: 'not-configured', attempted: false };
     if (!qualifiesLastfmScrobble({ artist, title: track, elapsedSec: event?.elapsedSec, durationSec: duration })) {
       return { state: 'ineligible', attempted: false };
     }
     capabilities.assertExternalMutation('lastfm.scrobble');
 
     const params = {
-      api_key: text(apiKey),
+      api_key: text(current.apiKey),
       artist,
       method: 'track.scrobble',
-      sk: text(sessionKey),
+      sk: text(current.sessionKey),
       timestamp: String(timestamp),
       track,
     };
     if (text(event?.album)) params.album = text(event.album);
     if (duration > 0) params.duration = String(duration);
-    const signature = Object.keys(params).sort().map((key) => `${key}${params[key]}`).join('') + text(apiSecret);
+    const signature = Object.keys(params).sort().map((key) => `${key}${params[key]}`).join('') + text(current.apiSecret);
     params.api_sig = md5(signature);
     params.format = 'json';
 
@@ -80,6 +83,13 @@ export function createLastfmScrobbler({
       if (!response.ok || body?.error) {
         return { state: 'failed', attempted: true, error: text(body?.message) || `HTTP ${response.status}` };
       }
+      const accepted = Number(body?.scrobbles?.['@attr']?.accepted);
+      const ignored = Number(body?.scrobbles?.['@attr']?.ignored || 0);
+      const scrobble = body?.scrobbles?.scrobble;
+      const item = Array.isArray(scrobble) ? scrobble[0] : scrobble;
+      if (accepted !== 1 || ignored > 0 || Number(item?.ignoredMessage?.code || 0) !== 0) {
+        return { state: 'failed', attempted: true, error: text(item?.ignoredMessage?.['#text']) || 'Last.fm did not confirm an accepted scrobble' };
+      }
       return { state: 'submitted', attempted: true };
     } catch (error) {
       log?.warn?.('[lastfm] non-MPD scrobble failed:', error?.message || String(error));
@@ -87,5 +97,5 @@ export function createLastfmScrobbler({
     }
   }
 
-  return { configured, submit };
+  return { get configured(){return isConfigured(credentials());}, submit };
 }

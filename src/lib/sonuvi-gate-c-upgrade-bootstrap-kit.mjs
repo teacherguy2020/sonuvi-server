@@ -14,6 +14,9 @@ export const GATE_C_UPGRADE_BOOTSTRAP_KIT_ADDITIONS = Object.freeze([
   'scripts/sonuvi-existing-install-upgrade.mjs',
   'src/lib/sonuvi-gate-c-existing-install-upgrade.mjs',
   'src/lib/sonuvi-linux-systemd-upgrade.mjs',
+  'src/lib/master-configuration-upgrade.mjs',
+  'src/lib/master-configuration-transaction.mjs',
+
   'src/lib/release-activation.mjs',
 ]);
 export const GATE_C_UPGRADE_BOOTSTRAP_KIT_FILES = Object.freeze([

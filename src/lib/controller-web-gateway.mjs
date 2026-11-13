@@ -135,6 +135,23 @@ export function createControllerWebGateway({ secret=process.env.SONUVI_CONTROLLE
         send(res,200,{ok:true,authenticated:!!session,csrfToken:session?.csrf||null,role:session?.role||'controller',expiresAt:session?.accessExpiresAt||null,persistent:!!session?.refreshToken},session?{'set-cookie':controllerCookie(id,secure)}:{});return true;
       }
       const deviceRemoval=url.pathname.match(/^\/__controller\/devices\/([A-Za-z0-9._:-]{1,200})$/);
+      const qobuzStatus = url.pathname === '/__controller/configuration/plugins/qobuz/account/status' && req.method === 'GET';
+      const qobuzRelease = url.pathname === '/__controller/configuration/plugins/qobuz/session/release' && req.method === 'POST';
+      const masterRead = (url.pathname === '/__controller/configuration' && req.method === 'GET') || qobuzStatus;
+      const masterSave = url.pathname === '/__controller/configuration' && req.method === 'PUT';
+      const masterValidate = url.pathname === '/__controller/configuration/validate' && req.method === 'POST';
+      const masterAction = req.method === 'POST' && url.pathname.match(/^\/__controller\/configuration\/plugins\/lastfm\/(credentials|authorize\/start|authorize\/complete|disconnect)$/);
+      const credentialAction = req.method === 'POST' && url.pathname.match(/^\/__controller\/configuration\/plugins\/(apns|notifications|alexa)\/credentials$/);
+      if ((masterRead || masterSave || masterValidate || masterAction || qobuzRelease || credentialAction) && !url.search) {
+        if (session) session = await ensureAccess(id, session);
+        if (!session) { send(res,401,{ok:false,error:'Sign in as an administrator to configure Sonuvi.'}); return true; }
+        if (!masterRead && !equal(session.csrf,req.headers['x-csrf-token'])) { send(res,403,{ok:false,error:'CSRF validation failed.'}); return true; }
+        const target = '/v1/admin/configuration/master' + (credentialAction ? '/plugins/'+credentialAction[1]+'/credentials' : qobuzStatus ? '/plugins/qobuz/account/status' : qobuzRelease ? '/plugins/qobuz/session/release' : masterValidate ? '/validate' : masterAction ? '/plugins/lastfm/'+masterAction[1] : '');
+        const body = masterRead ? undefined : await readJson(req);
+        // API authorization checks current ownership/revocation, not cached UI role.
+        const up = await api(req.method,target,{headers:{authorization:`Bearer ${session.accessToken}`},body});
+        send(res,up.status,await up.json()); return true;
+      }
       if((url.pathname==='/__controller/devices'&&req.method==='GET')||(deviceRemoval&&req.method==='DELETE')){
         if(session)session=await ensureAccess(id,session);
         if(!session){send(res,401,{ok:false,error:'Sign in to manage devices.'});return true;}

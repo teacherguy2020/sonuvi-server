@@ -1,6 +1,12 @@
 import { projectNativeDlnaStatus } from '../lib/native-configuration-workspace.mjs';
 import { registerConfigurationWorkspaceRoutes } from './admin-configuration-workspace.routes.mjs';
 import { requireAdministratorAuthorization } from '../lib/sonuvi-admin-authority.mjs';
+import { registerMasterConfigurationRoutes } from './master-configuration.routes.mjs';
+import { createLastfmPluginAdministration } from '../lib/lastfm-plugin-admin.mjs';
+import { registerConfigQobuzAccountRoutes } from './config.qobuz-account.routes.mjs';
+import {createPluginCredentialAdministration} from '../lib/plugin-credentials.mjs';
+import { createMasterConfigurationStore } from '../lib/master-configuration.mjs';
+import { runtimeStatePaths } from '../lib/runtime-state-paths.mjs';
 import { normalizeMoodeBaseUrl } from '../lib/moode-url.mjs';
 import { assertImmutableRuntimeConfig } from '../lib/runtime-config-security.mjs';
 import {
@@ -205,6 +211,7 @@ function nativeFieldIDs(incoming) {
  */
 export function registerNativeAdministratorConfigurationRoutes(app, {
   administratorAuthority = null,
+  qobuz = null,
   readConfig = null,
   writeConfig = null,
   runtimeProjectionOptions = {},
@@ -235,6 +242,14 @@ export function registerNativeAdministratorConfigurationRoutes(app, {
       return false;
     }
   };
+
+  registerMasterConfigurationRoutes(app, {
+    authorize,
+    store: createMasterConfigurationStore(runtimeStatePaths().configPath),
+    lastfm: createLastfmPluginAdministration({statePaths:runtimeStatePaths()}),
+    credentials: createPluginCredentialAdministration({statePaths:runtimeStatePaths()}),
+  });
+  if(qobuz)registerConfigQobuzAccountRoutes(app,{...qobuz,authorize,routePrefix:'/v1/admin/configuration/master/plugins/qobuz'});
 
   app.get('/v1/admin/configuration', async (req, res) => {
     if (!(await authorize(req, res))) return;

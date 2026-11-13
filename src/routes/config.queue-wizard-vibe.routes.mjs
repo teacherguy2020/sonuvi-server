@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import { MPD_HOST } from '../config.mjs';
 import { runtimeCapabilities } from '../lib/runtime-capabilities.mjs';
 import { runtimeStatePaths } from '../lib/runtime-state-paths.mjs';
+import { loadProtectedLastfmEnvironment } from '../lib/protected-runtime-secrets.mjs';
 
 const nativeExecFileP = promisify(execFile);
 const execFileP = (...args) => {
@@ -60,7 +61,11 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
   }
 
   async function resolveLastfmApiKey() {
-    const envKey = String(process.env.LASTFM_API_KEY || '').trim();
+    try{
+      const master=JSON.parse(await fs.readFile(configPath,'utf8'));
+      if(master.format==='sonuvi-master-configuration'&&(!master.plugins.lastfm.enabled||!master.plugins.lastfm.metadataEnabled))return '';
+    }catch{/* Legacy fixtures may have no configuration file. */}
+    const envKey = loadProtectedLastfmEnvironment({ statePaths }).LASTFM_API_KEY;
     if (envKey) return envKey;
     if (statePaths.sharedStateEnabled) return '';
     try {

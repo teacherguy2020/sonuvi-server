@@ -5,7 +5,7 @@ import { validateBootstrapHistory } from './sonuvi-bootstrap-history.mjs';
 export const GATE_C_BOOTSTRAP_KIT_REPLACEMENT_CONTRACT = 'sonuvi.gate-c-bootstrap-kit-replacement.v1';
 export const GATE_C_BOOTSTRAP_ADMISSION_LOCK_PATH = '/var/lib/sonuvi-bootstrap/bootstrap-admission.lock';
 export const GATE_C_BOOTSTRAP_REPLACEMENT_JOURNAL_ROOT = '/var/lib/sonuvi-bootstrap/bootstrap-kit-replacements';
-export const GATE_C_BOOTSTRAP_REPLACEMENT_CAPSULE_SHA256 = '8d4509a7a79fca65ba255e0a13eb59bcf888a8aee963d507adf8bb7d864dd15c';
+export const GATE_C_BOOTSTRAP_REPLACEMENT_CAPSULE_SHA256 = 'e78fc5d346b261fdedf3df3204b1f29cba1e86cb2e3467bedc4e7f1d90624210';
 
 export const GATE_C_BOOTSTRAP_ADMISSION_HELPERS = Object.freeze({
   stageRelease: '/var/lib/sonuvi-bootstrap/bootstrap-kit-v2/scripts/sonuvi-release-stage.mjs',

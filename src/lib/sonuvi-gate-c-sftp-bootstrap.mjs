@@ -8,14 +8,14 @@ export const GATE_C_SFTP_STAGING_RELATIVE_DIRECTORY = '.local/share/sonuvi-boots
 export const GATE_C_SFTP_BOOTSTRAP_PARTIAL_NAME = 'sonuvi-bootstrap-kit-v1.tar.partial';
 export const GATE_C_SFTP_BOOTSTRAP_FINAL_NAME = 'sonuvi-bootstrap-kit-v1.tar';
 export const GATE_C_SFTP_BOOTSTRAP_ACTIVATOR = 'sonuvi_sftp_bootstrap_activate_v1';
-export const GATE_C_SFTP_BOOTSTRAP_ACTIVATOR_SHA256 = '42d68708c61c9d451a0e4285be2217c2f8f6ec2ef3518f308f154c5175de7a7a';
+export const GATE_C_SFTP_BOOTSTRAP_ACTIVATOR_SHA256 = '8cf9c308f6cea901f77ad6b44b41062b481987e79370d7022eeee2444815ef98';
 export const GATE_C_SFTP_UPGRADE_BOOTSTRAP_CONTRACT = 'sonuvi.gate-c-sftp-bootstrap.v2';
 export const GATE_C_SFTP_UPGRADE_STAGING_RELATIVE_DIRECTORY = '.local/share/sonuvi-bootstrap-v2';
 export const GATE_C_SFTP_UPGRADE_BOOTSTRAP_FILE_PREFIX = 'sonuvi-bootstrap-kit-v2-';
 export const GATE_C_SFTP_UPGRADE_BOOTSTRAP_PARTIAL_SUFFIX = '.tar.partial';
 export const GATE_C_SFTP_UPGRADE_BOOTSTRAP_FINAL_SUFFIX = '.tar';
 export const GATE_C_SFTP_UPGRADE_BOOTSTRAP_ACTIVATOR = 'sonuvi_bootstrap_kit_replacement_v1';
-export const GATE_C_SFTP_UPGRADE_BOOTSTRAP_ACTIVATOR_SHA256 = '8d4509a7a79fca65ba255e0a13eb59bcf888a8aee963d507adf8bb7d864dd15c';
+export const GATE_C_SFTP_UPGRADE_BOOTSTRAP_ACTIVATOR_SHA256 = 'e78fc5d346b261fdedf3df3204b1f29cba1e86cb2e3467bedc4e7f1d90624210';
 
 const STAGING_SEGMENTS = Object.freeze(GATE_C_SFTP_STAGING_RELATIVE_DIRECTORY.split('/'));
 const UPGRADE_STAGING_SEGMENTS = Object.freeze(GATE_C_SFTP_UPGRADE_STAGING_RELATIVE_DIRECTORY.split('/'));

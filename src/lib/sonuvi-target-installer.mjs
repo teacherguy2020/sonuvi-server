@@ -12,6 +12,7 @@ import { appendBootstrapAttemptEvent, writeBootstrapAttemptProgress } from './so
 import { FreshInstallClassification, appendFreshInstallJournal, classifyFreshInstallHost, initializeFreshHostLayout, initializeFreshMobileEnvironment, provisionFreshSystemdUnits, renderFreshSystemdUnits, writeFreshInstallState } from './sonuvi-fresh-install.mjs';
 import { makeTreeReadOnly, verifyReleaseArtifact } from './release-artifact.mjs';
 import { assertReleaseTargetRuntime, inspectExternalExecutables } from './release-runtime-preflight.mjs';
+import { MASTER_FORMAT, validateMasterConfiguration } from './master-configuration.mjs';
 
 const execFile = promisify(execFileCallback);
 export const TARGET_INSTALLER_VERSION = '1.0.0';
@@ -116,6 +117,29 @@ export async function provisionServiceReadableConfiguration({ stateRoot, run = (
   await fs.chmod(configFile, 0o640);
   await fs.chmod(verifierFile, 0o640);
   await fs.chmod(checkpointsRoot, 0o750);
+  const configuration=JSON.parse(await fs.readFile(configFile,'utf8'));
+  if(configuration.format===MASTER_FORMAT){
+    if(validateMasterConfiguration(configuration).length)throw new Error('configuration_master_invalid');
+    // Sticky, root-owned directory: the service can atomically replace its own
+    // master document, but cannot rename/remove the root-owned auth verifier.
+    await run('/usr/bin/chown',['sonuvi:sonuvi',configFile]);
+    await fs.chmod(configFile,0o600);
+    await fs.chmod(configRoot,0o1770);
+    const protectedRoot=path.join(root,'protected');
+    const protectedStat=await fs.lstat(protectedRoot);
+    if(!protectedStat.isDirectory()||protectedStat.isSymbolicLink())throw new Error('protected_path_invalid');
+    await run('/usr/bin/chown',['root:sonuvi',protectedRoot]);
+    await fs.chmod(protectedRoot,0o710);
+    const integrations=path.join(protectedRoot,'integrations');
+    const credentialDirectories=['lastfm','apns','notifications','alexa'].map(id=>path.join(integrations,id));
+    for(const directory of [integrations,...credentialDirectories]){
+      await fs.mkdir(directory,{recursive:true,mode:0o700});
+      const stat=await fs.lstat(directory);
+      if(!stat.isDirectory()||stat.isSymbolicLink())throw new Error('credential_directory_invalid');
+    }
+    await run('/usr/bin/chown',['root:sonuvi',integrations]);await fs.chmod(integrations,0o710);
+    for(const directory of credentialDirectories){await run('/usr/bin/chown',['sonuvi:sonuvi',directory]);await fs.chmod(directory,0o700);}
+  }
 }
 
 export async function provisionServiceReadableActivationState({ stateRoot, run = (file, args) => execFile(file, args, { timeout: 30_000, env: { PATH: '/usr/sbin:/usr/bin:/sbin:/bin' } }) } = {}) {

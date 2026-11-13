@@ -9,6 +9,21 @@ import { authorizeFirstController } from '../src/lib/sonuvi-first-controller-han
 import { buildGateB2ReadinessPackage } from '../src/lib/sonuvi-gate-b2-package.mjs';
 import { makeTreeWritableForCleanup } from '../src/lib/release-artifact.mjs';
 import { createFixedServiceAccount, createFixedSystemd, provisionServiceReadableActivationState, provisionServiceReadableConfiguration, provisionWritableStateOwnership, runFixedTargetInstallation, TARGET_WRITABLE_STATE_DIRECTORIES, verifyFixedTargetPrerequisites } from '../src/lib/sonuvi-target-installer.mjs';
+import {initializeMasterConfiguration} from '../src/lib/master-configuration.mjs';
+
+test('master provisioning grants atomic settings writes but retains root verifier ownership',async t=>{
+  const root=await fixture(t),stateRoot=path.join(root,'state');
+  for(const name of ['config','protected','checkpoints'])await fs.mkdir(path.join(stateRoot,name),{recursive:true});
+  const file=path.join(stateRoot,'config','now-playing.config.json'),verifier=path.join(stateRoot,'config','administrator-verifier.json');
+  await fs.writeFile(file,JSON.stringify(initializeMasterConfiguration()));await fs.writeFile(verifier,'{}');
+  const calls=[];
+  await provisionServiceReadableConfiguration({stateRoot,run:async(file,args)=>{calls.push(args);}});
+  assert.equal((await fs.stat(path.dirname(file))).mode&0o7777,0o1770);
+  assert.ok(calls.some(args=>args[0]==='sonuvi:sonuvi'&&args[1]===file));
+  assert.ok(calls.some(args=>args[0]==='root:sonuvi'&&args[1]===verifier));
+  assert.equal(calls.some(args=>args[0]==='sonuvi:sonuvi'&&args[1]===verifier),false);
+  assert.equal((await fs.stat(path.join(stateRoot,'protected','integrations','lastfm'))).mode&0o777,0o700);
+});
 import crypto from 'node:crypto';
 
 const attemptId = 'boot_0123456789abcdef'; const targetIdentity = 'machine_0123456789abcdef';

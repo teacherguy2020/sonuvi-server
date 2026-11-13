@@ -1,6 +1,5 @@
-import fs from 'node:fs/promises';
 import { runtimeStatePaths } from '../lib/runtime-state-paths.mjs';
-import { writeJsonAtomically } from '../lib/atomic-file.mjs';
+import {readAlexaEventState,writeAlexaEventState} from '../lib/alexa-event-state.mjs';
 
 export function registerConfigAlexaAliasRoutes(app, deps) {
   const { requireTrackKey } = deps;
@@ -12,8 +11,7 @@ export function registerConfigAlexaAliasRoutes(app, deps) {
       const artist = String(req.body?.artist || '').trim();
       if (!artist) return res.status(400).json({ ok: false, error: 'Missing artist' });
 
-      let current = {};
-      try { current = JSON.parse(await fs.readFile(configPath, 'utf8')); } catch {}
+      const current = await readAlexaEventState(configPath);
 
       const now = new Date().toISOString();
       const key = artist.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
@@ -51,7 +49,7 @@ export function registerConfigAlexaAliasRoutes(app, deps) {
         },
       };
 
-      await writeJsonAtomically(configPath, next);
+      await writeAlexaEventState(configPath, next);
       return res.json({ ok: true, queued: artist, total: unresolved.slice(0, 200).length });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e?.message || String(e) });
@@ -64,8 +62,7 @@ export function registerConfigAlexaAliasRoutes(app, deps) {
       const artist = String(req.body?.artist || '').trim();
       if (!artist) return res.status(400).json({ ok: false, error: 'Missing artist' });
 
-      let current = {};
-      try { current = JSON.parse(await fs.readFile(configPath, 'utf8')); } catch {}
+      const current = await readAlexaEventState(configPath);
 
       const now = new Date().toISOString();
       const key = artist.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
@@ -83,7 +80,7 @@ export function registerConfigAlexaAliasRoutes(app, deps) {
         },
       };
 
-      await writeJsonAtomically(configPath, next);
+      await writeAlexaEventState(configPath, next);
       return res.json({ ok: true, logged: artist, total: heard.slice(0, 400).length });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e?.message || String(e) });
@@ -96,8 +93,7 @@ export function registerConfigAlexaAliasRoutes(app, deps) {
       const album = String(req.body?.album || '').trim();
       if (!album) return res.status(400).json({ ok: false, error: 'Missing album' });
 
-      let current = {};
-      try { current = JSON.parse(await fs.readFile(configPath, 'utf8')); } catch {}
+      const current = await readAlexaEventState(configPath);
 
       const now = new Date().toISOString();
       const key = album.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
@@ -120,7 +116,7 @@ export function registerConfigAlexaAliasRoutes(app, deps) {
         },
       };
 
-      await writeJsonAtomically(configPath, next);
+      await writeAlexaEventState(configPath, next);
       return res.json({ ok: true, queued: album, total: unresolved.slice(0, 200).length });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e?.message || String(e) });
@@ -133,8 +129,7 @@ export function registerConfigAlexaAliasRoutes(app, deps) {
       const album = String(req.body?.album || '').trim();
       if (!album) return res.status(400).json({ ok: false, error: 'Missing album' });
 
-      let current = {};
-      try { current = JSON.parse(await fs.readFile(configPath, 'utf8')); } catch {}
+      const current = await readAlexaEventState(configPath);
 
       const now = new Date().toISOString();
       const key = album.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
@@ -153,7 +148,7 @@ export function registerConfigAlexaAliasRoutes(app, deps) {
         },
       };
 
-      await writeJsonAtomically(configPath, next);
+      await writeAlexaEventState(configPath, next);
       return res.json({ ok: true, logged: album, total: heard.slice(0, 400).length });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e?.message || String(e) });
@@ -166,8 +161,7 @@ export function registerConfigAlexaAliasRoutes(app, deps) {
       const playlist = String(req.body?.playlist || '').trim();
       if (!playlist) return res.status(400).json({ ok: false, error: 'Missing playlist' });
 
-      let current = {};
-      try { current = JSON.parse(await fs.readFile(configPath, 'utf8')); } catch {}
+      const current = await readAlexaEventState(configPath);
 
       const now = new Date().toISOString();
       const key = playlist.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
@@ -190,7 +184,7 @@ export function registerConfigAlexaAliasRoutes(app, deps) {
         },
       };
 
-      await writeJsonAtomically(configPath, next);
+      await writeAlexaEventState(configPath, next);
       return res.json({ ok: true, queued: playlist, total: unresolved.slice(0, 200).length });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e?.message || String(e) });
@@ -203,8 +197,7 @@ export function registerConfigAlexaAliasRoutes(app, deps) {
       const playlist = String(req.body?.playlist || '').trim();
       if (!playlist) return res.status(400).json({ ok: false, error: 'Missing playlist' });
 
-      let current = {};
-      try { current = JSON.parse(await fs.readFile(configPath, 'utf8')); } catch {}
+      const current = await readAlexaEventState(configPath);
 
       const now = new Date().toISOString();
       const key = playlist.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
@@ -223,7 +216,7 @@ export function registerConfigAlexaAliasRoutes(app, deps) {
         },
       };
 
-      await writeJsonAtomically(configPath, next);
+      await writeAlexaEventState(configPath, next);
       return res.json({ ok: true, logged: playlist, total: heard.slice(0, 400).length });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e?.message || String(e) });

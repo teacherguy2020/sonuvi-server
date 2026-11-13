@@ -1,3 +1,4 @@
+import './config/master-runtime-bootstrap.mjs';
 import path from 'node:path';
 import { loadConfigOrNull } from './config/load-config.mjs';
 import { normalizeMoodeBaseUrl } from './lib/moode-url.mjs';
@@ -6,6 +7,7 @@ import { loadProtectedLastfmEnvironment } from './lib/protected-runtime-secrets.
 
 export const RUNTIME_STATE_PATHS = runtimeStatePaths();
 export const MASTER_CONFIG = loadConfigOrNull();
+const MASTER_DOCUMENT = MASTER_CONFIG?.[Symbol.for('sonuvi.master.document')];
 // A fresh Server deliberately starts without a playback destination. This is
 // configuration state, not an operator-controlled environment override: the
 // root-managed fresh configuration is the only way to enable this mode.
@@ -42,7 +44,7 @@ export const CURL = process.env.CURL || '/usr/bin/curl';
 export const MPD_PLAYLIST_DIR = '/var/lib/mpd/playlists';
 export const FAVORITES_PATH = `${MPD_PLAYLIST_DIR}/Favorites.m3u`;
 export const MOODE_SSH_USER = process.env.MOODE_SSH_USER || moodeCfg?.sshUser || 'moode';
-export const MOODE_SSH_HOST = process.env.MOODE_SSH_HOST || moodeCfg?.sshHost || mpdCfg?.host || 'moode.local';
+export const MOODE_SSH_HOST = MASTER_DOCUMENT ? moodeCfg.sshHost : process.env.MOODE_SSH_HOST || moodeCfg?.sshHost || mpdCfg?.host || 'moode.local';
 export const PORT = Number(process.env.PORT || MASTER_CONFIG?.ports?.api || '3000');
 
 /**
@@ -62,7 +64,7 @@ export function resolveApiListenHost({ freshInstall = FRESH_INSTALL_MODE, overri
 }
 export const API_LISTEN_HOST = resolveApiListenHost();
 
-export const MOODE_BASE_URL = normalizeMoodeBaseUrl(
+export const MOODE_BASE_URL = MASTER_DOCUMENT && !moodeCfg.baseUrl ? '' : normalizeMoodeBaseUrl(
   process.env.MOODE_BASE_URL || moodeCfg?.baseUrl,
   MOODE_SSH_HOST,
 );
@@ -75,17 +77,17 @@ export const PUBLIC_BASE_URL =
   ((alexaEnabledFromConfig ?? true) && publicDomainFromConfig ? `https://${publicDomainFromConfig}` : '') ||
   `http://${LOCAL_ADDRESS}:${PORT}`;
 
-export const MPD_HOST = process.env.MPD_HOST || mpdCfg?.host || MOODE_SSH_HOST || 'moode.local';
+export const MPD_HOST = MASTER_DOCUMENT ? mpdCfg.host : process.env.MPD_HOST || mpdCfg?.host || MOODE_SSH_HOST || 'moode.local';
 export const MPD_PORT = Number(process.env.MPD_PORT || mpdCfg?.port || '6600');
 
-export const MOODE_USB_PREFIX = process.env.SONUVI_MUSIC_CONFIGURED === '1' ? (process.env.MOODE_USB_PREFIX ?? '') :
+export const MOODE_USB_PREFIX = MASTER_DOCUMENT ? MASTER_DOCUMENT.plugins.moode.usbPrefix : process.env.SONUVI_MUSIC_CONFIGURED === '1' ? (process.env.MOODE_USB_PREFIX ?? '') :
   process.env.MOODE_USB_PREFIX ||
   (MASTER_CONFIG?.paths?.moodeUsbMount
     ? `USB/${String(MASTER_CONFIG.paths.moodeUsbMount).split('/').filter(Boolean).slice(-1)[0] || 'SamsungMoode'}/`
     : 'USB/SamsungMoode/');
-export const PI4_MOUNT_BASE = process.env.PI4_MOUNT_BASE || MASTER_CONFIG?.paths?.piMountBase || '/mnt/SamsungMoode';
-export const MUSIC_LIBRARY_ROOT = process.env.MUSIC_LIBRARY_ROOT || MASTER_CONFIG?.paths?.musicLibraryRoot || '/var/lib/mpd/music';
-export const PODCAST_ROOT = process.env.PODCAST_ROOT || MASTER_CONFIG?.paths?.podcastRoot || path.join(MUSIC_LIBRARY_ROOT, 'Podcasts');
+export const PI4_MOUNT_BASE = MASTER_DOCUMENT ? MASTER_CONFIG.paths.piMountBase : process.env.PI4_MOUNT_BASE || MASTER_CONFIG?.paths?.piMountBase || '/mnt/SamsungMoode';
+export const MUSIC_LIBRARY_ROOT = MASTER_DOCUMENT ? MASTER_CONFIG.paths.musicLibraryRoot : process.env.MUSIC_LIBRARY_ROOT || MASTER_CONFIG?.paths?.musicLibraryRoot || '/var/lib/mpd/music';
+export const PODCAST_ROOT = MASTER_DOCUMENT ? MASTER_CONFIG.paths.podcastRoot : process.env.PODCAST_ROOT || MASTER_CONFIG?.paths?.podcastRoot || path.join(MUSIC_LIBRARY_ROOT, 'Podcasts');
 
 export const METAFLAC = process.env.METAFLAC || '/usr/bin/metaflac';
 
@@ -184,7 +186,7 @@ export const ART_640_PATH = path.join(ART_CACHE_DIR, 'current_640.jpg');
 export const ART_BG_PATH = path.join(ART_CACHE_DIR, 'current_bg_640_blur.jpg');
 export const PODCAST_DL_LOG = RUNTIME_STATE_PATHS.podcastDownloadLogPath;
 
-export const MOODE_SSH = process.env.MOODE_SSH || `${MOODE_SSH_USER}@${MOODE_SSH_HOST}`;
+export const MOODE_SSH = MASTER_DOCUMENT ? (MOODE_SSH_HOST ? `${MOODE_SSH_USER}@${MOODE_SSH_HOST}` : '') : process.env.MOODE_SSH || `${MOODE_SSH_USER}@${MOODE_SSH_HOST}`;
 export const FAVORITES_M3U = process.env.FAVORITES_M3U || '/var/lib/mpd/playlists/Favorites.m3u';
 
 // Optional track-start push notifications (Pushover)
@@ -209,6 +211,7 @@ export const TRACK_NOTIFY_ALEXA_MAX_AGE_MS = Number(
 // runtime JSON may describe the topic/environment, but the Apple private key
 // must never be returned by config routes or committed to the repository.
 const apnsCfg = notificationsCfg?.apns || {};
+export const APNS_ENABLED = MASTER_DOCUMENT ? MASTER_DOCUMENT.plugins.apns.enabled : true;
 export const APNS_KEY_ID = String(process.env.APNS_KEY_ID || '').trim();
 export const APNS_TEAM_ID = String(process.env.APNS_TEAM_ID || '').trim();
 export const APNS_PRIVATE_KEY_PATH = String(process.env.APNS_PRIVATE_KEY_PATH || '').trim();

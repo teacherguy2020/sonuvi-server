@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import { readGateCTargetIdentity } from './sonuvi-gate-c-target-preflight.mjs';
 import { isMusicLibraryTrack } from './music-library-counts.mjs';
 import { writeJsonAtomically } from './atomic-file.mjs';
+import { createMasterConfigurationStore } from './master-configuration.mjs';
 
 const exec = promisify(callback);
 export const MUSIC_SETUP_CONTRACT = 'sonuvi.music-setup.v1';
@@ -14,9 +15,18 @@ const ROOT = '/var/lib/sonuvi';
 const MOUNT = ROOT + '/music';
 const STATUS = ROOT + '/config/music-setup.json';
 const ENV = ROOT + '/protected/music-setup.env';
+const MASTER = ROOT + '/config/now-playing.config.json';
 const CREDS = ROOT + '/protected/music-share.credentials';
 const UNIT = 'var-lib-sonuvi-music.mount';
 const fail = code => { throw Object.assign(new Error(code), { code }); };
+// Setup is another editor of the same document, never an environment overlay.
+export function musicSetupMasterDraft(document, {address, port, prefix, mount = MOUNT}) {
+ const draft=structuredClone(document);
+ Object.assign(draft.plugins.mpd,{enabled:true,host:address,port});
+ Object.assign(draft.plugins.moode,{enabled:true,sshHost:address,baseUrl:`http://${address}`,usbPrefix:prefix});
+ Object.assign(draft.plugins.library,{enabled:true,musicLibraryRoot:mount,piMountBase:mount});
+ return draft;
+}
 export function privateIPv4(value) {
  const a = String(value).split('.');
  if(a.length!==4||a.some(x=>!/^\d{1,3}$/.test(x)||String(Number(x))!==x||Number(x)>255))return false;
@@ -142,6 +152,8 @@ async function verifiedStatus() {
  }catch(e){return {...state,state:'failed',code:e.code||'music_setup_failed'};}
 }
 async function apply(r,address) {
+ const store=createMasterConfigurationStore(MASTER);
+ const initial=await store.read(); // Fail before host changes if migration is required.
  const previous=JSON.parse(await safeFile(STATUS)||'null');
  if(previous?.state==='ready') {
   if(previous.address!==address||previous.share!==r.share||previous.port!==r.port)fail('music_already_configured');
@@ -161,13 +173,13 @@ async function apply(r,address) {
   const options=await mountShare(r,address,CREDS,MOUNT);
   const verified=await verifyFiles(MOUNT,files,r.share);
   state={...state,state:'configuring',...verified};await saveState(state);
-  const env=`SONUVI_MUSIC_CONFIGURED=1\nMPD_HOST=${address}\nMPD_PORT=${r.port}\nMOODE_SSH_HOST=${address}\nMOODE_BASE_URL=http://${address}\nMOODE_USB_PREFIX=${verified.prefix}\nMUSIC_LIBRARY_ROOT=${MOUNT}\nPI4_MOUNT_BASE=${MOUNT}\n`;
-  await fs.writeFile(ENV,env,{mode:0o600,flag:'wx'});
+  const saved=await store.save(musicSetupMasterDraft(initial.document,{address,port:r.port,prefix:verified.prefix}),initial.revision);
+  state={...state,configurationRevision:saved.revision};await saveState(state);
   // No fstab edits and no remote writes. Only this fixed read-only share unit.
   const unit=`[Unit]\nDescription=Sonuvi read-only music share\nAfter=network-online.target\nWants=network-online.target\n[Mount]\nWhat=//${address}/${r.share}\nWhere=${MOUNT}\nType=cifs\nOptions=${options}\nTimeoutSec=25\n[Install]\nWantedBy=multi-user.target\n`;
   await fs.writeFile(`/etc/systemd/system/${UNIT}`,unit,{mode:0o644,flag:'wx'});
   await fs.mkdir('/etc/systemd/system/sonuvi-api.service.d',{recursive:true});
-  await fs.writeFile('/etc/systemd/system/sonuvi-api.service.d/50-music-setup.conf',`[Unit]\nWants=${UNIT}\nAfter=${UNIT}\n[Service]\nEnvironmentFile=${ENV}\nReadOnlyPaths=${MOUNT}\n`,{mode:0o644,flag:'wx'});
+  await fs.writeFile('/etc/systemd/system/sonuvi-api.service.d/50-music-setup.conf',`[Unit]\nWants=${UNIT}\nAfter=${UNIT}\n[Service]\nReadOnlyPaths=${MOUNT}\n`,{mode:0o644,flag:'wx'});
   await run('/usr/bin/systemctl',['daemon-reload']);await run('/usr/bin/systemctl',['enable',UNIT]);
   state={...state,state:'indexing'};await saveState(state);
   const result=await run('/usr/sbin/runuser',['-u','sonuvi','--','/usr/bin/env',`SONUVI_STATE_ROOT=${ROOT}`,`SONUVI_RELEASE_ROOT=/opt/sonuvi/current`,`MPD_HOST=${address}`,`MPD_PORT=${r.port}`,'SONUVI_MUSIC_CONFIGURED=1',`MOODE_USB_PREFIX=${verified.prefix}`,'/usr/bin/node','/opt/sonuvi/current/scripts/sonuvi-music-index.mjs'],{timeout:180000,maxBuffer:65536});

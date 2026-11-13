@@ -15,7 +15,7 @@ Environment=SONUVI_STATE_ROOT=/var/lib/sonuvi
 Environment=SONUVI_CONFIG_ROOT=/var/lib/sonuvi/config
 Environment=SONUVI_SECRETS_ROOT=/var/lib/sonuvi/protected
 Environment=SONUVI_MOODE_SSH_ROOT=/var/lib/sonuvi/protected/ssh
-Environment=LASTFM_ENV_FILE=/var/lib/sonuvi/protected/lastfm.env
+Environment=LASTFM_ENV_FILE=/var/lib/sonuvi/protected/integrations/lastfm/credentials.env
 Environment=SONUVI_PUBLIC_WEB_ROOT=/opt/sonuvi/current/public
 Environment=SONUVI_RELEASE_MANIFEST=/opt/sonuvi/current/release-manifest.json
 Environment=SONUVI_RELEASE_ID=@RELEASE_ID@

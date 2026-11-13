@@ -25,6 +25,7 @@
 // network, and state-write boundaries before legacy route modules capture
 // Node built-in helpers.
 import './src/lib/rehearsal-runtime-boundary.mjs';
+import './src/config/master-runtime-bootstrap.mjs';
 import { createMobileControllerBridge } from './src/lib/mobile-controller-bridge.mjs';
 import { readEffectiveRuntimeConfig, writeNativeRuntimeConfig } from './src/lib/native-configuration-store.mjs';
 import { startLibraryHealthScan, waitForLibraryHealthScan } from './src/routes/config.library-health-read.routes.mjs';
@@ -262,7 +263,7 @@ import {
   MOBILE_PUBLIC_BASE_URL, MOBILE_TRACK_CACHE_DIR, MOBILE_TRANSCODE_TRACKS,
   MOBILE_VIDEO_ROOT, MOBILE_VIDEO_CATALOG_PATH,
   APNS_KEY_ID, APNS_TEAM_ID, APNS_PRIVATE_KEY_PATH, APNS_PRIVATE_KEY, APNS_TOPIC,
-  APNS_ENVIRONMENT, MOBILE_PUSH_TOKENS_PATH,
+  APNS_ENVIRONMENT, APNS_ENABLED, MOBILE_PUSH_TOKENS_PATH,
   PUSHOVER_TOKEN, PUSHOVER_USER_KEY,
   HARMONY_HOST, HARMONY_PORT, HARMONY_DOMAIN, HARMONY_HUB_ID,
   HARMONY_DENON_DEVICE_ID, HARMONY_INPUT_PHONO, HARMONY_INPUT_AUX1,
@@ -313,6 +314,7 @@ import { createSavedQueuePlayService } from './src/saved-queue-play-service.mjs'
 import { createQobuzConnectController } from './src/lib/qobuz-connect-control.mjs';
 import { createListeningHistoryStore } from './src/lib/listening-history.mjs';
 import { createLastfmScrobbler } from './src/lib/lastfm-scrobbler.mjs';
+import { loadProtectedLastfmEnvironment } from './src/lib/protected-runtime-secrets.mjs';
 import { createApnsProvider } from './src/lib/apns.mjs';
 import { resolveApnsMediaUrl } from './src/lib/apns-artwork.mjs';
 import { createMobilePushTokenStore } from './src/lib/mobile-push-store.mjs';
@@ -510,6 +512,13 @@ const millsHarmonyClient = new HarmonyHubClient({
 });
 
 const nonMpdScrobbler = createLastfmScrobbler({
+  getCredentials: () => {
+    const cfg = readEffectiveRuntimeConfig(RUNTIME_STATE_PATHS.configPath);
+    const master = cfg[Symbol.for('sonuvi.master.document')];
+    if(master && (!master.plugins.lastfm.enabled || !master.plugins.lastfm.scrobblingEnabled)) return {};
+    const c = loadProtectedLastfmEnvironment({statePaths:RUNTIME_STATE_PATHS});
+    return {apiKey:c.LASTFM_API_KEY || (!master ? LASTFM_API_KEY : ''),apiSecret:c.LASTFM_API_SECRET,sessionKey:c.LASTFM_SESSION_KEY};
+  },
   apiKey: LASTFM_API_KEY,
   apiSecret: LASTFM_API_SECRET,
   sessionKey: LASTFM_SESSION_KEY,
@@ -544,6 +553,7 @@ const mobileVideoCatalog = createMobileVideoCatalog({
   registryPath: MOBILE_VIDEO_CATALOG_PATH,
 });
 const apnsProvider = createApnsProvider({
+  enabled: APNS_ENABLED,
   keyId: APNS_KEY_ID,
   teamId: APNS_TEAM_ID,
   privateKeyPath: APNS_PRIVATE_KEY_PATH,
@@ -9466,6 +9476,7 @@ registerMobileRoutes(app, {
 });
 
 registerNativeAdministratorConfigurationRoutes(app, {
+  qobuz:{controlPoint:upnpControlPoint,getQobuzNowPlaying:()=>qobuzConnect.get(),releaseQobuzConnect:()=>qobuzConnectController.release()},
   administratorAuthority: firstAdministratorAuthority,
   readConfig: async () => readEffectiveRuntimeConfig(RUNTIME_CONFIG_PATH),
   writeConfig: async (value) => writeNativeRuntimeConfig(value),

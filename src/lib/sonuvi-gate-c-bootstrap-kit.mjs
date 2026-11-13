@@ -27,6 +27,10 @@ const SOURCE_FILES = Object.freeze([
   'src/lib/sonuvi-bootstrap-progress.mjs',
   'src/lib/sonuvi-bootstrap-status.mjs',
   'src/lib/sonuvi-fresh-install.mjs',
+  'src/lib/master-configuration.mjs',
+  'src/lib/master-configuration-migration.mjs',
+  'src/lib/master-runtime-options.mjs',
+
   'src/lib/sonuvi-gate-c-release.mjs',
   'src/lib/sonuvi-gate-c-first-install.mjs',
   'src/lib/sonuvi-gate-c-staging.mjs',
