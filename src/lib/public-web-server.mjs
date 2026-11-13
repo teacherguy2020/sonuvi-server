@@ -84,7 +84,9 @@ export async function createPublicWebServer({ publicRoot, tls, ...gatewayOptions
       response.setHeader('content-type', mimeType(asset));
       response.setHeader('content-length', String(stat.size));
       response.setHeader('x-content-type-options', 'nosniff');
-      response.setHeader('cache-control', asset.endsWith('/release.json') || asset.endsWith('release.json')
+      const extension = path.extname(asset).toLowerCase();
+      const isHtml = extension === '.html';
+      response.setHeader('cache-control', asset.endsWith('/release.json') || asset.endsWith('release.json') || isHtml
         ? 'no-cache'
         : 'public, max-age=300');
       if (String(request.method || 'GET').toUpperCase() === 'HEAD') {

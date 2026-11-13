@@ -54,7 +54,9 @@ test('public web server serves only H2 allowlisted regular files with no travers
   const rootResponse = await request(server, '/');
   assert.equal(rootResponse.statusCode, 200);
   assert.match(rootResponse.body, /Public/);
+  assert.equal(rootResponse.headers['cache-control'], 'no-cache');
   assert.equal((await request(server, '/scripts/index.js?v=1')).statusCode, 200);
+  assert.equal((await request(server, '/scripts/index.js?v=1')).headers['cache-control'], 'public, max-age=300');
   assert.equal((await request(server, '/.env')).statusCode, 404);
   assert.equal((await request(server, '/%2e%2e/.env')).statusCode, 404);
   assert.equal((await request(server, '/src/server.mjs')).statusCode, 404);
