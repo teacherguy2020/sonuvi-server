@@ -77,6 +77,11 @@ test('generated public root preserves the declared PWA manifest, start URL, and 
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 
+  for (const module of ['master-configuration-editor.mjs', 'master-configuration-draft.mjs']) {
+    const response = await request(server, '/scripts/' + module);
+    assert.equal(response.statusCode, 200);
+    assert.match(response.headers['content-type'], /^text\/javascript/);
+  }
   const manifestResponse = await request(server, '/manifest.webmanifest');
   assert.equal(manifestResponse.statusCode, 200);
   const manifest = JSON.parse(manifestResponse.body);
