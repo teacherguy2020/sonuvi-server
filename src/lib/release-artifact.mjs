@@ -61,6 +61,9 @@ const RELEASE_CONFIG_FILES = new Set([
 const RELEASE_SYSTEMD_TEMPLATES = new Set([
   'ops/systemd/sonuvi-api.service.in',
   'ops/systemd/sonuvi-web.service.in',
+  'ops/systemd/sonuvi-alexa-public.service',
+  'ops/systemd/sonuvi-alexa-public-reconcile.service',
+  'ops/systemd/sonuvi-alexa-public-reconcile.timer',
 ]);
 
 const RELEASE_RUNTIME_SCRIPTS = new Set([
@@ -76,6 +79,7 @@ const RELEASE_RUNTIME_SCRIPTS = new Set([
   'scripts/sonuvi-target-installer.mjs',
   'scripts/lastfm-authorize.mjs',
   'scripts/sonuvi-local-tls-renew.mjs',
+  'scripts/sonuvi-alexa-public-https.mjs',
   'scripts/sonuvi-owner-recovery.mjs',
   'scripts/promote-staged-release.mjs',
   'scripts/serve-public-web.mjs',

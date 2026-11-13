@@ -44,6 +44,7 @@ async function sourceFixture(t) {
   await write(root, 'vibe_planner.py', 'print("fixture planner")\n');
   await write(root, 'src/config.mjs', 'export const fixtureConfig = true;\n');
   await write(root, 'src/lib/fixture.mjs', 'export const fixture = true;\n');
+  await write(root, 'scripts/sonuvi-alexa-public-https.mjs', 'export const reconciler = true;\n');
   await write(root, 'scripts/serve-public-web.mjs', 'console.log("fixture static server");\n');
   await write(root, 'scripts/verify-current-release.mjs', 'console.log("fixture verifier");\n');
   await write(root, 'scripts/verify-release-runtime.mjs', 'console.log("fixture runtime verifier");\n');
@@ -197,6 +198,7 @@ test('manifest-backed artifact excludes secrets and detects tampering before sta
   for (const blocked of ['.env', 'credentials/private.key', 'var/cache.json', 'data/library-browse-index.json']) {
     await assert.rejects(fs.access(path.join(artifactRoot, blocked)));
   }
+  assert.equal(await fs.readFile(path.join(artifactRoot,'scripts/sonuvi-alexa-public-https.mjs'),'utf8'),'export const reconciler = true;\n');
   const manifestText = await fs.readFile(path.join(artifactRoot, 'release-manifest.json'), 'utf8');
   assert.equal(manifestText.includes('SECRET_SENTINEL'), false);
   assert.equal(manifestText.includes(source), false);
