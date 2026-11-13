@@ -5,7 +5,7 @@ import { validateBootstrapHistory } from './sonuvi-bootstrap-history.mjs';
 export const GATE_C_BOOTSTRAP_KIT_REPLACEMENT_CONTRACT = 'sonuvi.gate-c-bootstrap-kit-replacement.v1';
 export const GATE_C_BOOTSTRAP_ADMISSION_LOCK_PATH = '/var/lib/sonuvi-bootstrap/bootstrap-admission.lock';
 export const GATE_C_BOOTSTRAP_REPLACEMENT_JOURNAL_ROOT = '/var/lib/sonuvi-bootstrap/bootstrap-kit-replacements';
-export const GATE_C_BOOTSTRAP_REPLACEMENT_CAPSULE_SHA256 = 'e78fc5d346b261fdedf3df3204b1f29cba1e86cb2e3467bedc4e7f1d90624210';
+export const GATE_C_BOOTSTRAP_REPLACEMENT_CAPSULE_SHA256 = '53b3411ec29e300dc30c0a2e207705c594e6721052a29f7d1eeef5478265455d';
 
 export const GATE_C_BOOTSTRAP_ADMISSION_HELPERS = Object.freeze({
   stageRelease: '/var/lib/sonuvi-bootstrap/bootstrap-kit-v2/scripts/sonuvi-release-stage.mjs',
@@ -268,7 +268,7 @@ function validActiveKitManifest(value) {
     && /^[a-z0-9][a-z0-9._-]{2,80}$/i.test(value.keyId)
     && sameKeys(value.target, ['architecture', 'os'])
     && value.target.os === 'linux' && value.target.architecture === 'arm64'
-    && Array.isArray(value.files) && value.files.length === ACTIVE_KIT_FILES.length;
+    && Array.isArray(value.files);
 }
 async function assertActiveKitTree(directory = CONFIG.activeKit) {
   if (ACTIVE_KIT_FILES.length === 0 || ACTIVE_KIT_FILE_SET.size !== ACTIVE_KIT_FILES.length) failClosed();
@@ -278,6 +278,14 @@ async function assertActiveKitTree(directory = CONFIG.activeKit) {
   let manifest;
   try { manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8')); } catch { failClosed(); }
   if (!validActiveKitManifest(manifest)) failClosed();
+  const legacyFiles = ACTIVE_KIT_FILES.filter(file => ![
+    'src/lib/master-configuration-migration.mjs', 'src/lib/master-configuration-transaction.mjs',
+    'src/lib/master-configuration-upgrade.mjs', 'src/lib/master-configuration.mjs',
+    'src/lib/master-runtime-options.mjs',
+  ].includes(file));
+  const allowed = directory === CONFIG.activeKit ? [ACTIVE_KIT_FILES] : [ACTIVE_KIT_FILES, legacyFiles];
+  const inventory = allowed.find(files => JSON.stringify(files) === JSON.stringify(manifest.files.map(file => file.path).sort()));
+  if (!inventory) failClosed();
   const actual = [];
   const visited = [];
   async function walk(directory, relative = '') {
@@ -305,15 +313,15 @@ async function assertActiveKitTree(directory = CONFIG.activeKit) {
   }
   await walk(directory);
   actual.sort((left, right) => left.path.localeCompare(right.path));
-  const expectedTree = [...ACTIVE_KIT_FILES, 'bootstrap-kit-manifest.json', '.sonuvi-bootstrap-kit-v2.sha256', ...expectedDirectories(ACTIVE_KIT_FILES)].sort();
+  const expectedTree = [...inventory, 'bootstrap-kit-manifest.json', '.sonuvi-bootstrap-kit-v2.sha256', ...expectedDirectories(inventory)].sort();
   if (JSON.stringify(visited.sort()) !== JSON.stringify(expectedTree)) failClosed();
   const manifestFiles = manifest.files.map((file) => {
-    if (!sameKeys(file, ['bytes', 'path', 'sha256']) || !ACTIVE_KIT_FILE_SET.has(file.path)
+    if (!sameKeys(file, ['bytes', 'path', 'sha256']) || !inventory.includes(file.path)
       || !Number.isSafeInteger(file.bytes) || file.bytes < 0 || !digestPattern.test(file.sha256)) failClosed();
     return { path: file.path, bytes: file.bytes, sha256: file.sha256 };
   }).sort((left, right) => left.path.localeCompare(right.path));
   if (JSON.stringify(manifestFiles) !== JSON.stringify(actual)
-    || JSON.stringify(actual.map((file) => file.path)) !== JSON.stringify(ACTIVE_KIT_FILES)) failClosed();
+    || JSON.stringify(actual.map((file) => file.path)) !== JSON.stringify(inventory)) failClosed();
   return { marker: activeMarker, manifest };
 }
 function validJournal(value, operationId) {

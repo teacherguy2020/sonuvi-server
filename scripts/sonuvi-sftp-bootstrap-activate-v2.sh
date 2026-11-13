@@ -495,6 +495,15 @@ function parseReplacementArgs() {
   };
 }
 
+// The pre-master v2 kit is a supported immutable predecessor, not an open
+// inventory. Newly staged archives still require the complete FILES list.
+const PRE_MASTER_FILES = Object.freeze(FILES.filter(file => ![
+  'src/lib/master-configuration-migration.mjs',
+  'src/lib/master-configuration-transaction.mjs',
+  'src/lib/master-configuration-upgrade.mjs',
+  'src/lib/master-configuration.mjs',
+  'src/lib/master-runtime-options.mjs',
+].includes(file)));
 async function assertRootTree(rootPath, expectedMarker, anchorBytes) {
   const treeLabel = rootPath === ACTIVE ? 'previous_kit' : 'replacement_kit';
   phase(`${treeLabel}_root`);
@@ -514,7 +523,10 @@ async function assertRootTree(rootPath, expectedMarker, anchorBytes) {
     || !validRelease(manifest.releaseId) || !manifest.target || !sameKeys(manifest.target, ['architecture', 'os'])
     || manifest.target.os !== 'linux' || manifest.target.architecture !== 'arm64'
     || typeof manifest.keyId !== 'string' || !/^[a-z0-9][a-z0-9._-]{2,80}$/i.test(manifest.keyId)
-    || !Array.isArray(manifest.files) || manifest.files.length !== FILES.length) fail('replacement_kit_inventory_invalid');
+    || !Array.isArray(manifest.files)) fail('replacement_kit_inventory_invalid');
+  const paths = manifest.files.map(file => file.path).sort();
+  const inventory = [FILES, PRE_MASTER_FILES].find(files => JSON.stringify(files) === JSON.stringify(paths));
+  if (!inventory) fail('replacement_kit_inventory_invalid');
   const actual = [];
   const visited = [];
   phase(`${treeLabel}_tree`);
@@ -541,15 +553,15 @@ async function assertRootTree(rootPath, expectedMarker, anchorBytes) {
   }
   await walk(rootPath);
   actual.sort((a, b) => a.path.localeCompare(b.path));
-  const expectedTree = [...FILES, 'bootstrap-kit-manifest.json', '.sonuvi-bootstrap-kit-v2.sha256', ...expectedDirectories(FILES)].sort();
+  const expectedTree = [...inventory, 'bootstrap-kit-manifest.json', '.sonuvi-bootstrap-kit-v2.sha256', ...expectedDirectories(inventory)].sort();
   if (JSON.stringify(visited.sort()) !== JSON.stringify(expectedTree)) fail('replacement_kit_inventory_invalid');
   const manifestFiles = manifest.files.map((file) => {
-    if (!sameKeys(file, ['bytes', 'path', 'sha256']) || !FILES.includes(file.path)
+    if (!sameKeys(file, ['bytes', 'path', 'sha256']) || !inventory.includes(file.path)
       || !Number.isSafeInteger(file.bytes) || file.bytes < 0 || !validDigest(file.sha256)) fail('replacement_kit_inventory_invalid');
     return { path: file.path, bytes: file.bytes, sha256: file.sha256 };
   }).sort((a, b) => a.path.localeCompare(b.path));
   if (JSON.stringify(manifestFiles) !== JSON.stringify(actual)
-    || JSON.stringify(actual.map((file) => file.path)) !== JSON.stringify(FILES)) fail('replacement_kit_inventory_invalid');
+    || JSON.stringify(actual.map((file) => file.path)) !== JSON.stringify(inventory)) fail('replacement_kit_inventory_invalid');
   phase(`${treeLabel}_trust_anchor`);
   if (!Object.hasOwn(JSON.parse(anchorBytes.toString('utf8')), manifest.keyId)) fail('replacement_trust_anchor_mismatch');
   const kitAnchorPath = path.join(rootPath, 'etc/sonuvi/release-trust-anchors.json');

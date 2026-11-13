@@ -472,3 +472,25 @@ test('normal helpers become reachable only after the fixed recovery operation ha
   assert.ok(fixedRecovery.includes('recover_bootstrap_kit_replacement'));
   assert.equal(fixedRecovery.includes('--eval'), false, 'the documented fixed recovery capsule remains independently reachable');
 });
+
+test('current admission accepts exact pre-master historical kit but rejects incomplete inventory', {
+  skip: !flockAvailable || !Number.isSafeInteger(uid) || !Number.isSafeInteger(gid),
+}, async t => {
+  const f = await createFixture(t);
+  await resetActive(f, NEW_KIT);
+  const transaction = await writeJournal(f, 'bkr_00000000-0000-4000-8000-000000000601', 'committed');
+  const previous = path.join(transaction.root, 'previous');
+  await writeKit(previous, OLD_KIT);
+  const manifestFile = path.join(previous, 'bootstrap-kit-manifest.json');
+  const manifest = JSON.parse(await fs.readFile(manifestFile, 'utf8'));
+  const additions = ['master-configuration-migration.mjs', 'master-configuration-transaction.mjs',
+    'master-configuration-upgrade.mjs', 'master-configuration.mjs', 'master-runtime-options.mjs'];
+  for (const name of additions) await fs.unlink(path.join(previous, 'src/lib', name));
+  manifest.files = manifest.files.filter(file => !additions.includes(path.posix.basename(file.path)));
+  await fs.writeFile(manifestFile, JSON.stringify(manifest));
+  await assertAdmittedForEveryOperation(f);
+  const removed = manifest.files.pop();
+  await fs.unlink(path.join(previous, removed.path));
+  await fs.writeFile(manifestFile, JSON.stringify(manifest));
+  await assertBlockedForEveryOperation(f);
+});
