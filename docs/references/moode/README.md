@@ -89,3 +89,24 @@ uses `/etc/sonuvi-moode-vm/led-curl.conf` only when the configured target has
 exactly the approved origin `https://10.0.0.65:8443`; all other valid target
 hosts retain the bounded unauthenticated `http://HOST:3101/now-playing` probe.
 It does not solve display-only Mills after that VM browser session expires.
+
+## Canonical `sonuvi.local` repair (2026-11-12)
+
+The moOde target is now `https://sonuvi.local/display.html?mode=index&kiosk=1`.
+The 2026-11-11 VM wake patch still special-cased the retired
+`https://10.0.0.65:8443` origin, so the worker, watchdog, and RGB LED service
+could query the wrong host after the canonical LAN cutover.
+
+The follow-up patches apply to the exact live post-VM-wake baselines:
+
+- `worker.php`: `585db6691761ea92c212af366602bf95026ffd35aa8ff1ce15d8b2dcbe7af8a6`
+- `watchdog.sh`: `f9a805f6a2015207a2cc1f8280ad44df49f1065f1cdc92fd8fa245e33389782d`
+- `rgb_moode_service.py`: `e46fc10dd79cccf2094feb2d640e5f27057cf3c7385ac21efd95285ee9d218fb`
+
+Use `stage-canonical-sonuvi-local-20261112.sh STAGED_DIRECTORY` before
+activation. It dry-runs all three patches, preserves modes, checks syntax,
+and verifies the resulting hashes. The root-only
+`/etc/sonuvi-moode-vm/led-curl.conf` remains restricted to the approved
+HTTPS origins; it is not copied into source or logs. A fresh authenticated
+LED/display pairing is still required when the existing short-lived session
+has expired.

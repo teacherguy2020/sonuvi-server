@@ -1,0 +1,27 @@
+--- worker.php
++++ worker.php
+@@ -2351,11 +2351,19 @@
+ 		return $mpdState == 'play';
+ 	}
+ 
+-	if (($localDisplay['scheme'] ?? '') == 'https' && $host == '10.0.0.65'
+-		&& ($localDisplay['port'] ?? null) == 8443) {
+-		// This root-only config contains the VM CA and browser cookie. It is
+-		// deliberately usable only with the approved VM HTTPS origin.
+-		$nowPlayingUrl = 'https://10.0.0.65:8443/now-playing';
++	$scheme = strtolower((string)($localDisplay['scheme'] ?? ''));
++	$host = strtolower($host);
++	$port = $localDisplay['port'] ?? null;
++	$isCanonicalSonuvi = $scheme == 'https' && $host == 'sonuvi.local'
++		&& ($port === null || $port == 443);
++	$isLegacyVm = $scheme == 'https' && $host == '10.0.0.65'
++		&& $port == 8443;
++	if ($isCanonicalSonuvi || $isLegacyVm) {
++		// This root-only config contains the Sonuvi CA and browser cookie. It is
++		// deliberately usable only with the approved HTTPS origins.
++		$nowPlayingUrl = $isCanonicalSonuvi
++			? 'https://sonuvi.local/now-playing'
++			: 'https://10.0.0.65:8443/now-playing';
+ 		$curlCommand = 'curl -s --max-time 1 --config /etc/sonuvi-moode-vm/led-curl.conf ' . escapeshellarg($nowPlayingUrl);
+ 	} else {
+ 		$nowPlayingUrl = 'http://' . $host . ':3101/now-playing';

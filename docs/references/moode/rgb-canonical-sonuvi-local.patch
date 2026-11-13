@@ -1,0 +1,10 @@
+--- rgb_moode_service.py
++++ rgb_moode_service.py
+@@ -65,7 +65,7 @@
+ # =========================
+ # Endpoints
+ # =========================
+-NOW_PLAYING_URL = "https://10.0.0.65:8443/now-playing"
++NOW_PLAYING_URL = "https://sonuvi.local/now-playing"
+ CURRENSONG_URL  = "http://localhost/command/?cmd=get_currentsong"
+ MOODE_DB        = "/var/local/www/db/moode-sqlite3.db"

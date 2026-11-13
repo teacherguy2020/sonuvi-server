@@ -358,3 +358,19 @@ paused, error, or expired-session data. The root-only VM curl configuration is
 restricted to that exact origin; other display hosts retain the unauthenticated
 bounded port-3101 probe. This does not restore display-only Mills after a VM
 browser session expiry.
+
+## Canonical Sonuvi hostname and moOde consumers (2026-11-12)
+
+When the moOde display target changes from a VM address to
+`https://sonuvi.local/`, inspect every state consumer, not just the browser
+target. The PHP worker, wake watchdog, and physical RGB LED service each need
+to query the canonical authenticated `/now-playing` route. A stale VM or Pi
+URL can make the browser appear correct while blanking and LED state silently
+fall back to inactive/local metadata.
+
+Local MPD/ALSA remains authoritative for ordinary moOde playback. Mills,
+AirPlay, and UPnP display-only state requires the root-only authenticated
+curl configuration and a live pairing grant. A failed or expired grant must
+not be mistaken for a server playback failure.
+
+Last updated: 2026-11-12

@@ -1,0 +1,13 @@
+--- watchdog.sh
++++ watchdog.sh
+@@ -198,7 +198,9 @@
+ 					# Remote display host does not expose moOde's /command/ endpoint.
+ 					# The VM HTTPS origin alone may use its root-only CA/cookie config.
+ 					REMOTE_HOST=${WEBUI_DISPLAY_HOST%%:*}
+-					if [[ $WEBUI_DISPLAY_URL == https://10.0.0.65:8443/* ]]; then
++					if [[ $WEBUI_DISPLAY_URL == https://sonuvi.local/* || $WEBUI_DISPLAY_URL == https://sonuvi.local:443/* ]]; then
++						NP_JSON=$(curl -s --max-time 1 --config /etc/sonuvi-moode-vm/led-curl.conf 'https://sonuvi.local/now-playing')
++					elif [[ $WEBUI_DISPLAY_URL == https://10.0.0.65:8443/* ]]; then
+ 						NP_JSON=$(curl -s --max-time 1 --config /etc/sonuvi-moode-vm/led-curl.conf 'https://10.0.0.65:8443/now-playing')
+ 					else
+ 						NP_JSON=$(curl -s --max-time 1 "http://$REMOTE_HOST:3101/now-playing")

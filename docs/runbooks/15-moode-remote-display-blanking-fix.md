@@ -187,3 +187,20 @@ reviewed application, syntax-check both files, run the supplied target PHP and
 shell regression runners, then reload the existing worker/watchdog by the
 release-appropriate method. Startup output/volume initialization is unchanged:
 do not restart MPD or mutate mixer/queue/volume for this repair.
+
+## Canonical `sonuvi.local` follow-up (2026-11-12)
+
+After the display target moved to
+`https://sonuvi.local/display.html?mode=index&kiosk=1`, update all three
+moOde consumers together:
+
+- `worker.php` blanking queries use the authenticated canonical HTTPS route;
+- `watchdog.sh` wake queries use the same route;
+- `rgb_moode_service.py` reads the same route for Mills white-pulse and other
+  remote playback state.
+
+Apply the exact-baseline artifacts in `docs/references/moode/` with
+`stage-canonical-sonuvi-local-20261112.sh`. Keep ordinary local MPD/ALSA
+authority intact, and keep the root-only curl configuration out of source
+control. If the current browser/controller grant is expired, re-pair the
+display/LED session before expecting remote Mills state to be visible.
