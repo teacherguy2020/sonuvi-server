@@ -7,6 +7,7 @@ import { chromium } from 'playwright';
 import { initializeMasterConfiguration, createMasterConfigurationStore } from '../src/lib/master-configuration.mjs';
 import {registerMasterConfigurationRoutes} from '../src/routes/master-configuration.routes.mjs';
 
+import {createPluginCredentialAdministration} from '../src/lib/plugin-credentials.mjs';
 import {createLastfmPluginAdministration} from '../src/lib/lastfm-plugin-admin.mjs';
 import {createPublicWebServer} from '../src/lib/public-web-server.mjs';
 import {buildPublicWebRoot} from '../src/lib/public-web-root.mjs';
@@ -16,7 +17,9 @@ test('actual configuration page synchronizes forms and JSON through real validat
   const file=path.join(root,'config.json'),document=initializeMasterConfiguration();document.plugins.radio.enabled=false;
   await fs.writeFile(file,JSON.stringify(document));
   const store=createMasterConfigurationStore(file),routes=new Map();
-  registerMasterConfigurationRoutes(Object.fromEntries(['get','put','post'].map(method=>[method,(path,handler)=>routes.set(method.toUpperCase()+' '+path,handler)])),{store,authorize:async()=>true,lastfm:createLastfmPluginAdministration({statePaths:{sharedStateEnabled:true,lastfmEnvPath:path.join(root,'legacy.env'),lastfmAdminEnvPath:path.join(root,'credentials.env')},env:{},requestToken:async()=>'fixture-token',exchangeToken:async()=>({sessionKey:'fixture-session',username:'fixture-user'})})});
+  await fs.mkdir(path.join(root,'integrations/alexa'),{recursive:true});
+  const credentials=createPluginCredentialAdministration({statePaths:{secretsRoot:root},env:{ALEXA_ROUTE_WEBHOOK_URL:'https://example.test/private-route'}});
+  registerMasterConfigurationRoutes(Object.fromEntries(['get','put','post'].map(method=>[method,(path,handler)=>routes.set(method.toUpperCase()+' '+path,handler)])),{store,credentials,authorize:async()=>true,lastfm:createLastfmPluginAdministration({statePaths:{sharedStateEnabled:true,lastfmEnvPath:path.join(root,'legacy.env'),lastfmAdminEnvPath:path.join(root,'credentials.env')},env:{},requestToken:async()=>'fixture-token',exchangeToken:async()=>({sessionKey:'fixture-session',username:'fixture-user'})})});
   const publicRoot=process.env.PACKAGED_ROOT ? path.join(process.env.PACKAGED_ROOT,'public') : path.join(root,'public');if(!process.env.PACKAGED_ROOT)await buildPublicWebRoot({sourceRoot: new URL('../',import.meta.url).pathname,outputRoot:publicRoot});
   const server=await createPublicWebServer({publicRoot});await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>new Promise(r=>server.close(r)));
   const origin='http://127.0.0.1:'+server.address().port;
@@ -43,6 +46,18 @@ test('actual configuration page synchronizes forms and JSON through real validat
     await hostPage.goto(origin+'/app.html?page=config.html');
     await hostPage.locator('#appFrame').waitFor();
     page=hostPage.frameLocator('#appFrame');
+    const alexa=page.locator('fieldset[data-plugin=alexa]');
+    await alexa.locator('summary',{hasText:'Protected credentials'}).click();
+    assert.equal(await alexa.locator('input[type=password]').nth(0).getAttribute('placeholder'),'Saved ••••••••');
+    assert.equal(await alexa.locator('input[type=password]').nth(1).getAttribute('placeholder'),'Not saved');
+    assert.equal(await alexa.locator('input[type=password]').nth(0).inputValue(),'');
+    assert.ok(!(await alexa.textContent()).includes('private-route'));
+    await alexa.locator('input[type=password]').nth(1).fill('https://example.test/private-stop');
+    await alexa.getByRole('button',{name:'Save Alexa credentials'}).click();
+    await hostPage.getByRole('button',{name:'Later',exact:true}).click();
+    assert.equal(await alexa.locator('input[type=password]').nth(1).getAttribute('placeholder'),'Saved ••••••••');
+    assert.equal(await alexa.locator('input[type=password]').nth(1).inputValue(),'');
+    assert.equal(credentials.status('alexa').credentials.routeWebhookUrl,true);
     const lastfm=page.locator('fieldset[data-plugin=lastfm]');
     await lastfm.locator('summary',{hasText:'Vibe, shelves and scrobbling'}).click();
     await lastfm.getByRole('button',{name:'Complete authorization',exact:true}).click();

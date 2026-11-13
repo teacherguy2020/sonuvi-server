@@ -124,14 +124,16 @@ export async function mountMasterConfigurationEditor(root, {request, refreshMs =
       if(['apns','notifications','alexa'].includes(module.id)){
         const account=element('details');account.append(element('summary','Protected credentials'));
         const fields=module.id==='alexa'?['routeWebhookUrl','stopWebhookUrl']:module.credentials;
-        account.append(element('p','These explicit credential actions save immediately, outside exported JSON. Untouched fields retain their values; clearing an edited field removes it. Restart applies provider changes.'));
+        account.append(element('p','Saved values are hidden, not missing. No need to enter saved values again. These explicit credential actions save immediately, outside exported JSON. Untouched fields retain their values; clearing an edited field removes it. Restart applies provider changes.'));
         if(module.id==='apns')account.append(element('p','Use credentials for your own Apple developer provider. Sonuvi’s private signing key is not included. Consumer push may require a separately operated Sonuvi push relay. Device registration and actual delivery are separate checks.'));
         for(const key of fields){
           const label=element('label',key+' '),input=element(key==='privateKey'?'textarea':'input');
           if(key!=='privateKey')input.type='password';else input.rows=5;
+          const saved=loaded.status?.[module.id]?.credentials?.[key];
+          input.placeholder=saved===true?'Saved ••••••••':saved===false?'Not saved':'Status unavailable';
           input.value=otherCredentials[module.id]?.[key]??'';input.autocomplete='new-password';
           input.addEventListener('input',()=>{otherCredentials[module.id]??={};otherCredentials[module.id][key]=input.value;});
-          label.append(input);account.append(label,element('br'));
+          label.append(input,element('span',saved===true?' Saved':saved===false?' Not saved':' Saved status unavailable'));account.append(label,element('br'));
         }
         const button=element('button','Save '+module.title+' credentials');button.type='button';button.disabled=credentialBusy;
         button.addEventListener('click',async()=>{
