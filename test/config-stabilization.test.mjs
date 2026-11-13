@@ -79,6 +79,17 @@ test('browser masks access key, keeps auth separate, and avoids credential mutat
   assert.doesNotMatch(extract('async function restartServicesNow(){', 'async function checkRatingsDb(){'), /now-playing\.service|pm2|this is expected|setTimeout/);
 });
 
+test('moOde display setup documents and verifies the canonical HTTPS target', () => {
+  assert.match(html, /https:\/\/sonuvi\.local\/display\.html\?mode=index&amp;kiosk=1/);
+  assert.match(html, /\/var\/www\/daemon\/worker\.php/);
+  assert.match(html, /\/var\/www\/daemon\/watchdog\.sh/);
+  assert.match(html, /\/usr\/local\/bin\/rgb_moode_service\.py/);
+  const targetCheck = extract('const MOODE_DISPLAY_TARGET_URL', "document.getElementById('featureMoodeDisplayTakeover')");
+  assert.match(targetCheck, /https:\/\/sonuvi\.local\/display\.html\?mode=index&kiosk=1/);
+  assert.match(targetCheck, /url\.protocol === 'https:'/);
+  assert.doesNotMatch(targetCheck, /:8101\/display\.html/);
+});
+
 test('pairing uses the canonical resolver across HTTPS and direct HTTP, retaining explicit override', async () => {
   const pairing = await fs.readFile(new URL('../scripts/mobile-pairing-ui.js', import.meta.url), 'utf8');
   const start = pairing.indexOf('  function resolveApiBase()');

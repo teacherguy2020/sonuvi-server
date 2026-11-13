@@ -338,6 +338,18 @@
                   <div class="cfgField"><label><input id="featureMoodeDisplayTakeover" type="checkbox" /> Enable Sonuvi display enhancement on moOde</label></div>
                   <div class="cfgHint">When enabled, Peppy/Player display tools are available and can set moOde target URL to this server.</div>
                   <div class="cfgHint" id="displayTakeoverTargetHint" style="margin-top:6px;"></div>
+                  <details class="cfgHint" id="moodeDisplaySetupHelp" style="margin-top:8px;">
+                    <summary><strong>moOde target, wake, and LED setup</strong></summary>
+                    <div style="margin-top:8px;">
+                      <ol style="margin:0 0 0 20px;padding:0;">
+                        <li>In moOde, open <strong>Configure → Peripherals → Local Display</strong>.</li>
+                        <li>Set <strong>Web UI target URL</strong> to <code id="moodeDisplayTargetValue">https://sonuvi.local/display.html?mode=index&amp;kiosk=1</code>. Use HTTPS and leave the URL portless; do not use <code>:8101</code>.</li>
+                        <li>Apply the matching Sonuvi maintenance bundle on the moOde box to <code>/var/www/daemon/worker.php</code>, <code>/var/www/daemon/watchdog.sh</code>, and <code>/usr/local/bin/rgb_moode_service.py</code>. The first two control wake/blanking; the RGB service drives the Mills LED state.</li>
+                        <li>If the server or target URL changed, re-pair the moOde display/LED session before testing Mills. Its authenticated curl grant is kept root-only on the player.</li>
+                      </ol>
+                      <div style="margin-top:8px;">Settings can verify the browser target, but it does not replace moOde daemon files or copy private pairing credentials. Use the version-bound patch and staging procedure documented with the moOde maintenance files.</div>
+                    </div>
+                  </details>
                 </div>
 
                 <div class="cfgCard gateCard" id="idleDisplayBrandingCard">
@@ -2060,6 +2072,20 @@ document.getElementById('featureRatings')?.addEventListener('change', () => {
   if (document.getElementById('featureRatings')?.checked) loadRatingsBackups().catch(() => {});
 });
 
+const MOODE_DISPLAY_TARGET_URL = 'https://sonuvi.local/display.html?mode=index&kiosk=1';
+
+function isCanonicalMoodeDisplayTarget(value){
+  try {
+    const url = new URL(String(value || '').trim());
+    return url.protocol === 'https:'
+      && url.hostname.toLowerCase() === 'sonuvi.local'
+      && (!url.port || url.port === '443')
+      && url.pathname === '/display.html'
+      && url.searchParams.get('mode') === 'index'
+      && url.searchParams.get('kiosk') === '1';
+  } catch { return false; }
+}
+
 async function checkDisplayTakeoverTargetNow(){
   const hint = document.getElementById('displayTakeoverTargetHint');
   const enabled = !!document.getElementById('featureMoodeDisplayTakeover')?.checked;
@@ -2067,8 +2093,7 @@ async function checkDisplayTakeoverTargetNow(){
   if (sshRestricted) { hint.textContent = 'Remote display-target verification is unavailable: managed SSH is restricted. MPD and Sonuvi web access are independent.'; return; }
   if (!enabled) { hint.textContent = ''; return; }
 
-  const host = location.hostname || 'sonuvi.local';
-  const expected = `http://${host}:8101/display.html?kiosk=1`;
+  const expected = MOODE_DISPLAY_TARGET_URL;
   const key = getTrackKey();
   if (!key) {
     hint.style.color = '#f59e0b';
@@ -2081,7 +2106,7 @@ async function checkDisplayTakeoverTargetNow(){
     const r = await fetch(`${API_BASE}/config/moode/browser-url/status`, { headers:{ 'x-track-key': key }, cache:'no-store' });
     const j = await r.json().catch(()=>({}));
     const current = String(j?.appUrl || j?.runUrl || '').trim();
-    const ok = !!current && current.startsWith(`http://${host}:8101/display.html`);
+    const ok = isCanonicalMoodeDisplayTarget(current);
     if (ok) {
       hint.style.color = '#22c55e';
       hint.textContent = `✅ Target URL in moOde web-ui properly set to ${current}`;

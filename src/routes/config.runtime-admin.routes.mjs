@@ -35,6 +35,7 @@ import { exchangeLastfmToken, lastfmAuthorizationUrl, requestLastfmToken } from 
 
 const execFileP = promisify(execFile);
 let pendingLastfmAuthorization = null;
+const DEFAULT_MOODE_DISPLAY_URL = 'https://sonuvi.local/display.html?mode=index&kiosk=1';
 
 async function readEnvFileValues(envPath) {
   const raw = await fs.readFile(envPath, 'utf8').catch(() => '');
@@ -660,15 +661,13 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
 
   app.get('/peppy/live', async (req, res) => {
     try {
-      const hostHdr = String(req.get('host') || '').trim().replace(/:\d+$/, '') || 'localhost';
-      const fallback = `http://${hostHdr}:8101/display.html?kiosk=1`;
+      const fallback = DEFAULT_MOODE_DISPLAY_URL;
       const raw = await fs.readFile(peppyLastPushPath, 'utf8').catch(() => '');
       const j = raw ? JSON.parse(raw) : null;
       const url = String(j?.url || '').trim() || fallback;
       return res.redirect(302, url);
     } catch {
-      const hostHdr = String(req.get('host') || '').trim().replace(/:\d+$/, '') || 'localhost';
-      return res.redirect(302, `http://${hostHdr}:8101/display.html?kiosk=1`);
+      return res.redirect(302, DEFAULT_MOODE_DISPLAY_URL);
     }
   });
 
@@ -712,7 +711,7 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
         prev = JSON.parse(rawPrev || '{}') || {};
       } catch {}
       const merged = {
-        url: incoming.url || String(prev?.url || '').trim() || 'http://sonuvi.local:8101/display.html?kiosk=1',
+        url: incoming.url || String(prev?.url || '').trim() || DEFAULT_MOODE_DISPLAY_URL,
         skin: incoming.skin || String(prev?.skin || '').trim() || 'blue-1280',
         theme: incoming.theme || String(prev?.theme || '').trim() || 'midnight-blue',
         meterType: incoming.meterType || String(prev?.meterType || '').trim() || 'circular',

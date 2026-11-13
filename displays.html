@@ -99,8 +99,8 @@
 
   <script>
     (async()=>{
-      const host = location.hostname || 'sonuvi.local';
       const base = globalThis.NPArt.apiBase();
+      const moodeDisplayUrl = 'https://sonuvi.local/display.html?mode=index&kiosk=1';
       let key='';
       async function ensureKey(){
         if(key) return key;
@@ -133,7 +133,7 @@
           const p = JSON.parse(localStorage.getItem('player.profile.v2') || '{}') || {};
           size = String(p?.size || size).trim() || size;
         } catch {}
-        const url = `http://${host}:8101/display.html?kiosk=1`;
+        const url = moodeDisplayUrl;
         try {
           if (btnEl) btnEl.textContent='Pushing…';
           await ensureKey();
@@ -151,7 +151,7 @@
       document.getElementById('pushPeppyBtn')?.addEventListener('click', async ()=>{
         const statusEl = document.getElementById('pushPeppyStatus');
         const btnEl = document.getElementById('pushPeppyBtn');
-        const url = `http://${host}:8101/display.html?kiosk=1`;
+        const url = moodeDisplayUrl;
         try {
           if (btnEl) btnEl.textContent='Pushing…';
           await ensureKey();
@@ -169,7 +169,7 @@
       document.getElementById('pushVisualizerBtn')?.addEventListener('click', async ()=>{
         const statusEl = document.getElementById('pushVisualizerStatus');
         const btnEl = document.getElementById('pushVisualizerBtn');
-        const url = `http://${host}:8101/display.html?kiosk=1`;
+        const url = moodeDisplayUrl;
         try {
           if (btnEl) btnEl.textContent='Pushing…';
           await ensureKey();

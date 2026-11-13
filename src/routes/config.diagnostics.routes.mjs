@@ -444,7 +444,7 @@ export function registerConfigDiagnosticsRoutes(app, deps) {
     { group: 'Moode/Peppy', method: 'GET', path: '/config/moode/display/status' },
     { group: 'Moode/Peppy', method: 'POST', path: '/config/moode/display', body: { mode: 'on' } },
     { group: 'Moode/Peppy', method: 'GET', path: '/config/moode/browser-url/status' },
-    { group: 'Moode/Peppy', method: 'POST', path: '/config/moode/browser-url', body: { url: 'http://sonuvi.local:8101/display.html' } },
+    { group: 'Moode/Peppy', method: 'POST', path: '/config/moode/browser-url', body: { url: 'https://sonuvi.local/display.html?mode=index&kiosk=1' } },
     { group: 'Moode/Peppy', method: 'GET', path: '/peppy/last-profile' },
     { group: 'Moode/Peppy', method: 'POST', path: '/peppy/last-profile', body: { displayMode: 'peppy' } },
 
