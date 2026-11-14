@@ -69,7 +69,7 @@ export function createControllerWebGateway({ secret=process.env.SONUVI_CONTROLLE
     try{fs.writeFileSync(temporary,JSON.stringify({version:2,origin:configured,sessions:[...sessions]}),{mode:0o600,flag:'wx'});fs.renameSync(temporary,sessionFile);}finally{if(fs.existsSync(temporary))fs.unlinkSync(temporary);}
   };
   const prune=()=>{let changed=false;for(const [id,s] of pairings)if(s.expiresAt<=now()){pairings.delete(id);changed=true;}for(const [id,s] of sessions)if(s.legacy&&s.accessExpiresAt<=now()){sessions.delete(id);changed=true;}if(changed)persist();};
-  const api=async(method,target,{headers={},body,dispatch=false}={})=>fetch(`http://127.0.0.1:${apiPort}${target}`,{method,headers:{...(dispatch?{'x-sonuvi-controller-dispatch':controllerDispatchHeader({secret,method,target})}:{}),...(body?{'content-type':'application/json'}:{}),...headers},body:body?JSON.stringify(body):undefined,redirect:'error',signal:AbortSignal.timeout(30000)});
+  const api=async(method,target,{headers={},body,dispatch=false}={})=>fetch(`http://127.0.0.1:${apiPort}${target}`,{method,headers:{...(dispatch?{'x-sonuvi-controller-dispatch':controllerDispatchHeader({secret,method,target})}:{}),...(body?{'content-type':'application/json'}:{}),...headers},body:body?JSON.stringify(body):undefined,redirect:'error',signal:AbortSignal.timeout(target==='/v1/admin/configuration/master/display'?65000:30000)});
   const controllerCookie=(id,secure)=>setCookie('sonuvi_controller',id,secure,CONTROLLER_COOKIE_MAX_AGE_SECONDS);
   const expiresAt=value=>Number(value)||Date.parse(value);
   const installRefresh=(session,body)=>{

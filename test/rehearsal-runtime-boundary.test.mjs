@@ -239,4 +239,3 @@ test('immutable boundary accepts the exact config-backed display invocation with
     /Raw SSH\/SCP transport is disabled/,
   );
 });
-
