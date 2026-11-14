@@ -160,6 +160,7 @@ export function buildMobileCatalog(index, { trackIdSecret } = {}) {
       artist: clean(source?.artist || source?.albumArtist),
       albumArtist: clean(source?.albumArtist || source?.artist),
       album: clean(source?.album),
+      year: clean(source?.year || source?.date),
       trackNumber: parseTrackNumber(source?.track),
       track: clean(source?.track),
       genre: clean(source?.genre),
@@ -252,6 +253,7 @@ export function publicMobileTrack(record, { baseUrl = '' } = {}) {
     artist: record.artist,
     albumArtist: record.albumArtist,
     album: record.album,
+    year: record.year || null,
     albumId: record.albumId,
     artistId: record.artistId,
     trackNumber: record.trackNumber,
@@ -272,6 +274,7 @@ export function publicMobileAlbum(album, catalog, { baseUrl = '' } = {}) {
   return {
     id: album.id,
     album: album.album,
+    year: album.trackIds?.map(id => catalog?.byTrackId?.get(id)?.year).find(Boolean) || null,
     artist: album.artist,
     artistId: album.artistId,
     genre: album.genre,
