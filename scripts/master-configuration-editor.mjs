@@ -10,10 +10,13 @@ export async function mountMasterConfigurationEditor(root, {request, refreshMs =
   const json = element('textarea'); json.rows = 28; json.spellcheck = false; json.setAttribute('aria-label','Complete master configuration JSON'); json.style.width = '100%';
   const save = element('button','Save / Update'); save.type = 'button';
   const reload = element('button','Load server version'); reload.type = 'button';
-  root.replaceChildren(message, panels, heading, json, save, reload);
+  const optional=element('details');optional.append(element('summary','Optional integrations'));
+  const optionalChoices=element('div');optional.append(optionalChoices);
+  root.replaceChildren(message, panels, optional, heading, json, save, reload);
   const loaded = await request('GET','');
   const draft = new MasterConfigurationDraft(loaded);
   const pendingPlugins = new Map();
+  const shownOptional=new Set();
   const credentialDraft = {apiKey:'',apiSecret:''};
   const otherCredentials = {};
   const credentialsDirty = () => Boolean(credentialDraft.apiKey || credentialDraft.apiSecret || Object.values(otherCredentials).some(fields=>Object.keys(fields).length));
@@ -80,17 +83,21 @@ export async function mountMasterConfigurationEditor(root, {request, refreshMs =
 
   const render = () => {
     const openPanels = new Set([...panels.querySelectorAll('details[open]')].map(node=>node.closest('fieldset').dataset.plugin+':'+node.querySelector('summary').textContent));
-    panels.replaceChildren();
+    panels.replaceChildren();optionalChoices.replaceChildren();
     for (const module of loaded.plugins) {
+      if(module.optional && !draft.document.plugins?.[module.id]?.enabled && !shownOptional.has(module.id)){
+        const add=element('button','Configure '+module.title);add.type='button';
+        add.addEventListener('click',()=>{shownOptional.add(module.id);render();});optionalChoices.append(add);continue;
+      }
       const section = element('fieldset'), legend = element('legend',module.title);
       section.className = 'plugin-card';
       section.dataset.plugin = module.id;
       section.append(legend);
-      section.append(element('small',`sonuvi.${module.id} · Built-in`));
+      section.append(element('small',`sonuvi.${module.id} · ${module.optional?'Optional':'Built-in'}`));
       const enabled = draft.document.plugins?.[module.id]?.enabled;
       section.append(element('p',enabled === undefined ? 'Core capability' : enabled ? 'Enabled' : 'Disabled'));
       const status = loaded.status?.[module.id];
-      section.append(element('p',module.id==='alexa' ? `Public domain saved: ${status?.configured ? 'yes' : 'no'} · Playback: not verified${status?.error ? ' · '+status.error : ''}` : status ? `Configured: ${status.configured ?? 'unknown'} · Operational: ${status.operational ?? 'not checked'}${status.error ? ' · '+status.error : ''}` : 'Operational status has not been checked.'));
+      if(module.id!=='millsDisplay')section.append(element('p',module.id==='alexa' ? `Public domain saved: ${status?.configured ? 'yes' : 'no'} · Playback: not verified${status?.error ? ' · '+status.error : ''}` : status ? `Configured: ${status.configured ?? 'unknown'} · Operational: ${status.operational ?? 'not checked'}${status.error ? ' · '+status.error : ''}` : 'Operational status has not been checked.'));
       if(module.id==='alexa'){
         section.append(element('p',status?.guidance || 'A saved domain is not proof of public HTTPS readiness.'));
         const connection=element('p',`Alexa setup: ${status?.setupState || 'not-checked'}`);connection.setAttribute('role','status');section.append(connection);
@@ -106,7 +113,7 @@ export async function mountMasterConfigurationEditor(root, {request, refreshMs =
       const settings = element('details');
       settings.append(element('summary','Plugin Config'));
       for (const [key, schema] of Object.entries(module.schema.properties)) {
-        if(schema.deprecated)continue;
+        if(schema.deprecated || module.id==='millsDisplay')continue;
         const label = element('label',key+' ');
         const value = draft.document.plugins?.[module.id]?.[key];
         let control;
@@ -132,7 +139,7 @@ export async function mountMasterConfigurationEditor(root, {request, refreshMs =
         });
         label.append(control); settings.append(label,element('br'));
       }
-      section.append(settings);
+      if(module.id!=='millsDisplay')section.append(settings);
       if(['apns','notifications','alexa'].includes(module.id)){
         const account=element('details');account.append(element('summary','Protected credentials'));
         const fields=module.id==='alexa'?['routeWebhookUrl','stopWebhookUrl']:module.credentials;
@@ -170,11 +177,23 @@ export async function mountMasterConfigurationEditor(root, {request, refreshMs =
         }
         section.append(resultText);
       }
+      if(module.id==='millsDisplay'){
+        section.append(element('p','Optional integration for a physical Mills jukebox and a moOde screen. Not needed for ordinary Sonuvi playback. Disabled by default.'));
+        const power=element('fieldset');power.append(element('legend','Physical jukebox display'));
+        const label=element('label','Keep display awake during Mills playback '),toggle=element('input');toggle.type='checkbox';toggle.checked=draft.document.plugins?.millsDisplay?.enabled===true;toggle.setAttribute('aria-label','Keep display awake during Mills playback');
+        toggle.addEventListener('change',()=>{draft.document.plugins.millsDisplay??={enabled:false};draft.editPlugin('millsDisplay','enabled',toggle.checked);json.value=draft.text;render();message.textContent='Unsaved changes — choose Save / Update. Display power changes apply without a restart.';});label.append(toggle);power.append(label);
+        power.append(element('p','Uses a dedicated machine connection. When enabled, Mills playback wakes the screen; after playback ends, the normal moOde idle timeout applies. Turning this off does not disable ordinary playback wake behavior.'));
+        const connection=loaded.status?.millsDisplay;
+        power.append(element('p',connection?.connection==='receiving'?'Machine connection: receiving authenticated playback-state requests.':'Machine connection: not verified. Check that the moOde display connection is provisioned.'));
+        power.append(element('p',connection?.enabled?'Saved Mills wake setting: enabled.':'Saved Mills wake setting: disabled.'));
+        const check=element('button','Check display connection');check.type='button';check.addEventListener('click',async()=>{check.disabled=true;try{const fresh=await request('GET','');loaded.status=fresh.status;render();}catch(error){message.textContent='Connection check unavailable: '+error.message;}finally{check.disabled=false;}});power.append(check);section.append(power);
+
+      }
       if(module.id==='moode'){
         const help=element('details');help.append(element('summary','Local display setup'));
         help.append(element('p','In moOde Configure → Peripherals → Local Display, use the portless HTTPS target https://sonuvi.local/display.html?mode=index&kiosk=1.'));
         help.append(element('p','The matching moOde maintenance bundle updates /var/www/daemon/worker.php, /var/www/daemon/watchdog.sh and /usr/local/bin/rgb_moode_service.py for wake/blanking and Mills LED behavior. Settings does not replace player daemon files.'));
-        help.append(element('p','If the Server or target changed, pair the display/LED session with the new Server. Remote target verification has not been performed.'));
+        help.append(element('p','The browser display uses normal pairing. Display power uses a separate, narrowly scoped machine credential installed on moOde; browser cookies are not used for wake detection.'));
         section.append(help);
       }
       if(['hardware','mills','seeburg','multiphone'].includes(module.id)){

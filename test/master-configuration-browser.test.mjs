@@ -10,7 +10,7 @@ import {registerMasterConfigurationRoutes} from '../src/routes/master-configurat
 test('actual configuration page synchronizes forms and JSON through real validation and atomic persistence', async t => {
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'sonuvi-browser-master-'));
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
-  const file=path.join(root,'config.json'),document=initializeMasterConfiguration();document.plugins.radio.enabled=false;
+  const file=path.join(root,'config.json'),document=initializeMasterConfiguration();document.plugins.radio.enabled=false;delete document.plugins.millsDisplay;
   await fs.writeFile(file,JSON.stringify(document));
   const store=createMasterConfigurationStore(file),routes=new Map();
   registerMasterConfigurationRoutes(Object.fromEntries(['get','put','post'].map(method=>[method,(path,handler)=>routes.set(method.toUpperCase()+' '+path,handler)])),{store,authorize:async()=>true});
@@ -60,5 +60,15 @@ test('actual configuration page synchronizes forms and JSON through real validat
     await page.getByRole('button',{name:'Save / Update'}).click();
     await page.getByRole('status').filter({hasText:'Saved revision'}).waitFor();
     assert.equal(saves,1);assert.equal((await store.read()).document.plugins.radio.enabled,true);
+    if(await page.locator('dialog[open]').count())await page.getByRole('button',{name:'Later',exact:true}).click();
+    assert.equal(await page.locator('[data-plugin=millsDisplay]').count(),0);
+    await page.getByText('Optional integrations',{exact:true}).click();
+    await page.getByRole('button',{name:'Configure Mills Display Wake'}).click();
+    await page.getByRole('checkbox',{name:'Keep display awake during Mills playback'}).check();
+    await page.getByRole('button',{name:'Save / Update'}).click();
+    await page.waitForFunction(()=>document.querySelector('[role=status]').textContent.includes('Saved revision'));
+    assert.equal((await store.read()).document.plugins.millsDisplay.enabled,true);
+    assert.equal(await page.locator('dialog[open]').count(),0);
+
   } finally { await browser.close(); }
 });

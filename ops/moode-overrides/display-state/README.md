@@ -1,0 +1,23 @@
+# Display power machine connection
+
+Config → Mills Display Wake owns `plugins.millsDisplay.enabled` (default false). The value is read live; changing only this setting does not require a server restart. Enable it only after provisioning the machine connection. This is a separate optional module for physical Mills jukebox owners; it is not a general moOde preference.
+
+The public web handler accepts only GET `/__moode/playback-state` with a dedicated Bearer credential configured by SONUVI_MOODE_STATE_TOKEN_FILE. Browser cookies and telemetry credentials do not grant this access. The handler fetches only local `/now-playing` and projects state plus Mills/AirPlay/UPnP/stream/Qobuz flags. No titles, URLs, credentials, file paths or write operations are exposed. Disabling Mills wake masks both Mills flags; ordinary play and idle states retain their existing meanings. Errors return 503, never a fabricated playing state.
+
+The existing root-only `/etc/sonuvi-moode-vm/led-curl.conf` is the shared adapter used by worker.php, watchdog.sh and rgb_moode_service.py. Replace its expired cookie with the dedicated Authorization header, preserve trusted `cacert`, and set `request-target = "/__moode/playback-state"`. Curl retains the original HTTPS origin and certificate validation but sends this narrowly scoped request path. Do not enable insecure TLS, follow redirects, or put credentials in process arguments. Consumers reread the file on each call, so no daemon or playback restart is required. Preserve a root-only backup before installing atomically.
+
+Successful authenticated state reads update a bounded heartbeat under the runtime data root. Config's Check display connection reports recent requests (15 seconds), or not verified; it does not claim physical screen state. Preserve the existing worker/watchdog idle timeout and LED Mills-end timer reset. Verify physical DPMS wakes during actual Mills playback, and test inactive/disabled semantics without changing the user's playback.
+
+Updated: 2026-11-14
+
+## Live Queue handoff
+Mills captures a checkpoint after amplifier switching and pausing MPD. Stop
+compares the live queue, song ID and paused position to that checkpoint; if
+unchanged and previously playing, it sends `pause 0`, preserving queue IDs and
+position. The older pre-switch checkpoint could exceed its one-second tolerance
+during Harmony's 900ms retry plus network time and suppress a valid resume.
+Changed queues, resumed playback and user seeks are left alone.
+
+The optional wake module is hidden in Optional integrations until configured;
+it is not a general moOde requirement. A full installable plugin lifecycle for
+Mills, Seeburg and Multiphone remains a separate architecture task.

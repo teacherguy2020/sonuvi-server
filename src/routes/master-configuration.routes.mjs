@@ -1,3 +1,4 @@
+import {moodeDisplayPowerStatus} from '../lib/moode-playback-state.mjs';
 import { createAlexaReadiness } from '../lib/alexa-readiness.mjs';
 import { configurationPlugins, validateMasterConfiguration, MasterConfigurationError } from '../lib/master-configuration.mjs';
 
@@ -40,6 +41,7 @@ export function registerMasterConfigurationRoutes(app, {
         capabilities:{skillEndpoint:{configured:skillConfigured,operational:null},homebridgeRouting:{configured:alexa.configured,operational:null}},
         error:plugins.alexa.enabled&&!skillConfigured?'Configure the public Alexa endpoint. External skill connectivity has not been verified.':null};
     }
+    status.millsDisplay=await moodeDisplayPowerStatus(state.document.plugins.millsDisplay);
     status.alexa={...status.alexa,...await alexaStatus(state.document.plugins.alexa)};
     return res.json({ok:true, contract:'sonuvi.master-configuration.v1', ...state, plugins:configurationPlugins, status});
   }));
@@ -62,7 +64,10 @@ export function registerMasterConfigurationRoutes(app, {
     const before = await store.read();
     const saved = await store.save(req.body.document, req.body.revision);
     let application = {state:saved.changed ? 'restart-required' : 'unchanged', restartRequired:saved.changed};
-    if (saved.changed && applyConfiguration) {
+    const withoutDisplayWake=value=>{const copy=structuredClone(value);if(copy.plugins)delete copy.plugins.millsDisplay;return JSON.stringify(copy);};
+    const displayWakeOnly=saved.changed&&before.document.plugins?.millsDisplay?.enabled!==saved.document.plugins?.millsDisplay?.enabled&&withoutDisplayWake(before.document)===withoutDisplayWake(saved.document);
+    if(displayWakeOnly)application={state:'applied',restartRequired:false};
+    if (saved.changed && !displayWakeOnly && applyConfiguration) {
       try { application = await applyConfiguration({before:before.document, after:saved.document, revision:saved.revision}); }
       catch { application = {state:'apply-failed', restartRequired:true, error:'Settings were saved, but runtime application failed.'}; }
     }

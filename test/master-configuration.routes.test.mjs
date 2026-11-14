@@ -72,3 +72,12 @@ test('Alexa connectivity action requires authorization and uses saved domain, no
  call=harness({...options,authorize:async()=>true});
  assert.equal((await call('post','/plugins/alexa/check',{publicDomain:'127.0.0.1'})).body.setupState,'connection-failed');assert.equal(probes,1);
 });
+
+test('optional Mills display setting applies live without restarting other plugins',async()=>{
+ const before=initializeMasterConfiguration();delete before.plugins.millsDisplay;
+ const after=structuredClone(before);after.plugins.millsDisplay={enabled:true};
+ let applies=0;
+ const call=harness({authorize:async()=>true,store:{read:async()=>({document:before,revision:'before'}),save:async()=>({document:after,revision:'after',changed:true})},applyConfiguration:async()=>{applies++;}});
+ const response=await call('put','',{document:after,revision:'before'});
+ assert.equal(response.body.application.state,'applied');assert.equal(response.body.application.restartRequired,false);assert.equal(applies,0);
+});

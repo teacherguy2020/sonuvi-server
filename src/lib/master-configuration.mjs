@@ -40,6 +40,7 @@ export const configurationPlugins = [
   plugin('display', 'Display', { enabled: enabled(true), idleBrandLine: string('Sonuvi'), idleMessageLine: string('Ready to play') }),
   plugin('playback', 'Playback and Playlists', { enabled: enabled(true), transcodeTracks: enabled(false), mobileTranscodeTracks: enabled(false), mobileVideoRoot: string(''), favoritesPlaylistName: string('Favorites'), favoritesRefreshMs: integer(3000,100,3600000), favoritesM3u: string('/var/lib/mpd/playlists/Favorites.m3u'),  }),
   plugin('hardware', 'Hardware / External Bridges', {enabled:enabled(false),host:string(''),port:integer(3103,1024,65535),clients:field('object',{})}),
+  {...plugin('millsDisplay', 'Mills Display Wake', { enabled: enabled(false) }),optional:true},
   plugin('mills', 'Mills', {playlistName:string('Mills Playlist')}),
   plugin('seeburg', 'Seeburg', {playlistName:string('Seeburg Playlist')}),
   plugin('multiphone', 'Shyvers Multiphone / Mabel', {playlistName:string('Multiphone Playlist')}),
@@ -90,6 +91,7 @@ export function validateMasterConfiguration(document) {
   for (const name of findSecretConfigFields(document.core)) add(`/core/${name.replaceAll('.', '/')}`, 'Use the plugin credential action for this field');
   for (const module of configurationPlugins) {
     const settings = document.plugins?.[module.id];
+    if(settings===undefined&&module.optional)continue;
     if (!plain(settings)) { add(`/plugins/${module.id}`, 'Plugin settings must be an object'); continue; }
     for(const [name,value] of Object.entries(settings.runtimeOptions||{})){
       if(!pluginRuntimeOptions[module.id]?.includes(name)||!['string','number','boolean'].includes(typeof value))add(`/plugins/${module.id}/runtimeOptions/${name}`,'Expected a supported ordinary runtime option with a scalar value');

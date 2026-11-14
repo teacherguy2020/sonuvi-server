@@ -145,49 +145,11 @@ export function registerMillsRoutes(app, deps) {
     if (metadataChanged || knownMillsIds.size) persistJukeboxState();
   }
 
-  async function restoreMpdSession(snapshot) {
-    if (!snapshot) return;
-    const clear = await mpdQueryRaw('clear');
-    if (mpdHasACK(clear)) throw new Error('MPD rejected clearing the Mills queue');
-
-    const restoredIds = [];
-    for (const item of snapshot.queue) {
-      const add = await mpdQueryRaw(`addid ${mpdEscapeValue(item.file)}`);
-      if (!add || mpdHasACK(add)) throw new Error(`MPD rejected restoring ${item.file}`);
-      const id = parseMpdId(add);
-      if (!id) throw new Error(`MPD did not return an ID while restoring ${item.file}`);
-      restoredIds.push(id);
-    }
-
-    if (snapshot.state === 'stop' || !restoredIds.length) {
-      const stop = await mpdQueryRaw('stop');
-      if (mpdHasACK(stop)) throw new Error('MPD rejected restoring stopped state');
-      return;
-    }
-
-    let restoreIndex = Number.isInteger(snapshot.currentPos) ? snapshot.currentPos : -1;
-    if (restoreIndex < 0 || restoreIndex >= restoredIds.length) {
-      restoreIndex = snapshot.currentFile
-        ? snapshot.queue.findIndex((item) => item.file === snapshot.currentFile)
-        : -1;
-    }
-    if (restoreIndex < 0 || restoreIndex >= restoredIds.length) {
-      const stop = await mpdQueryRaw('stop');
-      if (mpdHasACK(stop)) throw new Error('MPD rejected restoring state without a current track');
-      return;
-    }
-
-    const currentId = restoredIds[restoreIndex];
-    const play = await mpdQueryRaw(`playid ${currentId}`);
-    if (mpdHasACK(play)) throw new Error('MPD rejected restoring the previous track');
-    if (snapshot.elapsed > 0) {
-      const seek = await mpdQueryRaw(`seekid ${currentId} ${snapshot.elapsed.toFixed(3)}`);
-      if (mpdHasACK(seek)) throw new Error('MPD rejected restoring the previous position');
-    }
-    if (snapshot.state === 'pause') {
-      const pause = await mpdQueryRaw('pause 1');
-      if (mpdHasACK(pause)) throw new Error('MPD rejected restoring paused state');
-    }
+  async function resumeMpdSession(snapshot) {
+    // Mills pauses the existing queue; do not clear/rebuild it or change IDs.
+    if (snapshot?.state !== 'play') return;
+    const result = await mpdQueryRaw('pause 0');
+    if (!result || mpdHasACK(result)) throw new Error('MPD rejected resuming after Mills');
   }
 
   async function resolveMillsPlaylist() {
@@ -300,8 +262,9 @@ export function registerMillsRoutes(app, deps) {
         }
         const snapshot = await snapshotMpdSession();
         await switchToMills(snapshot);
+        const pausedSnapshot = await snapshotMpdSession();
         millsActive = true;
-        millsSession = { active: true, snapshot, displaySelected: false, surrogateStarted: false };
+        millsSession = { active: true, snapshot, pausedSnapshot, displaySelected: false, surrogateStarted: false };
         lastTransition = { state: 'active', at: new Date().toISOString(), input: 'Phono' };
         return res.json({
           ok: true,
@@ -333,7 +296,7 @@ export function registerMillsRoutes(app, deps) {
         if (millsActive || hasPersistedMillsEntries) {
           await withJukeboxMutation(async () => {
             await removeMillsSurrogates();
-            const snapshot = millsSession?.snapshot;
+            const snapshot = millsSession?.pausedSnapshot;
             const current = await snapshotMpdSession();
             // Mills only paused MPD. A changed queue, selection, position or
             // resumed playback belongs to the user, not the old Mills snapshot.
@@ -344,7 +307,7 @@ export function registerMillsRoutes(app, deps) {
               && current.queue.length === snapshot.queue.length
               && current.queue.every((item, index) => item.file === snapshot.queue[index].file
                 && item.mpdSongId === snapshot.queue[index].mpdSongId);
-            if (unchanged) await restoreMpdSession(snapshot);
+            if (unchanged) await resumeMpdSession(millsSession.snapshot);
           });
         }
         millsActive = false;

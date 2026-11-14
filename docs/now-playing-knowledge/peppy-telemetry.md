@@ -11,3 +11,6 @@ The Peppy editor pushes the selected, bounded profile through the administrator/
 Artwork cache-busting uses the gateway-supported `_` and `t` query parameters. Readiness refreshes every ten seconds while visible. App lights independently probe API status, web release, meter freshness and a bounded live MPD status query; a configured hostname is not connectivity proof. PeppyALSA green means audio data received, not an SSH configuration inspection. Alexa remains unverified until an actual connectivity check.
 
 Updated: 2026-11-14
+
+## Mills display power
+Config → Mills Display Wake controls Mills wake (`plugins.millsDisplay.enabled`). It applies live and separately reports authenticated machine-request freshness. The root-only curl adapter uses a distinct playback-state credential, never the browser cookie or Peppy ingestion credential. See `ops/moode-overrides/display-state/README.md`. Default is disabled; provisioning and actual DPMS verification are separate from saving the setting.
