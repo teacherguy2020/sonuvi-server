@@ -98,97 +98,29 @@
   </div>
 
   <script>
-    (async()=>{
-      const base = globalThis.NPArt.apiBase();
-      const moodeDisplayUrl = 'https://sonuvi.local/display.html?mode=index&kiosk=1';
-      let key='';
-      async function ensureKey(){
-        if(key) return key;
-        const r=await fetch(`${base}/config/runtime`,{cache:'no-store'});
-        const j=await r.json().catch(()=>({}));
-        key=String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
-        return key;
-      }
-      async function pushUrl(url, reason, statusEl, btnEl){
-        if (!url) return;
+    (()=>{
+      const buttons = ['Player','Peppy','Visualizer','Kiosk'];
+      let busy=false;
+      for (const label of buttons) document.getElementById(`push${label}Btn`).addEventListener('click',async()=>{
+        if(busy)return;
+        busy=true;
+        const button=document.getElementById(`push${label}Btn`),status=document.getElementById(`push${label}Status`);
+        buttons.forEach(name=>document.getElementById(`push${name}Btn`).disabled=true);
+        button.textContent='Pushing…';status.textContent='Switching moOde display…';
         try {
-          if (btnEl) btnEl.textContent='Pushing…';
-          await ensureKey();
-          const r=await fetch(`${base}/config/moode/browser-url`,{method:'POST',headers:{'Content-Type':'application/json',...(key?{'x-track-key':key}:{})},body:JSON.stringify({url,reason})});
-          const j=await r.json().catch(()=>({}));
-          if(!r.ok||!j?.ok) throw new Error(j?.error||`HTTP ${r.status}`);
-          if (statusEl) statusEl.textContent=`Pushed: ${url}`;
-        } catch (e) {
-          if (statusEl) statusEl.textContent=`Push failed: ${e?.message||e}`;
-        } finally {
-          if (btnEl) btnEl.textContent='Push to moOde';
-        }
-      }
-
-      document.getElementById('pushPlayerBtn')?.addEventListener('click', async ()=>{
-        const statusEl = document.getElementById('pushPlayerStatus');
-        const btnEl = document.getElementById('pushPlayerBtn');
-        let size='1280x400';
-        try {
-          const p = JSON.parse(localStorage.getItem('player.profile.v2') || '{}') || {};
-          size = String(p?.size || size).trim() || size;
-        } catch {}
-        const url = moodeDisplayUrl;
-        try {
-          if (btnEl) btnEl.textContent='Pushing…';
-          await ensureKey();
-          await fetch(`${base}/peppy/last-profile`, {
-            method:'POST',
-            headers:{'Content-Type':'application/json',...(key?{'x-track-key':key}:{})},
-            body: JSON.stringify({ url, displayMode:'player', playerSize:size })
-          }).catch(()=>null);
-          await pushUrl(url, 'displays-player-push', statusEl, btnEl);
-        } finally {
-          if (btnEl) btnEl.textContent='Push to moOde';
-        }
-      });
-
-      document.getElementById('pushPeppyBtn')?.addEventListener('click', async ()=>{
-        const statusEl = document.getElementById('pushPeppyStatus');
-        const btnEl = document.getElementById('pushPeppyBtn');
-        const url = moodeDisplayUrl;
-        try {
-          if (btnEl) btnEl.textContent='Pushing…';
-          await ensureKey();
-          await fetch(`${base}/peppy/last-profile`, {
-            method:'POST',
-            headers:{'Content-Type':'application/json',...(key?{'x-track-key':key}:{})},
-            body: JSON.stringify({ url, displayMode:'peppy' })
-          }).catch(()=>null);
-          await pushUrl(url, 'displays-peppy-push', statusEl, btnEl);
-        } finally {
-          if (btnEl) btnEl.textContent='Push to moOde';
-        }
-      });
-
-      document.getElementById('pushVisualizerBtn')?.addEventListener('click', async ()=>{
-        const statusEl = document.getElementById('pushVisualizerStatus');
-        const btnEl = document.getElementById('pushVisualizerBtn');
-        const url = moodeDisplayUrl;
-        try {
-          if (btnEl) btnEl.textContent='Pushing…';
-          await ensureKey();
-          await fetch(`${base}/peppy/last-profile`, {
-            method:'POST',
-            headers:{'Content-Type':'application/json',...(key?{'x-track-key':key}:{})},
-            body: JSON.stringify({ url, displayMode:'visualizer' })
-          }).catch(()=>null);
-          await pushUrl(url, 'displays-visualizer-push', statusEl, btnEl);
-        } finally {
-          if (btnEl) btnEl.textContent='Push to moOde';
-        }
-      });
-
-      document.getElementById('pushKioskBtn')?.addEventListener('click', async ()=>{
-        const statusEl = document.getElementById('pushKioskStatus');
-        const btnEl = document.getElementById('pushKioskBtn');
-        const url = `http://${host}:8101/kiosk.html`;
-        await pushUrl(url, 'displays-kiosk-push', statusEl, btnEl);
+          await globalThis.SonuviControllerAuth?.ready;
+          const body={mode:label.toLowerCase()};
+          if(label==='Player'){
+            let size='1280x400';
+            try{const p=JSON.parse(localStorage.getItem('player.profile.v2')||'{}');if(/^\d{2,4}x\d{2,4}$/.test(p.size))size=p.size;}catch{}
+            body.playerSize=size;
+          }
+          const response=await fetch('/__controller/configuration/display',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+          const result=await response.json();
+          if(!response.ok||result.ok!==true||result.verified!==true)throw Error(result.error||result.code||`HTTP ${response.status}`);
+          status.textContent=`Pushed and verified: ${result.url}`;
+        }catch(error){status.textContent=`Push failed: ${error.message}`;}
+        finally{busy=false;button.textContent='Push to moOde';buttons.forEach(name=>document.getElementById(`push${name}Btn`).disabled=false);}
       });
     })();
   </script>

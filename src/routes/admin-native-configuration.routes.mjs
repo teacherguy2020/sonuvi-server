@@ -1,3 +1,4 @@
+import {registerMoodeDisplayRoutes} from '../lib/moode-display.mjs';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {registerSonuviRestartRoutes} from '../lib/sonuvi-service-control.mjs';
@@ -246,6 +247,7 @@ export function registerNativeAdministratorConfigurationRoutes(app, {
     }
   };
 
+  registerMoodeDisplayRoutes(app,{authorize,readConfig});
   registerSonuviRestartRoutes(app, {requireTrackKey:authorize, execFileP:promisify(execFile),
     statusPath:'/v1/admin/configuration/master/restart/status', restartPaths:['/v1/admin/configuration/master/restart']});
   registerMasterConfigurationRoutes(app, {

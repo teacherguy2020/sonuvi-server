@@ -1,3 +1,4 @@
+import {displaySshArgs} from '../src/lib/moode-display.mjs';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
@@ -201,3 +202,41 @@ test('rehearsal bootstrap blocks legacy built-ins before they leave the disposab
   await assert.rejects(fs.access(outsideWrite));
   await assert.rejects(fs.access(escaped));
 });
+test('immutable boundary accepts the exact config-backed display invocation without an endpoint environment variable', () => {
+  const env = {
+    SONUVI_STATE_ROOT: '/tmp/sonuvi-config-backed-state',
+    SONUVI_SECRETS_ROOT: '/tmp/sonuvi-config-backed-secrets',
+    SONUVI_MOODE_DISPLAY_PROTOCOL: 'v1',
+  };
+  const profileDefaults = { host: 'moode.example.invalid', user: 'moode' };
+  const statePaths = createRuntimeStatePaths({
+    cwd: '/opt/sonuvi/releases/candidate',
+    env,
+  });
+  const profile = resolveMoodeSshProfile({ env, statePaths, profileDefaults });
+  const args = displaySshArgs('player', { env, statePaths, profileDefaults });
+  const invocations = [];
+  const childProcessModule = {
+    execFile(command, argv, options) {
+      invocations.push({ command, argv, options });
+      return 'allowed';
+    },
+  };
+
+  installRehearsalRuntimeBoundary({
+    environment: env,
+    capabilities: createRuntimeCapabilities({ env }),
+    statePaths,
+    childProcessModule,
+    globalObject: {},
+    moodeProfileDefaults: profileDefaults,
+  });
+
+  assert.equal(childProcessModule.execFile('/usr/bin/ssh', args, {}), 'allowed');
+  assert.equal(invocations.length, 1);
+  assert.throws(
+    () => childProcessModule.execFile('/usr/bin/ssh', [...args, 'id'], {}),
+    /Raw SSH\/SCP transport is disabled/,
+  );
+});
+

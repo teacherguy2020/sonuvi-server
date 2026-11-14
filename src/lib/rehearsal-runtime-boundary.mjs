@@ -5,6 +5,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { promisify } from 'node:util';
 
 import { MOODE_SSH_HOST, MOODE_SSH_USER } from '../config.mjs';
+import { isManagedDisplayInvocation } from './moode-display.mjs';
 import { isManagedReadOnlyInvocation } from './moode-ssh-profile.mjs';
 import { runtimeCapabilities } from './runtime-capabilities.mjs';
 import { runtimeStatePaths } from './runtime-state-paths.mjs';
@@ -101,11 +102,11 @@ function installProcessBoundary({ capabilities, statePaths, childProcessModule, 
     const executable = commandName(command);
     if (capabilities.rehearsal) capabilities.assertExternalMutation(`process.${executable}`);
     if (statePaths.sharedStateEnabled && RAW_IMMUTABLE_SSH_COMMANDS.has(executable)) {
-      if (method === 'execFile' && isManagedReadOnlyInvocation(command, args[0], args[1], {
+      if (method === 'execFile' && (isManagedReadOnlyInvocation(command, args[0], args[1], {
         env: environment,
         statePaths,
         profileDefaults,
-      })) return;
+      }) || isManagedDisplayInvocation(command,args[0],args[1],{env:environment,statePaths,profileDefaults}))) return;
       throw new Error('Raw SSH/SCP transport is disabled; only configured fixed read-only moOde operations are authorized');
     }
   }
