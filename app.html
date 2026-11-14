@@ -2160,7 +2160,7 @@
       async function pushPeppyToMoode(profileOverride = null){
         const host = location.hostname || 'sonuvi.local';
         const base = globalThis.NPArt.apiBase();
-        const targetUrl = `http://${host}:8101/display.html?kiosk=1`;
+        const targetUrl = `${location.origin}/display.html?mode=peppy&kiosk=1`;
         const refreshUrl = `${targetUrl}&sw=${Date.now()}`;
         let s = String(lastPeppyProfile?.skin || '').trim();
         let t = String(lastPeppyProfile?.theme || '').trim();
@@ -2275,81 +2275,18 @@
         mm = (lsMode === 'cassette') ? 'segmented' : 'continuous';
         cm = (lsMode === 'continuous-theme') ? 'theme' : 'classic';
         lastPeppyProfile = { ...lastPeppyProfile, skin:s, theme:t, meterType:mt, fontMode:fm, fontSize:fz, linearStyle:lsMode, linearSize:lzMode, meterMode:mm, colorMode:cm, spectrumColor:sc, spectrumEnergy:se, spectrumPeak:sp, sensitivity:sens, smoothing:smooth, displayMode:'peppy', ts: Date.now() };
-        setPushPeppyBusy(true);
+        const report=(busy,message,detail='')=>{
+          const btn=document.getElementById('pushPeppyBtn');if(btn){btn.disabled=busy;btn.textContent=message;btn.title=detail||message;}
+          for(const frame of document.querySelectorAll('iframe'))try{frame.contentWindow.postMessage({type:'peppy-push-result',busy,message,detail},location.origin);}catch{}
+        };
+        report(true,'Pushing…');
         try {
-          if (!runtimeTrackKey) {
-            const rr = await fetch(`${base}/config/runtime`, { cache:'no-store' });
-            const rj = await rr.json().catch(() => ({}));
-            runtimeTrackKey = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
-          }
-          // Persist last pushed profile explicitly (for bare /peppy.html?kiosk=1 resolution).
-          await fetchJsonWithTimeout(`${base}/peppy/last-profile`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...(runtimeTrackKey ? { 'x-track-key': runtimeTrackKey } : {}) },
-            body: JSON.stringify({
-              url: targetUrl,
-              skin: s,
-              theme: t,
-              meterType: mt,
-              fontMode: fm,
-              fontSize: fz,
-              linearStyle: lsMode,
-              linearSize: lzMode,
-              meterMode: mm,
-              colorMode: cm,
-              spectrumColor: sc,
-              spectrumEnergy: se,
-              spectrumPeak: sp,
-              sensitivity: sens,
-              smoothing: smooth,
-              normalization: Number(lastPeppyProfile?.normalization || 100) || 100,
-              displayMode: 'peppy',
-              playerSize: String(readAppPreference('playerSize', '1280x400') || '1280x400').trim() || '1280x400',
-            }),
-          }, 8000).catch(() => null);
-
-          // Ensure peppymeter engine is running so skin VU meters are alive even
-          // when we were previously in non-peppy display mode.
-          await fetchJsonWithTimeout(`${base}/config/moode/peppymeter/start`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...(runtimeTrackKey ? { 'x-track-key': runtimeTrackKey } : {}) },
-            body: JSON.stringify({ reason: 'push-peppy' }),
-          }, 12000).catch(() => null);
-
-          // Defensive: keep PeppyALSA enabled for meter data path.
-          await fetchJsonWithTimeout(`${base}/config/moode/peppyalsa/ensure`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...(runtimeTrackKey ? { 'x-track-key': runtimeTrackKey } : {}) },
-            body: JSON.stringify({ reason: 'push-peppy' }),
-          }, 12000).catch(() => null);
-
-          const { r, j } = await fetchJsonWithTimeout(`${base}/config/moode/browser-url`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...(runtimeTrackKey ? { 'x-track-key': runtimeTrackKey } : {}) },
-            body: JSON.stringify({ url: refreshUrl }),
-          }, 14000);
-          if (!r.ok || !j?.ok) throw new Error(j?.error || `HTTP ${r.status}`);
-          const btn = document.getElementById('pushPeppyBtn');
-          if (btn) {
-            const verified = !!j?.verified;
-            btn.textContent = verified ? 'Pushed ✓' : 'Pushed (unverified)';
-            btn.title = String(j?.effectiveUrl || targetUrl);
-            setTimeout(() => { try { btn.textContent = 'Push skin to moOde'; } catch {} }, 2200);
-          }
-          // Keep current editor surface intact after push.
-          // Do not swap local frame into kiosk display URL.
-          // (This was collapsing the Peppy toolbar until manual refresh.)
-          if (!j?.verified) console.warn('push verification failed', j?.verify || '', j?.verifyErr || '');
-        } catch (e) {
-          console.warn('push peppy failed', e?.message || e);
-          const btn = document.getElementById('pushPeppyBtn');
-          if (btn) {
-            btn.textContent = 'Push failed';
-            setTimeout(() => { try { btn.textContent = 'Push skin to moOde'; } catch {} }, 1800);
-          }
-        } finally {
-          setPushPeppyBusy(false);
-        }
+          await globalThis.SonuviControllerAuth?.ready;
+          const profile={skin:s,theme:t,meterType:mt,fontMode:fm,fontSize:fz,linearStyle:lsMode,linearSize:lzMode,meterMode:mm,colorMode:cm,spectrumColor:sc,spectrumEnergy:se,spectrumPeak:sp,sensitivity:sens,smoothing:smooth,playerSize:String(profileOverride?.playerSize||lastPeppyProfile?.playerSize||'1280x400')};
+          const {r,j}=await fetchJsonWithTimeout('/__controller/configuration/display',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'peppy',profile})},70000);
+          if(!r.ok||!j?.ok||j.verified!==true)throw Error(j?.error||`HTTP ${r.status}`);
+          report(false,'Pushed ✓',`Verified: ${j.url}`);
+        }catch(e){report(false,'Push failed',e.message);}
       }
 
       async function checkMoodeTargetUrl(){
@@ -2401,7 +2338,7 @@
       async function setDisplayModeAndRefresh(mode = 'peppy'){
         const host = location.hostname || 'sonuvi.local';
         const base = globalThis.NPArt.apiBase();
-        const targetUrl = `http://${host}:8101/display.html?kiosk=1`;
+        const targetUrl = `${location.origin}/display.html?mode=peppy&kiosk=1`;
         const refreshUrl = `${targetUrl}&sw=${Date.now()}`;
         if (!runtimeTrackKey) {
           const rr = await fetch(`${base}/config/runtime`, { cache:'no-store' });
@@ -2564,61 +2501,26 @@
       }
 
       async function syncPills(){
-        try {
-          const host = location.hostname || 'sonuvi.local';
-          const base = globalThis.NPArt.apiBase();
-          const r = await fetch(`${base}/config/runtime`, { cache:'no-store' });
-          const j = await r.json().catch(() => ({}));
-          if (!r.ok || !j?.ok) throw new Error('runtime unavailable');
-          const cfg = j.config || {};
-          const ports = cfg.ports || {};
-          const apiPort = Number(ports.api || 3101);
-          const uiPort = Number(ports.ui || 8101);
-          const axEnabled = !!cfg?.alexa?.enabled;
-          const axDomain = String(cfg?.alexa?.publicDomain || '').trim();
-          alexaEnabledState = axEnabled;
-          alexaDomainState = axDomain;
-          const moodeHost = String(cfg?.moode?.sshHost || cfg?.mpd?.host || cfg?.mpdHost || '').trim();
-          moodeDisplayTakeoverEnabled = !!(cfg?.features?.moodeDisplayTakeover ?? true);
-
-          const $ = (id) => document.getElementById(id);
-          if ($('apiHint')) $('apiHint').textContent = `${host}:${apiPort}`;
-          if ($('webHint')) $('webHint').textContent = `${host}:${uiPort}`;
-          if ($('alexaHint')) $('alexaHint').textContent = !axEnabled ? 'disabled' : (axDomain ? 'moode.••••••••.com' : 'missing domain');
-          if ($('moodeHint')) $('moodeHint').textContent = moodeHost ? `confirmed (${moodeHost})` : 'not verified';
-          const alexaPillEl = $('alexaPill');
-          if (alexaPillEl) alexaPillEl.style.display = axEnabled ? '' : 'none';
-          setPillState('apiPill','ok');
-          setPillState('webPill','ok');
-          setPillState('alexaPill', !axEnabled ? 'off' : (axDomain ? 'ok' : 'warn'));
-          setPillState('moodePill', moodeHost ? 'ok' : 'warn');
-          await refreshPeppyPill(base);
-          await refreshPeppyAlsaPill(base);
-          refreshScreenPill();
-
-          const podcastsLink = document.getElementById('podcastsNavLink');
-          if (podcastsLink) podcastsLink.style.display = cfg?.features?.podcasts ? '' : 'none';
-          const peppyLink = document.getElementById('peppyNavLink');
-          const playerLink = document.getElementById('playerNavLink');
-          if (peppyLink) peppyLink.style.display = moodeDisplayTakeoverEnabled ? '' : 'none';
-          if (playerLink) playerLink.style.display = moodeDisplayTakeoverEnabled ? '' : 'none';
-          // Designers remain available independently of moOde display takeover.
-          refreshPushPeppyVisibility();
-          refreshNotifyPillFromCfg(cfg);
-          await refreshScrobblePill(base);
-        } catch {
-          setPillState('apiPill','bad');
-          setPillState('webPill','warn');
-          setPillState('alexaPill','warn');
-          setPillState('moodePill','warn');
-          const ap = document.getElementById('alexaPill');
-          if (ap) ap.style.display = 'none';
-          await refreshPeppyPill();
-          await refreshPeppyAlsaPill();
-          refreshScreenPill();
-          const np = document.getElementById('notifyPill');
-          if (np) np.style.display = 'none';
+        const probe=async url=>{try{return await fetchJsonWithTimeout(url,{cache:'no-store'},5000);}catch{return {r:{ok:false},j:null};}};
+        const [runtime,services,web,vu,spectrum]=await Promise.all(['/config/runtime','/status/services','/release.json','/peppy/vumeter','/peppy/spectrum'].map(probe));
+        const show=(id,state,message)=>{setPillState(id+'Pill',state);const p=document.getElementById(id+'Pill'),h=document.getElementById(id+'Hint');if(p)p.title=message;if(h)h.textContent=message;};
+        show('api',services.r.ok&&services.j?.ok?'ok':'bad',services.r.ok&&services.j?.ok?'API responding over authenticated HTTPS':'API check failed');
+        show('web',web.r.ok&&web.j?.releaseId?'ok':'bad',web.r.ok&&web.j?.releaseId?'Web release responding over HTTPS':'Web release check failed');
+        const vf=vu.r.ok&&vu.j?.fresh===true,sf=spectrum.r.ok&&spectrum.j?.fresh===true;
+        show('peppy',vf&&sf?'ok':'warn',vf&&sf?'VU and spectrum feeds fresh':'VU or spectrum feed stale/unavailable');
+        show('peppyAlsa',vf?'ok':'warn',vf?'Audio levels received from Peppy ALSA':'Audio feed not verified');
+        show('moode',services.r.ok?(services.j?.moode?.reachable?'ok':'bad'):'warn',services.r.ok?(services.j?.moode?.reachable?'moOde MPD responded to a live status query':'moOde MPD status query failed'):'moOde connectivity not verified');
+        const cfg=runtime.r.ok&&runtime.j?.ok?runtime.j.config:null;
+        if(cfg){
+          moodeDisplayTakeoverEnabled=!!(cfg?.features?.moodeDisplayTakeover??true);
+          const podcasts=document.getElementById('podcastsNavLink');if(podcasts)podcasts.style.display=cfg?.features?.podcasts?'':'none';
+          const alexa=document.getElementById('alexaPill');if(alexa)alexa.style.display=cfg?.alexa?.enabled?'':'none';
+          show('alexa','warn','Configured; external Alexa connectivity not checked');
+          try{refreshPushPeppyVisibility();}catch{}
+          try{refreshNotifyPillFromCfg(cfg);}catch{}
         }
+        try{refreshScreenPill();}catch{}
+        try{await refreshScrobblePill();}catch{}
       }
 
       function getPageFromUrl() {

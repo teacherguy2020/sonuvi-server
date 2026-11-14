@@ -6,4 +6,8 @@ The server credential is configured by SONUVI_PEPPY_TOKEN_FILE in the web servic
 
 Enable enable_peppyalsa using moOde settings, keep the /tmp/peppymeter and /tmp/peppyspectrum FIFO paths, output.http=True, and the headless meter output.display=False. Enable peppymeter.service and peppy-spectrum-bridge.service. Target restoration must preserve the HTTPS addresses. URL configuration alone does not prove success: verify fresh changing nonzero meter levels and spectrum bins during real audio and verify them in the browser. Applying ALSA routing can briefly restart playback; preserve the queue.
 
+The Peppy editor pushes the selected, bounded profile through the administrator/CSRF-protected `/__controller/configuration/display` action. The saved profile is restored if the restricted display switch fails. Do not reuse legacy browser-url, last-profile POST or port-8101 transport. Feedback is returned to the visible editor button.
+
+Artwork cache-busting uses the gateway-supported `_` and `t` query parameters. Readiness refreshes every ten seconds while visible. App lights independently probe API status, web release, meter freshness and a bounded live MPD status query; a configured hostname is not connectivity proof. PeppyALSA green means audio data received, not an SSH configuration inspection. Alexa remains unverified until an actual connectivity check.
+
 Updated: 2026-11-14

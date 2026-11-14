@@ -42,3 +42,14 @@ test('all four real HTML handlers send correct mode, report failures, and unlock
  for(const label of ['Player','Peppy','Visualizer','Kiosk']){await elements.get('push'+label+'Btn').click();assert.equal(requested.body.mode,label.toLowerCase());assert.equal(requested.url,'/__controller/configuration/display');assert.match(elements.get('push'+label+'Status').textContent,/verified/);}
  fail=true;await elements.get('pushPlayerBtn').click();assert.match(elements.get('pushPlayerStatus').textContent,/Push failed/);assert.equal(elements.get('pushPlayerBtn').disabled,false);
 });
+test('Peppy profile persists with verified push and rolls back on failure; arbitrary fields rejected',async t=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'peppy-profile-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));const file=path.join(root,'profile.json');await fs.writeFile(file,JSON.stringify({skin:'old',visualizer:{energy:7}}));
+ let handler,fail=false;
+ registerMoodeDisplayRoutes({post:(_,h)=>handler=h},{authorize:async()=>true,readConfig:async()=>({}),profilePath:file,env,push:async()=>{if(fail)throw Error('no readback');return {ok:true,verified:true};}});
+ const request=async body=>{const res={statusCode:200,status(n){this.statusCode=n;return this;},json(j){this.body=j;return this;}};await handler({body},res);return res;};
+ for(const profile of [{url:'http://evil'},{skin:'../evil'},{skin:3},{meterType:'evil'},{playerSize:'bogus'},[]])assert.equal((await request({mode:'peppy',profile})).statusCode,400);
+ assert.equal((await request({mode:'player',profile:{skin:'blue'}})).statusCode,400);
+ assert.equal((await request({mode:'peppy',profile:{skin:'blue-1280',theme:'abyss-graphite',playerSize:'1280x400'}})).statusCode,200);
+ const saved=await fs.readFile(file,'utf8');assert.equal(JSON.parse(saved).skin,'blue-1280');assert.equal(JSON.parse(saved).visualizer.energy,7);
+ fail=true;assert.equal((await request({mode:'peppy',profile:{skin:'other'}})).statusCode,502);assert.equal(await fs.readFile(file,'utf8'),saved);
+});

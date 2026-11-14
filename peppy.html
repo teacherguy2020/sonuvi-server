@@ -3023,7 +3023,7 @@
           if (artUrl !== lastArt || trackChanged || podcastNeedsRefresh) {
             if (artUrl) {
               const finalArtUrl = (trackChanged || podcastNeedsRefresh || isPodcastLike)
-                ? `${artUrl}${artUrl.includes('?') ? '&' : '?'}tk=${encodeURIComponent(trackSig || String(nowTs))}&pv=${nowTs}`
+                ? `${artUrl}${artUrl.includes('?') ? '&' : '?'}_=${encodeURIComponent(trackSig || String(nowTs))}&t=${nowTs}`
                 : artUrl;
               art.src = finalArtUrl;
               if (isPodcastLike) lastPodcastArtRefreshAt = nowTs;
@@ -3304,6 +3304,10 @@
         syncProgressPlacement();
         drawNeedles();
         publishProfileState();
+      });
+      window.addEventListener('message', event => {
+        if(event.origin!==location.origin || event.source!==window.parent || event.data?.type!=='peppy-push-result')return;
+        if(pushPeppyFromTab){pushPeppyFromTab.disabled=!!event.data.busy;pushPeppyFromTab.textContent=event.data.message;pushPeppyFromTab.title=event.data.detail||event.data.message;}
       });
       pushPeppyFromTab?.addEventListener('click', () => {
         try {
@@ -3670,7 +3674,8 @@
         animate();
         setInterval(pollNowPlaying, kioskMode ? 3000 : 2500);
         setInterval(pollMeter, kioskMode ? 130 : 90);
-        // Target/readiness check runs on load; no periodic polling.
+        // Recheck recovery and stale feeds without requiring a focus change.
+        setInterval(() => { if (!document.hidden) refreshPeppyReadiness().catch(() => {}); }, 10000);
       })();
     })();
   </script>

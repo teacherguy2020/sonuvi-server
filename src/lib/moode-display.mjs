@@ -31,12 +31,19 @@ export async function pushMoodeDisplay(mode,{env=process.env,profileDefaults={},
   if(reply.contract!=='sonuvi.moode-display.v1'||reply.ok!==true||reply.verified!==true||reply.url!==url||reply.mode!==mode) throw Error('moOde did not verify the requested display');
   return {ok:true,verified:true,mode,url};
 }
+const profileKeys = new Set(['skin','theme','meterType','fontMode','fontSize','linearStyle','linearSize','meterMode','colorMode','spectrumColor','spectrumEnergy','spectrumPeak','sensitivity','smoothing','playerSize']);
+export function validPeppyProfile(p) {
+  return !!p && typeof p==='object' && !Array.isArray(p) && Object.keys(p).every(k=>profileKeys.has(k) && typeof p[k]==='string' && /^[a-zA-Z0-9_-]{1,80}$/.test(p[k]))
+    && (!p.meterType || ['circular','linear','spectrum'].includes(p.meterType))
+    && (!p.playerSize || /^\d{2,4}x\d{2,4}$/.test(p.playerSize));
+}
 export function registerMoodeDisplayRoutes(app,{authorize,readConfig,env=process.env,push=pushMoodeDisplay,profilePath=runtimeStatePaths().peppyLastPushPath}={}) {
   let busy=false;
   app.post('/v1/admin/configuration/master/display',async(req,res)=>{
     if(!(await authorize(req,res))) return;
     const b=req.body;
-    if(!b||typeof b!=='object'||Array.isArray(b)||Object.keys(b).some(k=>!['mode','playerSize'].includes(k))||!DISPLAY_MODES.includes(b.mode)||(b.playerSize!==undefined&&(b.mode!=='player'||!/^\d{2,4}x\d{2,4}$/.test(b.playerSize)))) return res.status(400).json({ok:false,error:'Invalid display selection'});
+    if(!b||typeof b!=='object'||Array.isArray(b)||Object.keys(b).some(k=>!['mode','playerSize','profile'].includes(k))||!DISPLAY_MODES.includes(b.mode)||(b.playerSize!==undefined&&(b.mode!=='player'||!/^\d{2,4}x\d{2,4}$/.test(b.playerSize)))) return res.status(400).json({ok:false,error:'Invalid display selection'});
+    if(b.profile!==undefined&&(b.mode!=='peppy'||!validPeppyProfile(b.profile))) return res.status(400).json({ok:false,error:'Invalid Peppy profile'});
     if(busy) return res.status(409).json({ok:false,error:'A display switch is already in progress'});
     busy=true;let original, saved=false;
     try {
@@ -44,7 +51,7 @@ export function registerMoodeDisplayRoutes(app,{authorize,readConfig,env=process
       try {original=await fs.readFile(profilePath,'utf8');} catch(e) {if(e.code!=='ENOENT')throw e;}
       const previous=original?JSON.parse(original):{};
       if(!previous||typeof previous!=='object'||Array.isArray(previous)) throw Error('Invalid saved display profile');
-      const next={...previous,displayMode:b.mode,...(b.playerSize?{playerSize:b.playerSize}:{}),ts:Date.now()};
+      const next={...previous,...(b.profile||{}),displayMode:b.mode,...(b.playerSize?{playerSize:b.playerSize}:{}),ts:Date.now()};
       await fs.mkdir(path.dirname(profilePath),{recursive:true});
       await fs.writeFile(profilePath+'.display-tmp',JSON.stringify(next,null,2));
       await fs.rename(profilePath+'.display-tmp',profilePath);saved=true;

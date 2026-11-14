@@ -801,6 +801,12 @@ app.use(rehearsalReadOnlyMiddleware({ capabilities: RUNTIME_CAPABILITIES }));
 // Immutable releases set SONUVI_PUBLIC_WEB_ROOT to the generated H2 public
 // root. Legacy checkouts retain their historical root until they opt in.
 app.use(express.static(PUBLIC_WEB_ROOT, { dotfiles: 'deny', index: false }));
+// Bounded read-only health projection for authenticated app indicators.
+app.get('/status/services', async (_req,res) => {
+  let reachable=false;
+  try {const raw=await Promise.race([mpdQueryRaw('status'),new Promise((_,reject)=>{const timer=setTimeout(()=>reject(Error('timeout')),3000);timer.unref?.();})]);reachable=!!raw&&!mpdHasACK(raw)&&/^state: (play|pause|stop)$/m.test(raw);}catch{}
+  res.set('Cache-Control','no-store').json({ok:true,moode:{reachable}});
+});
 app.get('/health', (_req, res) => {
   res.json({ contract: 'sonuvi.health.v1', ok: true, release: publicRuntimeReleaseIdentity(RELEASE_IDENTITY) });
 });
