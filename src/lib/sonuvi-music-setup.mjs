@@ -179,7 +179,7 @@ async function apply(r,address) {
   const unit=`[Unit]\nDescription=Sonuvi read-only music share\nAfter=network-online.target\nWants=network-online.target\n[Mount]\nWhat=//${address}/${r.share}\nWhere=${MOUNT}\nType=cifs\nOptions=${options}\nTimeoutSec=25\n[Install]\nWantedBy=multi-user.target\n`;
   await fs.writeFile(`/etc/systemd/system/${UNIT}`,unit,{mode:0o644,flag:'wx'});
   await fs.mkdir('/etc/systemd/system/sonuvi-api.service.d',{recursive:true});
-  await fs.writeFile('/etc/systemd/system/sonuvi-api.service.d/50-music-setup.conf',`[Unit]\nWants=${UNIT}\nAfter=${UNIT}\n[Service]\nReadOnlyPaths=${MOUNT}\n`,{mode:0o644,flag:'wx'});
+  await fs.writeFile('/etc/systemd/system/sonuvi-api.service.d/50-music-setup.conf',`[Unit]\nWants=${UNIT}\nAfter=${UNIT}\n[Service]\nType=exec\nReadOnlyPaths=${MOUNT}\n`,{mode:0o644,flag:'wx'});
   await run('/usr/bin/systemctl',['daemon-reload']);await run('/usr/bin/systemctl',['enable',UNIT]);
   state={...state,state:'indexing'};await saveState(state);
   const result=await run('/usr/sbin/runuser',['-u','sonuvi','--','/usr/bin/env',`SONUVI_STATE_ROOT=${ROOT}`,`SONUVI_RELEASE_ROOT=/opt/sonuvi/current`,`MPD_HOST=${address}`,`MPD_PORT=${r.port}`,'SONUVI_MUSIC_CONFIGURED=1',`MOODE_USB_PREFIX=${verified.prefix}`,'/usr/bin/node','/opt/sonuvi/current/scripts/sonuvi-music-index.mjs'],{timeout:180000,maxBuffer:65536});

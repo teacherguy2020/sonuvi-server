@@ -31,6 +31,13 @@ if (process.env.SONUVI_LOCAL_HTTPS_ENABLED === '1') {
   await new Promise((resolve,reject)=>{local.server.once('error',reject);local.server.listen(LOCAL_BROWSER_PORT,host,resolve);});
   servers.push(local.server);
 }
+if (process.env.SONUVI_FRESH_BROWSER_HTTPS === '1') {
+  if (certPath) throw new Error('fresh and custom browser TLS are mutually exclusive');
+  const friendly = await createLocalBrowserRuntime({publicRoot:configuredRoot,stateRoot:process.env.SONUVI_STATE_ROOT || '/var/lib/sonuvi',port:443,
+    onReloadError:()=>process.stderr.write('Fresh browser TLS renewal unavailable; trust was not changed.\n')});
+  await new Promise((resolve,reject)=>{friendly.server.once('error',reject);friendly.server.listen(443,host,resolve);});
+  servers.push(friendly.server);
+}
 if (certPath) {
   if (![certPath,keyPath].every(path.isAbsolute)) throw new Error('TLS paths must be absolute protected paths');
   const origin = new URL(process.env.SONUVI_CONTROLLER_WEB_ORIGIN || '');

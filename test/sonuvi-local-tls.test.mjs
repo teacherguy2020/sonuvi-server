@@ -30,6 +30,26 @@ test('private browser fallback requires explicit root trust and preserves identi
   assert.equal((await request()).body.authenticated,false);
 });
 
+test('fresh HTTPS443 uses its own origin/session scope and renews without replacing identity', async t => {
+  const f=await fixture(t);await provisionLocalTLS(f.options);const bundle=await f.read();
+  const publicRoot=path.join(f.stateRoot,'web');await fs.mkdir(publicRoot);
+  let next=bundle,errors=0;
+  const runtime=await createLocalBrowserRuntime({publicRoot,stateRoot:f.stateRoot,load:async()=>next,onReloadError:()=>errors++,port:443});
+  await new Promise(resolve=>runtime.server.listen(0,'127.0.0.1',resolve));
+  t.after(()=>new Promise(resolve=>runtime.server.close(resolve)));
+  const hostname=localTLSHostname(serverId),port=runtime.server.address().port;
+  assert.equal(runtime.origin,`https://${hostname}`);
+  const ca=new X509Certificate(Buffer.from(bundle.anchorDER,'base64')).toString();
+  const request=(options={})=>new Promise((resolve,reject)=>https.get({host:'127.0.0.1',port,servername:hostname,ca,path:'/__controller/session',headers:{host:hostname},agent:false,...options},res=>{let body='';res.on('data',chunk=>body+=chunk);res.on('end',()=>resolve({status:res.statusCode,body:JSON.parse(body)}));}).on('error',reject));
+  const initial=await request();assert.equal(initial.status,200);assert.equal(initial.body.authenticated,false);
+  await assert.rejects(request({ca:undefined}));
+  await assert.rejects(request({servername:'other.local'}));
+  assert.equal((await request({headers:{host:'other.local'}})).status,403);
+  await runtime.refresh();assert.equal(errors,0);
+  next={...bundle,anchorDER:'invalid'};await runtime.refresh();assert.equal(errors,1);
+  assert.equal((await request()).body.authenticated,false);
+});
+
 async function fixture(t) {
   const stateRoot = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'sonuvi-local-tls-')));
   t.after(() => fs.rm(stateRoot,{recursive:true,force:true}));

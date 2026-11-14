@@ -1,3 +1,4 @@
+import { provisionFreshHostPolicy } from './sonuvi-fresh-host-policy.mjs';
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs/promises';
@@ -236,7 +237,7 @@ export async function runFixedTargetInstallation({ request, paths = TARGET_PATHS
     const [apiTemplate, webTemplate] = await Promise.all([fs.readFile(path.join(destination, 'ops/systemd/sonuvi-api.service.in'), 'utf8'), fs.readFile(path.join(destination, 'ops/systemd/sonuvi-web.service.in'), 'utf8')]);
     const units = renderFreshSystemdUnits({ apiTemplate, webTemplate, releaseId: input.releaseId });
     const adapter = {
-      prepare: async () => { await provisionFreshSystemdUnits({ unitRoot: roots.unitRoot, units }); await renewal.prepare(); await systemd.daemonReload(); },
+      prepare: async () => { await provisionFreshHostPolicy({ etcRoot: path.dirname(path.dirname(roots.unitRoot)) }); await provisionFreshSystemdUnits({ unitRoot: roots.unitRoot, units }); await renewal.prepare(); await systemd.daemonReload(); },
       restart: async () => { await activationStateAccess({ stateRoot: roots.stateRoot }); for (const unit of TARGET_UNITS) await systemd.enableAndStart(unit); await renewal.start(); },
       verify: async ({ service, expectedReleaseId }) => ({ releaseId: (await systemd.isHealthy(`sonuvi-${service}.service`)) ? expectedReleaseId : null }),
       health: async ({ service }) => health ? health({ service }) : systemd.isHealthy(`sonuvi-${service}.service`),

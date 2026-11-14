@@ -9,11 +9,12 @@ export const LOCAL_BROWSER_PORT=8444;
  * root; native pinning cannot make it browser-trusted. No HTTP password path.
  * The optional public-domain listener remains the preferred browser origin.
  */
-export async function createLocalBrowserRuntime({publicRoot,stateRoot='/var/lib/sonuvi',load=()=>readLocalTLSBundle({stateRoot}),onReloadError=()=>{}}={}) {
+export async function createLocalBrowserRuntime({publicRoot,stateRoot='/var/lib/sonuvi',load=()=>readLocalTLSBundle({stateRoot}),onReloadError=()=>{},port=LOCAL_BROWSER_PORT}={}) {
+  if (![443, LOCAL_BROWSER_PORT].includes(port)) throw new Error('local_browser_port_invalid');
   const bundle=await load();if(!bundle)throw new Error('local_browser_trust_unavailable');
   validateLocalTLSBundle(bundle);
-  const origin=new URL(bundle.origin);origin.port=String(LOCAL_BROWSER_PORT);
-  const directory=path.join(stateRoot,'data','browser-local');
+  const origin=new URL(bundle.origin);origin.port=String(port);
+  const directory=path.join(stateRoot,'data',port===443?'browser-friendly':'browser-local');
   await fs.mkdir(directory,{recursive:true,mode:0o700});
   const server=await createPublicWebServer({publicRoot,tls:{key:bundle.key,cert:bundle.cert},origin:origin.origin,apiPort:3101,sessionFile:path.join(directory,'sessions.json')});
   let running=false;

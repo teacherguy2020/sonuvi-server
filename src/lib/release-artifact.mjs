@@ -58,6 +58,14 @@ const RELEASE_CONFIG_FILES = new Set([
   'now-playing.config.example.json',
 ]);
 
+const RELEASE_COMPANION_FILES = new Set([
+  'docs/runbooks/fresh-installer-baseline.md',
+  'ops/moode-overrides/sonuvi-display/ROLLOUT.md',
+  'ops/moode-overrides/sonuvi-display/dispatcher.py',
+  'ops/moode-overrides/sonuvi-display/apply.py',
+  'ops/moode-overrides/display-state/README.md',
+]);
+
 const RELEASE_SYSTEMD_TEMPLATES = new Set([
   'ops/systemd/sonuvi-api.service.in',
   'ops/systemd/sonuvi-web.service.in',
@@ -81,6 +89,7 @@ const RELEASE_RUNTIME_SCRIPTS = new Set([
   'scripts/sonuvi-local-tls-renew.mjs',
   'scripts/sonuvi-alexa-public-https.mjs',
   'scripts/sonuvi-owner-recovery.mjs',
+  'scripts/sonuvi-optional-machine-credentials.mjs',
   'scripts/promote-staged-release.mjs',
   'scripts/serve-public-web.mjs',
   'scripts/verify-current-release.mjs',
@@ -197,7 +206,7 @@ function snapshotExcluded(relativePath) {
 
 function releaseSourcePath(relativePath) {
   const relative = normalizeRelativePath(relativePath, 'release source path');
-  if (RELEASE_ROOT_FILES.has(relative) || RELEASE_CONFIG_FILES.has(relative) || RELEASE_SYSTEMD_TEMPLATES.has(relative) || RELEASE_RUNTIME_SCRIPTS.has(relative)) return true;
+  if (RELEASE_COMPANION_FILES.has(relative) || RELEASE_ROOT_FILES.has(relative) || RELEASE_CONFIG_FILES.has(relative) || RELEASE_SYSTEMD_TEMPLATES.has(relative) || RELEASE_RUNTIME_SCRIPTS.has(relative)) return true;
   if (relative.startsWith('src/')) return !relative.startsWith('src/private/');
   if (relative.startsWith('skins/')) return true;
   return false;

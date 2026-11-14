@@ -6,11 +6,12 @@ RequiresMountsFor=@MUSIC_LIBRARY_ROOT@
 ConditionPathExists=/opt/sonuvi/current/release-manifest.json
 
 [Service]
-Type=simple
+Type=exec
 User=@SERVICE_ACCOUNT@
 Group=@SERVICE_ACCOUNT@
 WorkingDirectory=/opt/sonuvi/current
 Environment=SONUVI_RELEASE_ROOT=/opt/sonuvi/releases/@RELEASE_ID@
+Environment=SONUVI_SERVICE_RESTART_POLICY=sonuvi-pair-polkit-v1
 Environment=SONUVI_STATE_ROOT=/var/lib/sonuvi
 Environment=SONUVI_CONFIG_ROOT=/var/lib/sonuvi/config
 Environment=SONUVI_SECRETS_ROOT=/var/lib/sonuvi/protected
