@@ -346,7 +346,7 @@ export function registerConfigBrowseRoutes(app, deps) {
       const idx = await getBrowseIndex(mpdHost);
       const tracks = (Array.isArray(idx?.tracks) ? idx.tracks : [])
         .filter((t) => String(t?.album || '').trim().toLowerCase() === albLc)
-        .filter((t) => !artLc || String(t?.artist || t?.albumArtist || '').trim().toLowerCase() === artLc)
+        .filter((t) => !artLc || [t?.albumArtist, t?.artist].some(value => String(value || '').trim().toLowerCase() === artLc))
         .map((t) => ({
           file: String(t?.file || '').trim(),
           track: String(t?.track || '').trim(),

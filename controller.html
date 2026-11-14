@@ -1211,6 +1211,16 @@
     }
 
     async function getRecentAlbumsForRail(){
+      // Browser controllers use catalog identities and cookie-authorized artwork,
+      // never persisted administrative library-health rows from another library.
+      if (globalThis.SonuviControllerWeb) {
+        await globalThis.SonuviControllerAuth.ready;
+        const response = await fetch(`${base}/recent/albums?limit=60`, { cache: 'no-store' });
+        if (!response.ok) throw new Error('Recent albums unavailable');
+        const payload = await response.json();
+        return (payload.items || []).map(row => ({ album: row.album, artist: row.artist,
+          sampleFile: row.file, folder: row.folder, thumbUrl: row.art, addedTs: row.maxId }));
+      }
       const now = Date.now();
 
       if (!Array.isArray(recentAlbumsCache.albums) || !recentAlbumsCache.albums.length) {
@@ -1680,6 +1690,13 @@
 
     async function fetchAlbumTracks(album, artist){
       await ensureKey();
+      if (globalThis.SonuviControllerWeb) {
+        const query = new URLSearchParams({ album: String(album || ''), artist: String(artist || '') });
+        const r = await fetch(`${base}/config/browse/album-tracks?${query}`, { cache: 'no-store', headers: reqHeaders(false) });
+        const j = await r.json().catch(()=>({}));
+        if (!r.ok || !j?.ok) throw new Error('Album tracks unavailable');
+        return Array.isArray(j.tracks) ? j.tracks : [];
+      }
       const body={genres:[],artists:artist?[artist]:[],albums:album?[album]:[],excludeGenres:[],minRating:0,maxTracks:500};
       const r=await fetch(`${base}/config/queue-wizard/preview`,{method:'POST',headers:reqHeaders(true),body:JSON.stringify(body)});
       const j=await r.json().catch(()=>({}));
