@@ -2602,9 +2602,7 @@
           const playerLink = document.getElementById('playerNavLink');
           if (peppyLink) peppyLink.style.display = moodeDisplayTakeoverEnabled ? '' : 'none';
           if (playerLink) playerLink.style.display = moodeDisplayTakeoverEnabled ? '' : 'none';
-          if (!moodeDisplayTakeoverEnabled && (String(currentShellPage || '') === 'peppy.html' || String(currentShellPage || '') === 'player.html')) {
-            navigate('config.html', true);
-          }
+          // Designers remain available independently of moOde display takeover.
           refreshPushPeppyVisibility();
           refreshNotifyPillFromCfg(cfg);
           await refreshScrobblePill(base);
@@ -2626,7 +2624,6 @@
       function getPageFromUrl() {
         const u = new URL(location.href);
         const p = String(u.searchParams.get('page') || 'config.html').trim();
-        if (!moodeDisplayTakeoverEnabled && (p === 'peppy.html' || p === 'player.html')) return 'config.html';
         return VALID.has(p) ? p : 'config.html';
       }
 
