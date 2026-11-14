@@ -7,3 +7,9 @@ p.write_text(s)
 p=Path('/usr/local/bin/peppy-spectrum-bridge.py')
 s=p.read_text().replace("headers={'Content-Type': 'application/json'}", "headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + open('/etc/sonuvi-peppy-token').read().strip()}")
 p.write_text(s)
+
+p=Path('/usr/local/bin/peppy-spectrum-bridge.py')
+s=p.read_text()
+if 'payload.pop("ts", None)' not in s:
+    s=s.replace('    data = json.dumps(payload).encode', '    payload.pop("ts", None)  # Server assigns receipt timestamps.\n    data = json.dumps(payload).encode')
+p.write_text(s)
