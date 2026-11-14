@@ -1965,53 +1965,11 @@
       }
 
       async function refreshPeppyAlsaPill(baseOverride = ''){
-        const hint = document.getElementById('peppyAlsaHint');
-        const host = location.hostname || 'sonuvi.local';
-        const base = baseOverride || globalThis.NPArt.apiBase();
-        try {
-          if (!runtimeTrackKey) {
-            const rr = await fetch(`${base}/config/runtime`, { cache:'no-store' });
-            const rj = await rr.json().catch(() => ({}));
-            runtimeTrackKey = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
-          }
-          const [{ r, j }, meter] = await Promise.all([
-            fetchJsonWithTimeout(`${base}/config/moode/peppyalsa/status`, {
-              headers: { ...(runtimeTrackKey ? { 'x-track-key': runtimeTrackKey } : {}) },
-              cache: 'no-store',
-            }, 9000),
-            fetchJsonWithTimeout(`${base}/peppy/vumeter`, { cache: 'no-store' }, 5000).catch(() => ({ r: { ok: false }, j: null })),
-          ]);
-
-          const on = !!(r.ok && j?.ok && j?.enabled === true);
-          const fresh = !!(meter?.r?.ok && meter?.j?.ok && meter?.j?.fresh === true);
-          const ageMs = Number(meter?.j?.ageMs || 0);
-
-          if (on && fresh) {
-            if (hint) hint.textContent = 'on';
-            setPillState('peppyAlsaPill', 'ok');
-          } else if (on && !fresh) {
-            if (hint) hint.textContent = ageMs > 0 ? `stale ${Math.round(ageMs/1000)}s` : 'stale';
-            setPillState('peppyAlsaPill', 'warn');
-
-            const now = Date.now();
-            const onPeppyPage = String(currentShellPage || '') === 'peppy.html';
-            if (onPeppyPage && (now - peppyHealLastAt > 8000)) {
-              peppyHealLastAt = now;
-              ensurePeppyAlsa(base, 'peppyalsa-stale-heal').catch(() => null);
-              fetchJsonWithTimeout(`${base}/config/moode/peppymeter/start`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', ...(runtimeTrackKey ? { 'x-track-key': runtimeTrackKey } : {}) },
-                body: JSON.stringify({ reason: 'peppyalsa-stale-heal' }),
-              }, 12000).catch(() => null);
-            }
-          } else {
-            if (hint) hint.textContent = 'off';
-            setPillState('peppyAlsaPill', 'warn');
-          }
-          return;
-        } catch {}
-        if (hint) hint.textContent = 'unknown';
-        setPillState('peppyAlsaPill', 'warn');
+        let fresh=false;
+        try{const {r,j}=await fetchJsonWithTimeout(`${baseOverride||globalThis.NPArt.apiBase()}/peppy/vumeter`,{cache:'no-store'},5000);fresh=r.ok&&j?.fresh===true;}catch{}
+        const message=fresh?'Audio levels received from Peppy ALSA':'Audio feed not verified';
+        const hint=document.getElementById('peppyAlsaHint'),pill=document.getElementById('peppyAlsaPill');if(hint)hint.textContent=message;if(pill)pill.title=message;
+        setPillState('peppyAlsaPill',fresh?'ok':'warn');
       }
 
       async function ensurePeppyAlsa(baseOverride = '', reason = 'peppy-tab-open'){
@@ -2338,7 +2296,7 @@
       async function setDisplayModeAndRefresh(mode = 'peppy'){
         const host = location.hostname || 'sonuvi.local';
         const base = globalThis.NPArt.apiBase();
-        const targetUrl = `${location.origin}/display.html?mode=peppy&kiosk=1`;
+        const targetUrl = `http://${host}:8101/display.html?kiosk=1`;
         const refreshUrl = `${targetUrl}&sw=${Date.now()}`;
         if (!runtimeTrackKey) {
           const rr = await fetch(`${base}/config/runtime`, { cache:'no-store' });
@@ -2512,6 +2470,8 @@
         show('moode',services.r.ok?(services.j?.moode?.reachable?'ok':'bad'):'warn',services.r.ok?(services.j?.moode?.reachable?'moOde MPD responded to a live status query':'moOde MPD status query failed'):'moOde connectivity not verified');
         const cfg=runtime.r.ok&&runtime.j?.ok?runtime.j.config:null;
         if(cfg){
+          alexaEnabledState=!!cfg?.alexa?.enabled;
+          alexaDomainState=String(cfg?.alexa?.publicDomain||'').trim();
           moodeDisplayTakeoverEnabled=!!(cfg?.features?.moodeDisplayTakeover??true);
           const podcasts=document.getElementById('podcastsNavLink');if(podcasts)podcasts.style.display=cfg?.features?.podcasts?'':'none';
           const alexa=document.getElementById('alexaPill');if(alexa)alexa.style.display=cfg?.alexa?.enabled?'':'none';
@@ -2981,7 +2941,7 @@
         updateSavePresetsButtonVisibility();
         if (safe === 'peppy.html') {
           setTimeout(() => { checkMoodeTargetUrl().catch(() => {}); }, 150);
-          setTimeout(() => { ensurePeppyAlsa('', 'peppy-tab-open').then(() => refreshPeppyAlsaPill()).catch(() => {}); }, 220);
+          setTimeout(() => { refreshPeppyAlsaPill().catch(() => {}); }, 220);
           setTimeout(() => { refreshPeppyAlsaPill().catch(() => {}); }, 1800);
         }
         if (!NO_IFRAME_MODE && frame) {
