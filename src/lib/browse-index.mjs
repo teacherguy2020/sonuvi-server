@@ -239,7 +239,7 @@ export function createBrowseIndexAdapter({
       getMpdDbUpdateIso(mpdHost),
       getMpdFileRevisions(mpdHost),
     ]);
-    const fmt = '%file%\t%artist%\t%albumartist%\t%album%\t%title%\t%track%\t%genre%\t%time%\t%MUSICBRAINZ_TRACKID%\t%MUSICBRAINZ_ALBUMID%\t%MUSICBRAINZ_ARTISTID%';
+    const fmt = '%file%\t%artist%\t%albumartist%\t%album%\t%title%\t%track%\t%genre%\t%time%\t%MUSICBRAINZ_TRACKID%\t%MUSICBRAINZ_ALBUMID%\t%MUSICBRAINZ_ARTISTID%\t%date%';
     const { stdout } = await runExecFile('mpc', ['-h', String(mpdHost || 'moode.local'), '-p', String(mpdPort), '-f', fmt, 'listall'], {
       maxBuffer: 96 * 1024 * 1024,
     });
@@ -254,7 +254,7 @@ export function createBrowseIndexAdapter({
 
     for (const ln of String(stdout || '').split(/\r?\n/)) {
       if (!ln) continue;
-      const [file = '', artistRaw = '', albumArtistRaw = '', albumRaw = '', titleRaw = '', trackRaw = '', genreRaw = '', timeRaw = '', mbTrackRaw = '', mbAlbumRaw = '', mbArtistRaw = ''] = ln.split('\t');
+      const [file = '', artistRaw = '', albumArtistRaw = '', albumRaw = '', titleRaw = '', trackRaw = '', genreRaw = '', timeRaw = '', mbTrackRaw = '', mbAlbumRaw = '', mbArtistRaw = '', dateRaw = ''] = ln.split('\t');
       const filePath = String(file || '').trim();
       if (!filePath) continue;
       if (process.env.SONUVI_MUSIC_CONFIGURED === '1' && !filePath.startsWith(process.env.MOODE_USB_PREFIX ?? '')) continue;
@@ -304,6 +304,7 @@ export function createBrowseIndexAdapter({
         albumArtist,
         album,
         title,
+        year: String(dateRaw || '').trim(),
         track,
         trackNo: parseTrackNo(track),
         genre,
