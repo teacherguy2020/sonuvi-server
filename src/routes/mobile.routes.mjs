@@ -1745,6 +1745,7 @@ export function registerMobileRoutes(app, deps = {}) {
       aboutProvider: text(payload.aboutProvider) || null,
       appleMusicUrl,
       radioYear,
+      year: text(payload.year) || text(payload.date) || null,
       track: currentMobileTrack.track
         ? publicMobileTrack(currentMobileTrack.track, { baseUrl })
         : (currentItem?.track || null),

@@ -1544,6 +1544,7 @@ test('mobile now-playing returns safe metadata and proxies raw artwork behind be
           title: 'First',
           artist: 'Test Artist',
           album: 'Test Album',
+          year: '2009',
           displayTitle: 'First',
           displayArtist: 'Test Artist',
           displayLine3: 'Test Album',
@@ -1598,6 +1599,7 @@ test('mobile now-playing returns safe metadata and proxies raw artwork behind be
   assert.equal(response.body.aboutProvider, 'apple');
   assert.equal(response.body.appleMusicUrl, null);
   assert.equal(response.body.radioYear, null);
+  assert.equal(response.body.year, '2009');
   assert.match(response.body.artworkUrl, /\/v1\/mobile\/home\/artwork\/har_/);
   assert.match(response.body.backgroundArtworkUrl, /\/v1\/mobile\/home\/artwork\/har_/);
   assert.doesNotMatch(JSON.stringify(response.body), /coverart|secret-file|SamsungMoode/);
