@@ -47,6 +47,7 @@ test('actual configuration page synchronizes forms and JSON through real validat
     await hostPage.locator('#appFrame').waitFor();
     page=hostPage.frameLocator('#appFrame');
     const alexa=page.locator('fieldset[data-plugin=alexa]');
+    await alexa.getByRole('button',{name:'Configure Alexa',exact:true}).click();
     await alexa.locator('summary',{hasText:'Protected credentials'}).click();
     assert.equal(await alexa.locator('input[type=password]').nth(0).getAttribute('placeholder'),'Saved ••••••••');
     assert.equal(await alexa.locator('input[type=password]').nth(1).getAttribute('placeholder'),'Not saved');
@@ -59,6 +60,7 @@ test('actual configuration page synchronizes forms and JSON through real validat
     assert.equal(await alexa.locator('input[type=password]').nth(1).inputValue(),'');
     assert.equal(credentials.status('alexa').credentials.routeWebhookUrl,true);
     const lastfm=page.locator('fieldset[data-plugin=lastfm]');
+    await lastfm.getByRole('button',{name:'Configure Last.fm',exact:true}).click();
     await lastfm.locator('summary',{hasText:'Vibe, shelves and scrobbling'}).click();
     await lastfm.getByRole('button',{name:'Complete authorization',exact:true}).click();
     await lastfm.getByRole('status').filter({hasText:'Choose Connect Last.fm'}).waitFor();
@@ -75,8 +77,10 @@ test('actual configuration page synchronizes forms and JSON through real validat
     await hostPage.getByRole('button',{name:'Later',exact:true}).click();
     assert.match(await fs.readFile(path.join(root,'credentials.env'),'utf8'),/LASTFM_SESSION_KEY=fixture-session/);
     const radio=page.locator('fieldset').filter({has:page.locator('legend',{hasText:/^Radio$/})});
+    await radio.getByRole('button',{name:'Configure Radio',exact:true}).click();
     await radio.locator('summary',{hasText:'Plugin Config'}).click();
     await radio.locator('input[type=checkbox]').check();
+    await page.getByText('Advanced · Master JSON',{exact:true}).click();
     const master=page.getByRole('textbox',{name:'Complete master configuration JSON'});
     assert.equal(JSON.parse(await master.inputValue()).plugins.radio.enabled,true);
     await radio.locator('summary',{hasText:'JSON Config'}).click();

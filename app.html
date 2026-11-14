@@ -557,7 +557,7 @@
           const tabHoverBg = cs.getPropertyValue('--theme-tab-hover-bg').trim() || '#2f4f93';
           const starColor = cs.getPropertyValue('--theme-pill-border').trim() || '#fbbf24';
           const pageNow = String(currentShellPage || '');
-          if (pageNow === 'peppy.html') {
+          if (pageNow === 'peppy.html' || pageNow === 'config.html') {
             try { doc.getElementById('npThemeBridge')?.remove(); } catch {}
             return;
           }
@@ -636,6 +636,8 @@
           if (doc.getElementById('appShellNormalizeStyle')) return;
           const currentSrc = String(frame?.getAttribute('src') || '');
           const isConfig = currentSrc.includes('config.html');
+          // Collection owns its spacing and palette, both standalone and embedded.
+          if (isConfig) return;
           const isPodcasts = currentSrc.includes('podcasts.html');
           const isQueueWizard = currentSrc.includes('queue-wizard.html');
           const isTheme = currentSrc.includes('theme.html');

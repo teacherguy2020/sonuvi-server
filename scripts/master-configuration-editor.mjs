@@ -12,7 +12,31 @@ export async function mountMasterConfigurationEditor(root, {request, refreshMs =
   const reload = element('button','Load server version'); reload.type = 'button';
   const optional=element('details');optional.append(element('summary','Optional integrations'));
   const optionalChoices=element('div');optional.append(optionalChoices);
-  root.replaceChildren(message, panels, optional, heading, json, save, reload);
+  message.className='configuration-status';optional.className='optional-integrations';
+  const advanced=element('details');advanced.className='advanced-settings';advanced.append(element('summary','Advanced · Master JSON'),element('p','Forms and JSON edit the same draft. Save / Update commits your changes.'),heading,json);
+  const actions=element('div');actions.className='configuration-actions';save.className='primary';actions.append(save,reload);
+  const toolbar=element('div');toolbar.className='collection-toolbar';
+  const filters=element('div');filters.className='collection-filters';filters.setAttribute('aria-label','Integration categories');
+  const search=element('input');search.type='search';search.placeholder='Find an integration';search.setAttribute('aria-label','Find an integration');search.className='collection-search';
+  const addIntegration=element('button','＋ Add integration');addIntegration.type='button';
+  addIntegration.addEventListener('click',()=>{optional.open=true;optional.scrollIntoView({behavior:'smooth',block:'center'});optional.querySelector('summary').focus();});
+  toolbar.append(filters,search,addIntegration);
+  const empty=element('p','No integrations match your search.');empty.className='collection-empty';empty.hidden=true;
+  root.replaceChildren(message,toolbar,panels,empty,optional,advanced,actions);
+  const expanded=new Set();let category='All integrations';
+  const descriptions={
+    moode:['Devices','◉','Your home audio system. Playback and local display.'],mpd:['Devices','◉','The playback engine behind your listening queue.'],
+    lastfm:['Music services','♫','A listening history that follows you. Scrobbling and discovery.'],alexa:['Devices','◌','Your music, hands-free. Voice control for your home.'],
+    library:['System','▤','Bring your collection together. Folders, sources, and indexing.'],artwork:['Experience','▧','Give every record its cover. Artwork sources and motion.'],ratings:['Experience','☆','Make your favorites count. Your taste, remembered.'],
+    display:['Experience','▧','Shape what appears on your listening screens.'],playback:['Experience','▷','Your queue, playlists, and playback preferences.'],
+    notifications:['Experience','♧','Stay in tune with what is playing.'],apns:['Experience','♧','Deliver listening updates to your Apple devices.'],
+    radio:['Music services','♫','Stations and discoveries for every listening mood.'],qobuz:['Music services','♫','Your Qobuz account and listening session.'],podcasts:['Music services','♫','Keep your favorite shows close at hand.'],appleMusic:['Music services','♫','Enrich your collection with Apple Music metadata.'],
+    upnp:['Devices','⌘','Music sources and players on your home network.'],dlna:['Devices','⌘','Share your library with compatible home players.'],echoLink:['Devices','◉','Connect your Echo Link listening setup.'],
+    hardware:['Custom','⌘','Connections for your external hardware bridges.'],mills:['Custom','◉','Your Mills jukebox collection and playback.'],seeburg:['Custom','◉','Your Seeburg jukebox connection.'],multiphone:['Custom','◉','Your Shyvers Multiphone and Mabel setup.'],millsDisplay:['Custom','▧','Keep your moOde screen awake while Mills plays.'],harmony:['Custom','⌘','Coordinate your amplifier and listening inputs.']
+  };
+  const applyFilter=()=>{let visible=0;for(const card of panels.children){card.hidden=(category!=='All integrations'&&card.dataset.category!==category)||!card.dataset.search.includes(search.value.toLowerCase().trim());if(!card.hidden)visible++;}empty.hidden=visible>0;};
+  for(const name of ['All integrations','Music services','Devices','Experience','System','Custom']){const button=element('button',name);button.type='button';button.setAttribute('aria-pressed',String(category===name));button.addEventListener('click',()=>{category=name;for(const item of filters.children)item.setAttribute('aria-pressed',String(item===button));applyFilter();});filters.append(button);}
+  search.addEventListener('input',applyFilter);
   const loaded = await request('GET','');
   const draft = new MasterConfigurationDraft(loaded);
   const pendingPlugins = new Map();
@@ -30,7 +54,7 @@ export async function mountMasterConfigurationEditor(root, {request, refreshMs =
   let saving = false, disposed = false;
   let restarting = false;
   const restartButton=element('button','Restart Server');restartButton.type='button';
-  root.append(restartButton);
+  actions.append(restartButton);
   const restartDialog=element('dialog');restartDialog.setAttribute('aria-label','Server restart required');
   const restartTitle=element('h2','Server restart required');
   const restartStatus=element('p');restartStatus.setAttribute('role','status');
@@ -84,19 +108,38 @@ export async function mountMasterConfigurationEditor(root, {request, refreshMs =
   const render = () => {
     const openPanels = new Set([...panels.querySelectorAll('details[open]')].map(node=>node.closest('fieldset').dataset.plugin+':'+node.querySelector('summary').textContent));
     panels.replaceChildren();optionalChoices.replaceChildren();
-    for (const module of loaded.plugins) {
-      if(module.optional && !draft.document.plugins?.[module.id]?.enabled && !shownOptional.has(module.id)){
+    const featured=['moode','lastfm','alexa','library','artwork','ratings'];
+    const order=id=>featured.includes(id)?featured.indexOf(id):featured.length;
+    for (const module of [...loaded.plugins].sort((a,b)=>order(a.id)-order(b.id))) {
+      const custom=['hardware','mills','seeburg','multiphone','harmony'].includes(module.id);
+      const customActive=draft.document.plugins?.[module.id]?.enabled || (['mills','seeburg','multiphone'].includes(module.id) && draft.document.plugins?.hardware?.enabled);
+      if(((module.optional && !draft.document.plugins?.[module.id]?.enabled)||(custom && !customActive)) && !shownOptional.has(module.id)){
         const add=element('button','Configure '+module.title);add.type='button';
-        add.addEventListener('click',()=>{shownOptional.add(module.id);render();});optionalChoices.append(add);continue;
+        add.addEventListener('click',()=>{shownOptional.add(module.id);expanded.add(module.id);category='All integrations';search.value='';for(const item of filters.children)item.setAttribute('aria-pressed',String(item.textContent===category));render();});optionalChoices.append(add);continue;
       }
-      const section = element('fieldset'), legend = element('legend',module.title);
+      let section = element('fieldset');const legend = element('legend',module.title);
       section.className = 'plugin-card';
       section.dataset.plugin = module.id;
       section.append(legend);
+      const [group,icon,description]=descriptions[module.id]||['System','⌘','Manage this part of your Sonuvi setup.'];
+      section.dataset.category=group;section.dataset.search=(module.title+' '+description+' '+group).toLowerCase();
+      const symbol=element('span',icon);symbol.className='card-icon';symbol.setAttribute('aria-hidden','true');
+      const badge=element('span');badge.className='card-badge';
+      const blurb=element('p',description);blurb.className='card-description';
+      const footer=element('div');footer.className='card-footer';
+      const configure=element('button',expanded.has(module.id)?'Close settings ↑':'Configure ↗');configure.type='button';configure.setAttribute('aria-label','Configure '+module.title);configure.setAttribute('aria-expanded',String(expanded.has(module.id)));configure.setAttribute('aria-controls','config-body-'+module.id);
+      footer.append(element('span',group==='Custom'?'Custom integration':group),configure);
+      section.append(symbol,badge,blurb,footer);
+      const card=section;
+      const body=element('div');body.className='card-body';body.id='config-body-'+module.id;body.hidden=!expanded.has(module.id);card.classList.toggle('expanded',!body.hidden);card.append(body);
+      configure.addEventListener('click',()=>{body.hidden=!body.hidden;body.hidden?expanded.delete(module.id):expanded.add(module.id);card.classList.toggle('expanded',!body.hidden);configure.setAttribute('aria-expanded',String(!body.hidden));configure.textContent=body.hidden?'Configure ↗':'Close settings ↑';});
+      section=body;
       section.append(element('small',`sonuvi.${module.id} · ${module.optional?'Optional':'Built-in'}`));
       const enabled = draft.document.plugins?.[module.id]?.enabled;
       section.append(element('p',enabled === undefined ? 'Core capability' : enabled ? 'Enabled' : 'Disabled'));
       const status = loaded.status?.[module.id];
+      badge.textContent=enabled===false?'Disabled':status?.operational===true?'Verified':enabled===true?'Enabled':'Not checked';
+      badge.title='Enablement is a saved preference; it does not imply a verified connection.';
       if(module.id!=='millsDisplay')section.append(element('p',module.id==='alexa' ? `Public domain saved: ${status?.configured ? 'yes' : 'no'} · Playback: not verified${status?.error ? ' · '+status.error : ''}` : status ? `Configured: ${status.configured ?? 'unknown'} · Operational: ${status.operational ?? 'not checked'}${status.error ? ' · '+status.error : ''}` : 'Operational status has not been checked.'));
       if(module.id==='alexa'){
         section.append(element('p',status?.guidance || 'A saved domain is not proof of public HTTPS readiness.'));
@@ -252,8 +295,9 @@ export async function mountMasterConfigurationEditor(root, {request, refreshMs =
       });
       details.append(summary,pluginJSON); section.append(details);
       for(const detail of section.querySelectorAll('details'))if(openPanels.has(module.id+':'+detail.querySelector('summary').textContent))detail.open=true;
-      panels.append(section);
+      panels.append(card);
     }
+    optional.hidden=optionalChoices.children.length===0;addIntegration.hidden=optional.hidden;applyFilter();
   };
   json.value = draft.text; render(); message.textContent = `Loaded revision ${draft.revision}`;
   json.addEventListener('input',()=>{
@@ -286,7 +330,7 @@ export async function mountMasterConfigurationEditor(root, {request, refreshMs =
   const refresh = async()=>{
     if(disposed)return;
     try {
-      if(!saving && !credentialBusy && !restarting && !credentialsDirty() && !pendingPlugins.size){const result=await request('GET',''); draft.receive(result); Object.assign(loaded,result);
+      if(!saving && !credentialBusy && !restarting && !credentialsDirty() && !pendingPlugins.size && !root.contains(document.activeElement)){const result=await request('GET',''); draft.receive(result); Object.assign(loaded,result);
         if(draft.external) message.textContent='Configuration changed elsewhere. Your draft is preserved; reconcile it before saving.';
         else if(!draft.dirty){json.value=draft.text;render();}}
     } catch(error){message.textContent=`Refresh failed: ${error.message}. Your draft is preserved.`;}

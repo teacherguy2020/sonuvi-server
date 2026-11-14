@@ -7,27 +7,24 @@
   <script src="/__controller/config.js"></script>
   <script src="scripts/controller-browser-auth.js"></script>
   <style>
-    :root { color-scheme: dark light; font: 16px system-ui; }
-    body { max-width: 1100px; margin: auto; padding: 24px; }
-    fieldset { margin: 20px 0; padding: 18px; border-radius: 12px; }
-    legend { font-weight: bold; }
-    label { display: inline-block; margin: 6px 0; }
-    input, select, button { font: inherit; padding: 8px; }
-    textarea { box-sizing: border-box; font: 14px ui-monospace, monospace; padding: 12px; }
-    button { margin: 12px 12px 12px 0; cursor: pointer; }
-    [role=status] { white-space: pre-wrap; }
-    .plugin-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 18px; align-items: start; }
-    .plugin-card { margin: 0; min-width: 0; background: light-dark(#f3f4f6,#27282b); border: 1px solid #7775; }
-    .plugin-card small { opacity: .65; }
-    .plugin-card details { padding: 10px 0; border-top: 1px solid #7774; }
-    .plugin-card summary { cursor: pointer; font-weight: 600; }
-    .plugin-card input:not([type=checkbox]), .plugin-card select { max-width: 100%; box-sizing: border-box; }
-    @media(max-width:700px) { .plugin-grid { grid-template-columns: 1fr; } body { padding: 14px; } }
+    :root{color-scheme:dark;font:14px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--bg:#101b1c;--card:#192526;--line:#304142;--soft:#263c39;--accent:#b4d3b6;--text:#f0f1e9;--muted:#a3b4b3}
+    *{box-sizing:border-box}body{margin:0 auto;max-width:1220px;padding:36px 34px;background:var(--bg);color:var(--text)}
+    h1{font-size:34px;letter-spacing:-1px;font-weight:620;margin:10px 0}h2{font-size:18px;letter-spacing:-.3px}p{line-height:1.6;color:var(--muted)}
+    .eyebrow{font-size:10px;letter-spacing:1.8px;text-transform:uppercase;color:var(--accent);font-weight:650}.intro{margin-bottom:26px}.intro p{margin:0}
+    button,input,select,textarea{font:inherit;color:var(--text)}button,input:not([type=checkbox]),select,textarea{background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:10px 13px;max-width:100%}
+    button{cursor:pointer}button:hover{border-color:var(--accent);background:var(--soft)}button:disabled{opacity:.5;cursor:default}button:focus-visible,input:focus-visible,summary:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:3px}input[type=checkbox]{accent-color:var(--accent);width:18px;height:18px}a{color:var(--accent)}
+    .collection-toolbar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin:22px 0}.collection-filters{display:flex;flex-wrap:wrap;gap:6px}.collection-filters button{background:transparent;border-color:transparent;color:var(--muted)}.collection-filters button[aria-pressed=true]{color:var(--text);background:var(--soft);border-color:var(--line)}.collection-search{margin-left:auto;min-width:220px}.collection-add{margin-left:auto}
+    .plugin-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;align-items:stretch}
+    .plugin-card{position:relative;min-width:0;margin:0;padding:24px;border:1px solid var(--line);border-radius:13px;background:var(--card);display:flex;flex-direction:column}
+    .plugin-card legend{float:left;width:100%;padding:0;margin:64px 0 9px;font-size:18px;font-weight:600;letter-spacing:-.3px}.card-icon{position:absolute;top:24px;left:24px;display:grid;place-items:center;width:39px;height:39px;border-radius:11px;background:var(--soft);color:var(--accent);font-size:22px}.card-badge{position:absolute;top:29px;right:24px;max-width:65%;font-size:11px;padding:5px 9px;border-radius:6px;background:var(--soft);color:var(--accent)}
+    .card-description{font-size:13px;margin:0 0 23px;min-height:42px}.card-footer{margin-top:auto;border-top:1px solid var(--line);padding-top:17px;display:flex;align-items:center;justify-content:space-between;gap:10px;color:var(--muted);font-size:12px}.card-footer button{color:var(--accent);border:0;background:transparent;padding:8px 0;min-height:36px}.card-body{border-top:1px solid var(--line);margin-top:16px;padding-top:14px;font-size:13px}.plugin-card.expanded{grid-column:1/-1}.plugin-card.expanded .card-description{min-height:0}.plugin-card.expanded legend{margin-top:64px}.card-body small{color:var(--muted)}.card-body p{overflow-wrap:anywhere}.card-body details{border-top:1px solid var(--line);padding:13px 0}.card-body summary{cursor:pointer;font-weight:600;padding:7px 0}.card-body label{display:flex;align-items:center;justify-content:space-between;gap:16px;max-width:780px;margin:12px 0}.card-body label input:not([type=checkbox]),.card-body label select,.card-body label textarea{width:60%;min-width:0}.card-body textarea{font:13px ui-monospace,monospace}.card-body button{margin:6px 10px 6px 0}.card-body fieldset{border:1px solid var(--line);border-radius:8px;margin:12px 0}.card-body fieldset legend{float:none;width:auto;font-size:14px;margin:0}
+    [hidden]{display:none!important}.configuration-status{white-space:pre-wrap;font-size:12px;overflow-wrap:anywhere}.collection-empty{padding:30px;text-align:center;border:1px dashed var(--line);border-radius:12px}.optional-integrations,.advanced-settings{margin-top:24px;border:1px solid var(--line);border-radius:12px;padding:18px 22px;background:var(--card)}summary{cursor:pointer}.optional-integrations button{margin:12px 10px 0 0}.advanced-settings textarea{width:100%;margin-top:14px;font:13px ui-monospace,monospace}.configuration-actions{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-top:24px;padding:18px 0;border-top:1px solid var(--line)}.configuration-actions .primary{background:var(--accent);color:#1c322b;font-weight:600;border-color:var(--accent)}.configuration-actions button:last-child{margin-left:auto}
+    @media(max-width:900px){.plugin-grid{grid-template-columns:repeat(2,minmax(0,1fr))}body{padding:26px 22px}.collection-search{margin-left:0;flex:1}}
+    @media(max-width:560px){body{padding:22px 16px}.plugin-grid{grid-template-columns:1fr}h1{font-size:28px}.collection-search{width:100%}.collection-filters{gap:2px}.collection-filters button{padding:10px}.card-body label{align-items:flex-start;flex-direction:column;gap:7px}.card-body label input:not([type=checkbox]),.card-body label select,.card-body label textarea{width:100%}.configuration-actions button:last-child{margin-left:0}}
   </style>
 </head>
 <body>
-  <h1>Server Configuration</h1>
-  <p>Plugin settings and master JSON edit the same draft. Changes are saved only when you press Save / Update.</p>
+  <header class="intro"><div class="eyebrow">Your listening ecosystem</div><h1>Everything, in harmony.</h1><p>Your music services, devices, and finishing touches. All in one place.</p></header>
   <main id="configuration"><p role="status">Loading authoritative Server configuration…</p></main>
   <script type="module">
     import { mountMasterConfigurationEditor } from './scripts/master-configuration-editor.mjs';
