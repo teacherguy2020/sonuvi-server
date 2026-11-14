@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { createPeppyIngest } from './peppy-ingest.mjs';
 import https from 'node:https';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -63,7 +64,9 @@ export async function createPublicWebServer({ publicRoot, tls, ...gatewayOptions
   if (!stat.isDirectory()) throw new Error('public web root is not a directory');
 
   const controllerGateway = createControllerWebGateway(gatewayOptions);
+  const peppyIngest = createPeppyIngest({apiPort:gatewayOptions.apiPort});
   const handler = async (request, response) => {
+    if (await peppyIngest(request,response)) return;
     if (request.url === '/__controller/config.js' && request.method === 'GET') {
       response.writeHead(200, { 'content-type': 'text/javascript', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
       response.end('globalThis.SonuviControllerWeb = true;');

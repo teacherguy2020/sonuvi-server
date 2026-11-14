@@ -1,0 +1,9 @@
+# Peppy telemetry on the current HTTPS server
+
+The API is loopback-only. Do not point moOde at port 3101. The dedicated machine ingestion routes are PUT https://sonuvi.local/__peppy/vumeter and /__peppy/spectrum. They require the dedicated Bearer credential, validate bounded telemetry bodies, and forward only to the fixed local meter endpoints. Browser cookies cannot authorize ingestion. Paired browsers read /peppy/vumeter and /peppy/spectrum through the existing authenticated gateway.
+
+The server credential is configured by SONUVI_PEPPY_TOKEN_FILE in the web service. The moOde copy is root-only /etc/sonuvi-peppy-token. Patched senders must read that file into the Authorization header, verify the server certificate using the system trust store, and use bounded HTTP timeouts. Never put credentials in URLs or browser instructions. Preserve these sender patches when upgrading moOde.
+
+Enable enable_peppyalsa using moOde settings, keep the /tmp/peppymeter and /tmp/peppyspectrum FIFO paths, output.http=True, and the headless meter output.display=False. Enable peppymeter.service and peppy-spectrum-bridge.service. Target restoration must preserve the HTTPS addresses. URL configuration alone does not prove success: verify fresh changing nonzero meter levels and spectrum bins during real audio and verify them in the browser. Applying ALSA routing can briefly restart playback; preserve the queue.
+
+Updated: 2026-11-14

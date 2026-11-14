@@ -250,8 +250,8 @@
         <span id="peppyReadiness" class="setupTxt" style="color:#fbbf24;">Checking Peppy readiness…</span>
         <button id="applyVuTargetBtn" class="skinBtn" type="button" title="Show instructions to fix /etc/peppymeter/config.txt on moOde">How to fix VU target</button>
         <button id="applySpectrumTargetBtn" class="skinBtn" type="button" title="Show instructions to fix /etc/peppyspectrum/config.txt on moOde">How to fix Spectrum target</button>
-        <span class="setupTxt" id="vuTargetHintWrap" style="display:none;">VU target should be <code id="vuTargetHint">http://sonuvi.local:3101/peppy/vumeter</code>.</span>
-        <span class="setupTxt" id="spectrumTargetHintWrap" style="display:none;">Spectrum target should be <code id="spectrumTargetHint">http://sonuvi.local:3101/peppy/spectrum</code>.</span>
+        <span class="setupTxt" id="vuTargetHintWrap" style="display:none;">VU target should be <code id="vuTargetHint">https://sonuvi.local/__peppy/vumeter</code>.</span>
+        <span class="setupTxt" id="spectrumTargetHintWrap" style="display:none;">Spectrum target should be <code id="spectrumTargetHint">https://sonuvi.local/__peppy/spectrum</code>.</span>
       </div>
 
       <div id="skinOps" class="skinOps" aria-label="Skin operations">
@@ -420,7 +420,7 @@
           const el = document.getElementById('vuTargetHint');
           if (!el) return;
           const base = String(api || candidates[0] || '').replace(/\/+$/, '');
-          el.textContent = `${base}/peppy/vumeter`;
+          el.textContent = `${location.origin}/__peppy/vumeter`;
         } catch {}
       }
 
@@ -429,7 +429,7 @@
           const el = document.getElementById('spectrumTargetHint');
           if (!el) return;
           const base = String(api || candidates[0] || '').replace(/\/+$/, '');
-          el.textContent = `${base}/peppy/spectrum`;
+          el.textContent = `${location.origin}/__peppy/spectrum`;
         } catch {}
       }
 
@@ -437,13 +437,9 @@
         try {
           const el = document.getElementById('vuTargetHint');
           if (!el) return;
-          const c = cfg && typeof cfg === 'object' ? cfg : {};
-          const host = String(c.apiNodeIp || location.hostname || API_FALLBACK_HOST).trim() || (location.hostname || API_FALLBACK_HOST);
-          const port = Number(c?.ports?.api || 3101) || 3101;
-          const proto = 'http:'; // moOde posts to the direct LAN API.
-          el.textContent = `${proto}//${host}:${port}/peppy/vumeter`;
+          el.textContent = `${location.origin}/__peppy/vumeter`;
           const sel = document.getElementById('spectrumTargetHint');
-          if (sel) sel.textContent = `${proto}//${host}:${port}/peppy/spectrum`;
+          if (sel) sel.textContent = `${location.origin}/__peppy/spectrum`;
         } catch {}
       }
 
@@ -2161,8 +2157,8 @@
           const tr = await fetch(`${api}/config/moode/browser-url/status`, { headers, cache:'no-store' });
           const tj = await tr.json().catch(() => ({}));
           const current = String(tj?.appUrl || tj?.runUrl || '').trim();
-          const expectedDisplayUrl = `http://${location.hostname || API_FALLBACK_HOST}:8101/display.html?kiosk=1`;
-          const onNowPlayingHost = !!current && current.startsWith(`http://${location.hostname || API_FALLBACK_HOST}:8101/`);
+          const expectedDisplayUrl = `${location.origin}/display.html?mode=peppy&kiosk=1`;
+          const onNowPlayingHost = !!current && current.startsWith(`${location.origin}/`);
           const currentOnPeppy = !!current && current.includes('/peppy.html');
 
           const vr = await fetch(`${api}/peppy/vumeter`, { cache:'no-store' });
@@ -2180,8 +2176,8 @@
           let foundSpectrumTarget = '';
           if (hintEl || spectrumHintEl) {
             const host = location.hostname || API_FALLBACK_HOST;
-            if (hintEl) hintEl.textContent = `http://${host}:3101/peppy/vumeter`;
-            if (spectrumHintEl) spectrumHintEl.textContent = `http://${host}:3101/peppy/spectrum`;
+            if (hintEl) hintEl.textContent = `https://${host}/__peppy/vumeter`;
+            if (spectrumHintEl) spectrumHintEl.textContent = `https://${host}/__peppy/spectrum`;
           }
 
           // Check moOde /etc/peppymeter/config.txt VU target correctness.
@@ -2245,6 +2241,16 @@
             peppyReadiness.textContent = '⚠ Spectrum feed is stale — PeppySpectrum may not be running';
             peppyReadiness.style.color = '#f59e0b';
             return { ok:false, reason:'spectrum-stale' };
+          }
+
+          if (!tr.ok || !tj?.ok) {
+            if (hintWrap) hintWrap.style.display = 'none';
+            if (spectrumHintWrap) spectrumHintWrap.style.display = 'none';
+            if (applyVuTargetBtn) applyVuTargetBtn.style.display = 'none';
+            if (applySpectrumTargetBtn) applySpectrumTargetBtn.style.display = 'none';
+            peppyReadiness.textContent = '✅ VU + Spectrum feeds healthy — moOde display selection not verified';
+            peppyReadiness.style.color = '#22c55e';
+            return {ok:true, reason:'feeds-ready-display-unverified'};
           }
 
           if (!onNowPlayingHost) {
@@ -3366,14 +3372,15 @@
       applyVuTargetBtn?.addEventListener('click', async () => {
         try {
           const host = location.hostname || API_FALLBACK_HOST;
-          const target = `http://${host}:3101/peppy/vumeter`;
+          const target = `https://${host}/__peppy/vumeter`;
           alert(
-            'Fix on moOde:\n\n' +
+            'Peppy telemetry setup on moOde:\n\n' +
             '1) Open /etc/peppymeter/config.txt\n' +
             '2) Under [http.interface], set:\n' +
             `   target.url = ${target}\n` +
             '   update.period = 0.033\n\n' +
-            '3) Restart Peppymeter (via moOde Config or start-peppy.sh meter).'
+            '3) Use the configured Sonuvi telemetry sender with its dedicated credential and trusted HTTPS certificate. Never put the credential in the URL.\n' +
+            '4) Enable the Peppy ALSA audio feed and restart peppymeter.service. A fresh, changing VU reading confirms success; changing the URL alone is not sufficient.'
           );
         } catch {}
       });
@@ -3391,14 +3398,15 @@
         } catch {}
         try {
           const host = location.hostname || API_FALLBACK_HOST;
-          const target = `http://${host}:3101/peppy/spectrum`;
+          const target = `https://${host}/__peppy/spectrum`;
           alert(
-            'Fix on moOde:\n\n' +
+            'Peppy telemetry setup on moOde:\n\n' +
             '1) Open /etc/peppyspectrum/config.txt\n' +
             '2) Under [http.interface], set:\n' +
             `   target.url = ${target}\n` +
             '   update.period = 0.05\n\n' +
-            '3) Restart PeppySpectrum (start-peppy.sh spectrum).'
+            '3) Use the configured Sonuvi telemetry sender with its dedicated credential and trusted HTTPS certificate. Never put the credential in the URL.\n' +
+            '4) Enable the Peppy ALSA audio feed and restart peppy-spectrum-bridge.service. Verify fresh, changing spectrum bins.'
           );
         } catch {}
       });

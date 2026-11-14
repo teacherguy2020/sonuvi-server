@@ -5,8 +5,8 @@ python3 - <<'PY'
 from pathlib import Path
 import re
 
-VUMETER_TARGET = 'http://sonuvi.local:3101/peppy/vumeter'
-SPECTRUM_TARGET = 'http://sonuvi.local:3101/peppy/spectrum'
+VUMETER_TARGET = 'https://sonuvi.local/__peppy/vumeter'
+SPECTRUM_TARGET = 'https://sonuvi.local/__peppy/spectrum'
 
 
 def update_section(text, section_name, updates):
