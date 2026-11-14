@@ -406,3 +406,26 @@ test('Mills stop remains retryable when MPD cleanup or restoration fails', async
   assert.deepEqual(inputs, ['phono', 'aux1', 'aux1']);
   assert.deepEqual(fixture.getQueue(), ['House/BeforeRetry.flac']);
 });
+
+for (const change of ['replace', 'resume']) {
+  test(`Mills delayed stop preserves user ${change} instead of restoring stale snapshot`, async () => {
+    const app = makeApp();
+    const fixture = makeMpdFixture({ state: 'play', song: 0, elapsed: 12,
+      queue: [{ file: 'Old/Album.flac', id: 10 }] });
+    registerMillsRoutes(app, { requireTrackKey: () => true, switchDenonInput: async () => {},
+      mpdEscapeValue: JSON.stringify, mpdHasACK: raw => String(raw).includes('ACK'),
+      parseMpdFirstBlock: () => fixture.getStatus(), mpdQueryRaw: fixture.mpdQueryRaw });
+    await app.routes['POST /integrations/mills/start']({body:{}}, makeResponse());
+    if (change === 'replace') {
+      await fixture.mpdQueryRaw('clear');
+      await fixture.mpdQueryRaw('addid "New/Album.flac"');
+    }
+    await fixture.mpdQueryRaw('play 0');
+    const before = fixture.getQueue(); const start = fixture.commands.length;
+    const res = makeResponse();
+    await app.routes['POST /integrations/mills/stop']({body:{}}, res);
+    assert.equal(res.statusCode, 200); assert.equal(res.body.active, false);
+    assert.deepEqual(fixture.getQueue(), before); assert.equal(fixture.getStatus().state, 'play');
+    assert.equal(fixture.commands.slice(start).some(c => /^(clear$|play(?: |id )|seekid |pause |stop$|addid )/.test(c)), false);
+  });
+}

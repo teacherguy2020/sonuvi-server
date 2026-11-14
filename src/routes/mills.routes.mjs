@@ -333,7 +333,18 @@ export function registerMillsRoutes(app, deps) {
         if (millsActive || hasPersistedMillsEntries) {
           await withJukeboxMutation(async () => {
             await removeMillsSurrogates();
-            await restoreMpdSession(millsSession?.snapshot);
+            const snapshot = millsSession?.snapshot;
+            const current = await snapshotMpdSession();
+            // Mills only paused MPD. A changed queue, selection, position or
+            // resumed playback belongs to the user, not the old Mills snapshot.
+            const expectedState = snapshot?.state === 'play' ? 'pause' : snapshot?.state;
+            const unchanged = snapshot && current.state === expectedState
+              && current.currentSongId === snapshot.currentSongId
+              && Math.abs(current.elapsed - snapshot.elapsed) < 1
+              && current.queue.length === snapshot.queue.length
+              && current.queue.every((item, index) => item.file === snapshot.queue[index].file
+                && item.mpdSongId === snapshot.queue[index].mpdSongId);
+            if (unchanged) await restoreMpdSession(snapshot);
           });
         }
         millsActive = false;
