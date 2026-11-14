@@ -2250,7 +2250,7 @@
       async function checkMoodeTargetUrl(){
         const host = location.hostname || 'sonuvi.local';
         const base = globalThis.NPArt.apiBase();
-        const expected = `http://${host}:8101/display.html?kiosk=1`;
+        const expected = `${location.origin}/display.html?mode=${currentShellPage === 'player.html' ? 'player' : 'peppy'}&kiosk=1`;
         const hint = document.getElementById('targetUrlHint');
         const isPeppyPage = String(currentShellPage || '') === 'peppy.html';
         try {
@@ -2265,7 +2265,9 @@
           }, 8000);
           if (!r.ok || !j?.ok) throw new Error(j?.error || `HTTP ${r.status}`);
           const current = String(j?.appUrl || j?.runUrl || '').trim();
-          const ok = current.startsWith(`http://${host}:8101/display.html`);
+          if (!current) throw new Error('Target not verified');
+          const target = new URL(current);
+          const ok = target.origin === location.origin && target.pathname === '/display.html' && target.searchParams.get('mode') === new URL(expected).searchParams.get('mode');
           if (hint) {
             if (isPeppyPage) {
               hint.style.display = 'none';
@@ -2285,8 +2287,8 @@
               hint.textContent = '';
             } else {
               hint.style.display = '';
-              hint.textContent = 'Target check unavailable';
-              hint.style.color = '#f59e0b';
+              hint.textContent = 'Current moOde display not verified';
+              hint.style.color = '#94a3b8';
             }
           }
           return false;

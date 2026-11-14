@@ -70,20 +70,23 @@
         if (!targetHint) return;
         const host = location.hostname || 'sonuvi.local';
         const api = globalThis.NPArt.apiBase();
-        const expected = `http://${host}:8101/display.html?kiosk=1`;
+        const expected = `${location.origin}/display.html?mode=player&kiosk=1`;
         try {
           await ensureRuntimeKey();
           const r = await fetch(`${api}/config/moode/browser-url/status`, { headers:{...(runtimeTrackKey?{'x-track-key':runtimeTrackKey}:{})}, cache:'no-store' });
           const j = await r.json().catch(()=>({}));
+          if (!r.ok || j?.ok !== true) throw new Error('Target not verified');
           const current = String(j?.appUrl || j?.runUrl || '').trim();
-          const ok = !!current && current.startsWith(`http://${host}:8101/`);
+          if (!current) throw new Error('Target not verified');
+          const target = new URL(current);
+          const ok = target.origin === location.origin && target.pathname === '/display.html' && target.searchParams.get('mode') === 'player';
           targetHint.style.color = ok ? '#22c55e' : '#f59e0b';
           targetHint.textContent = ok
             ? `✅ Target URL in moOde web-ui properly set to ${current}`
-            : `⚠ The target URL in moOde Web UI config needs to be ${expected} to use this display.`;
+            : `moOde is using a different display. Player address: ${expected}`;
         } catch {
-          targetHint.style.color = '#f59e0b';
-          targetHint.textContent = `⚠ Target check unavailable. The target URL in moOde Web UI config needs to be ${expected} to use this display.`;
+          targetHint.style.color = '#94a3b8';
+          targetHint.textContent = `Player address: ${expected} — current moOde display not verified.`;
         }
       }
 
