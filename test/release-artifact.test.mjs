@@ -57,6 +57,7 @@ async function sourceFixture(t) {
   await write(root, 'scripts/sonuvi-admin-bootstrap.mjs', 'console.log("fixture administrator bootstrap");\n');
   await write(root, 'scripts/sonuvi-admin-session.mjs', 'console.log("fixture administrator session");\n');
   await write(root, 'scripts/sonuvi-music-setup.mjs', 'console.log("fixture administrator session");\n');
+  await write(root, 'scripts/sonuvi-remote-setup.mjs', 'console.log("fixture remote setup");\n');
   await write(root, 'scripts/sonuvi-music-index.mjs', 'console.log("fixture administrator session");\n');
   await write(root, 'scripts/sonuvi-debian-node-bootstrap.sh', '#!/bin/sh\nexit 0\n');
   await write(root, 'scripts/sonuvi-target-installer.mjs', 'console.log("fixture target installer");\n');
@@ -110,7 +111,7 @@ async function releaseFixture(t, { label = 'one' } = {}) {
   assert.deepEqual(built.manifest.requiredServices, ['sonuvi-api.service', 'sonuvi-web.service']);
   assert.equal(built.manifest.verifier.runtimeContract, 'sonuvi.release-runtime.v2');
   assert.equal(built.manifest.verifier.requiredRuntimeEntrypoints.includes('scripts/sonuvi-admin-session.mjs'), true);
-  for (const helper of ['scripts/sonuvi-music-setup.mjs', 'scripts/sonuvi-music-index.mjs']) {
+  for (const helper of ['scripts/sonuvi-music-setup.mjs', 'scripts/sonuvi-remote-setup.mjs', 'scripts/sonuvi-music-index.mjs']) {
     assert.equal(built.manifest.verifier.requiredRuntimeEntrypoints.includes(helper), true);
     assert.ok((await fs.readFile(path.join(output, helper), 'utf8')).length > 0);
   }

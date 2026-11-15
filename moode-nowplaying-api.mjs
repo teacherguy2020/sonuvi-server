@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { registerRemoteAccessRoute, createRemoteNativeListener, REMOTE_PROXY_PORT } from './src/lib/sonuvi-remote-access.mjs';
 import { registerDeferredPlaybackRoutes } from './src/routes/deferred-playback.routes.mjs';
 /**
  * moode-nowplaying-api.mjs -- moOde Now-Playing API (Pi4)
@@ -41,6 +42,7 @@ import { localTrustRecord, readLocalTLSBundle, LOCAL_TLS_PORT } from './src/lib/
 const hardwareCompatibilityConfig = resolveHardwareCompatibility({ apiHost: API_LISTEN_HOST, apiPort: PORT, trackKey: TRACK_KEY });
 let hardwareCompatibilityRuntime = null;
 let localTLSRuntime = null;
+let remoteNativeListener = null;
 let localAdvertisement = null;
 import { lookupAnimatedArt, resolveAnimatedMediaFile } from './src/routes/config.library-health-animated-art.routes.mjs';
 import fs from 'node:fs';
@@ -9228,6 +9230,7 @@ if (deviceSessions && MOBILE_API_SECRET) {
     }
   });
 }
+registerRemoteAccessRoute(app, {stateRoot: RUNTIME_STATE_PATHS.stateRoot});
 const runtimeBrowseIndex = createRuntimeBrowseIndexProvider({
   freshInstall: FRESH_INSTALL_MODE && process.env.SONUVI_MUSIC_CONFIGURED !== '1',
   getMpdBrowseIndex,
@@ -9274,6 +9277,7 @@ const dlnaRuntime = createDlnaRuntime({
   log,
 });
 stopRuntimeForShutdown = () => Promise.all([dlnaRuntime.stop(), hardwareCompatibilityRuntime?.close(), localAdvertisement?.stop(),
+  remoteNativeListener ? new Promise(resolve => { remoteNativeListener.close(resolve); remoteNativeListener.closeAllConnections(); }) : null,
   localTLSRuntime ? new Promise(resolve => { localTLSRuntime.server.close(resolve); localTLSRuntime.server.closeAllConnections(); }) : null]);
 const startDlnaRuntime = () => dlnaRuntime.start();
 
@@ -10112,6 +10116,11 @@ if (hardwareCompatibilityConfig.enabled) {
 }
 
 if (process.env.SONUVI_LOCAL_HTTPS_ENABLED === '1') {
+  remoteNativeListener = createRemoteNativeListener(app);
+  await new Promise((resolve, reject) => {
+    remoteNativeListener.once('error', reject);
+    remoteNativeListener.listen(REMOTE_PROXY_PORT, '127.0.0.1', resolve);
+  });
   localTLSRuntime = await loadLocalTLSListener({stateRoot:process.env.SONUVI_STATE_ROOT || '/var/lib/sonuvi',handler:app,
     onReloadError:()=>log.error('Local HTTPS renewal unavailable; existing trust is unchanged')});
   if (!localTLSRuntime) throw new Error('local_tls_required');
