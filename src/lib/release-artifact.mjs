@@ -117,7 +117,6 @@ const RELEASE_STATIC_ENTRYPOINTS = [
   'scripts/sonuvi-admin-bootstrap.mjs',
   'scripts/sonuvi-admin-session.mjs',
   'scripts/sonuvi-music-setup.mjs',
-  'scripts/sonuvi-remote-setup.mjs',
   'scripts/sonuvi-music-index.mjs',
   'scripts/sonuvi-debian-node-bootstrap.sh',
   'scripts/sonuvi-target-installer.mjs',

@@ -111,7 +111,9 @@ async function releaseFixture(t, { label = 'one' } = {}) {
   assert.deepEqual(built.manifest.requiredServices, ['sonuvi-api.service', 'sonuvi-web.service']);
   assert.equal(built.manifest.verifier.runtimeContract, 'sonuvi.release-runtime.v2');
   assert.equal(built.manifest.verifier.requiredRuntimeEntrypoints.includes('scripts/sonuvi-admin-session.mjs'), true);
-  for (const helper of ['scripts/sonuvi-music-setup.mjs', 'scripts/sonuvi-remote-setup.mjs', 'scripts/sonuvi-music-index.mjs']) {
+  assert.ok((await fs.readFile(path.join(output, 'scripts/sonuvi-remote-setup.mjs'), 'utf8')).length > 0);
+  assert.equal(built.manifest.verifier.requiredRuntimeEntrypoints.includes('scripts/sonuvi-remote-setup.mjs'), false);
+  for (const helper of ['scripts/sonuvi-music-setup.mjs', 'scripts/sonuvi-music-index.mjs']) {
     assert.equal(built.manifest.verifier.requiredRuntimeEntrypoints.includes(helper), true);
     assert.ok((await fs.readFile(path.join(output, helper), 'utf8')).length > 0);
   }
