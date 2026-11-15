@@ -9548,6 +9548,7 @@ registerQueueRoutes(app, {
 });
 
 registerSeeburgRoutes(app, {
+  getMillsIntegrationState,
   requireTrackKey,
   mpdQueryRaw,
   mpdEscapeValue,
@@ -9557,6 +9558,7 @@ registerSeeburgRoutes(app, {
 });
 
 registerMultiphoneRoutes(app, {
+  getMillsIntegrationState,
   requireTrackKey,
   mpdQueryRaw,
   mpdEscapeValue,

@@ -247,7 +247,7 @@ export function registerMillsRoutes(app, deps) {
   app.post('/integrations/mills/start', async (req, res) => {
     try {
       if (!requireTrackKey(req, res)) return;
-      return await withMillsTransition(async () => {
+      return await withMillsTransition(() => withJukeboxMutation(async () => {
         if (millsActive) {
           return res.json({
             ok: true,
@@ -278,7 +278,7 @@ export function registerMillsRoutes(app, deps) {
           showProgress: false,
           awaitingSelection: true,
         });
-      });
+      }));
     } catch (error) {
       return res.status(502).json({ ok: false, error: error?.message || String(error) });
     }
@@ -287,34 +287,52 @@ export function registerMillsRoutes(app, deps) {
   app.post('/integrations/mills/stop', async (req, res) => {
     try {
       if (!requireTrackKey(req, res)) return;
-      return await withMillsTransition(async () => {
+      return await withMillsTransition(() => withJukeboxMutation(async () => {
         if (!millsActive && lastTransition?.state === 'idle' && lastTransition?.input === 'Aux 1') {
           return res.json({ ok: true, active: false, duplicate: true, switched: false });
         }
         await switchDenonInput('aux1');
         const hasPersistedMillsEntries = [...jukeboxEntries.values()].some((entry) => entry?.source === 'mills');
         if (millsActive || hasPersistedMillsEntries) {
-          await withJukeboxMutation(async () => {
-            await removeMillsSurrogates();
-            const snapshot = millsSession?.pausedSnapshot;
-            const current = await snapshotMpdSession();
-            // Mills only paused MPD. A changed queue, selection, position or
-            // resumed playback belongs to the user, not the old Mills snapshot.
-            const expectedState = snapshot?.state === 'play' ? 'pause' : snapshot?.state;
-            const unchanged = snapshot && current.state === expectedState
-              && current.currentSongId === snapshot.currentSongId
-              && Math.abs(current.elapsed - snapshot.elapsed) < 1
-              && current.queue.length === snapshot.queue.length
-              && current.queue.every((item, index) => item.file === snapshot.queue[index].file
-                && item.mpdSongId === snapshot.queue[index].mpdSongId);
-            if (unchanged) await resumeMpdSession(millsSession.snapshot);
-          });
+          await removeMillsSurrogates();
+          const snapshot = millsSession?.pausedSnapshot;
+          const current = await snapshotMpdSession();
+          // Deferred requests are allowed additions; every original ID/order and
+          // paused checkpoint must still match before automatic handoff.
+          const expectedState = snapshot?.state === 'play' ? 'pause' : snapshot?.state;
+          const originalIds = new Set(snapshot?.queue.map(item => item.mpdSongId) || []);
+          const isNewDeferred = item => !originalIds.has(item.mpdSongId)
+            && jukeboxEntries.get(item.mpdSongId)?.deferredByMills;
+          const deferred = current.queue.filter(isNewDeferred);
+          const originalQueue = current.queue.filter(item => !isNewDeferred(item));
+          const unchanged = snapshot && current.state === expectedState
+            && current.currentSongId === snapshot.currentSongId
+            && Math.abs(current.elapsed - snapshot.elapsed) < 1
+            && originalQueue.length === snapshot.queue.length
+            && originalQueue.every((item, index) => item.file === snapshot.queue[index].file
+              && item.mpdSongId === snapshot.queue[index].mpdSongId);
+          if (unchanged) {
+            const interruptedPriority = jukeboxEntries.has(current.currentSongId)
+              && millsSession.snapshot?.state === 'play';
+            if (deferred.length && !interruptedPriority) {
+              const play = await mpdQueryRaw(`playid ${deferred[0].mpdSongId}`);
+              if (!play || mpdHasACK(play)) throw new Error('MPD rejected deferred priority handoff');
+            } else {
+              await resumeMpdSession(millsSession.snapshot);
+            }
+          }
+          // A user queue/seek/play change still wins; leave their queue intact.
+          let changed = false;
+          for (const entry of jukeboxEntries.values()) {
+            if (entry.deferredByMills) { delete entry.deferredByMills; changed = true; }
+          }
+          if (changed) persistJukeboxState(deps.jukeboxStatePath);
         }
         millsActive = false;
         millsSession = null;
         lastTransition = { state: 'idle', at: new Date().toISOString(), input: 'Aux 1' };
         return res.json({ ok: true, active: false, duplicate: false, switched: true, input: 'Aux 1' });
-      });
+      }));
     } catch (error) {
       // Keep the active latch set when source restoration fails so a repeated
       // Shelly event can safely retry the consequential operation.
@@ -333,7 +351,7 @@ export function registerMillsRoutes(app, deps) {
         return res.status(409).json({ ok: false, active: false, error: 'Mills session is not active' });
       }
 
-      return await withMillsTransition(async () => {
+      return await withMillsTransition(() => withJukeboxMutation(async () => {
         if (isDuplicateMillsSelection(slot)) {
           return res.json({
             ok: true,
@@ -375,7 +393,7 @@ export function registerMillsRoutes(app, deps) {
           showProgress: false,
           metadata: selection.metadata,
         });
-      });
+      }));
     } catch (error) {
       const status = Number.isInteger(error?.statusCode) ? error.statusCode : 502;
       return res.status(status).json({ ok: false, error: error?.message || String(error) });

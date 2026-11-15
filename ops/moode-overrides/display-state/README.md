@@ -21,3 +21,19 @@ Changed queues, resumed playback and user seeks are left alone.
 The optional wake module is hidden in Optional integrations until configured;
 it is not a general moOde requirement. A full installable plugin lifecycle for
 Mills, Seeburg and Multiphone remains a separate architecture task.
+
+
+## Priority requests during Mills (2026-11-15)
+
+Mills owns the physical audio source from start through completed stop. Seeburg
+and Multiphone/Mabel requests received in that interval only enqueue: no MPD
+start, house queue clear, or Mabel play-now promotion. Requests share a FIFO
+priority segment. A delayed Mabel confirmation reuses its reserved item.
+
+Mills transitions and request insertions share the MPD mutation lock. At stop,
+new deferred IDs are allowed additions to the paused snapshot; all original
+IDs/order, selected ID, state and elapsed checkpoint must still match. Resume an
+interrupted priority track first, otherwise start the first waiting request at
+zero, then let the remaining priority tracks and house queue advance normally.
+User queue/seek/play changes are preserved. Duplicate stop cannot restart or
+skip a request. Regression coverage: test/mills-priority-handoff.test.mjs.
