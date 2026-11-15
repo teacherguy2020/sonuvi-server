@@ -121,3 +121,15 @@ test('concurrent or interrupted writers do not overwrite state or steal a lock',
   assert.equal(fs.readFileSync(registry.file, 'utf8'), previous);
   assert.ok(fs.existsSync(registry.lock));
 });
+
+
+test('self naming preserves approval generation and cannot resurrect revoked grants', t => {
+  const {registry}=fixture(t);
+  const claims={deviceId:'phone',sid:registry.authorize('phone')};
+  const before=registry.read()[0];
+  registry.describe(claims,'Kitchen iPhone');
+  assert.deepEqual({...registry.read()[0],label:before.label},before);
+  assert.throws(()=>registry.describe({...claims,sid:'wrong'},'wrong'),/rejected/);
+  assert.throws(()=>registry.describe(claims,'bad\nname'),/invalid/);
+  registry.revoke('phone');assert.throws(()=>registry.describe(claims,'revived'),/rejected/);
+});

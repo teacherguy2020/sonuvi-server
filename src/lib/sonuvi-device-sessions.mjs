@@ -149,6 +149,18 @@ export class DeviceSessionRegistry {
     });
   }
 
+  // A verified device may supply its own display name, never another device's
+  // identity, role, session or approval. Recheck under the same writer lock.
+  describe(claims, label) {
+    if (typeof label !== 'string' || !label.trim() || label.length > 120 || /[\x00-\x1f\x7f]/.test(label)) throw new Error('device_session_label_invalid');
+    return this.mutate(devices => {
+      const record = devices.find(item => item.deviceId === claims?.deviceId);
+      if (!record || record.status !== 'active' || !(record.sessionId === claims.sid || (claims.sid === undefined && this.allowLegacy && record.allowLegacy))) throw new Error('device_session_rejected');
+      record.label = label.trim();
+      return true;
+    });
+  }
+
   list() {
     return this.read().map(({ deviceId, label, role, status, createdAt, updatedAt }) => ({ deviceId, label, role, status, createdAt, updatedAt }));
   }

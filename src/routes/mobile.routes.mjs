@@ -2411,10 +2411,10 @@ export function registerMobileRoutes(app, deps = {}) {
     return false;
   };
 
-  const issueMobileSession = (deviceId, { persistentControllerRefresh = false, renewalClaims } = {}) => {
+  const issueMobileSession = (deviceId, { persistentControllerRefresh = false, renewalClaims, label = '' } = {}) => {
     const issuedAt = Date.now();
     const sessionId = sessionRegistry
-      ? (renewalClaims ? sessionRegistry.renew(renewalClaims) : sessionRegistry.authorize(deviceId))
+      ? (renewalClaims ? sessionRegistry.renew(renewalClaims) : sessionRegistry.authorize(deviceId, { label }))
       : undefined;
     const accessTTL = renewalClaims && sessionRegistry?.administratorFor({ ...renewalClaims, sid: sessionId })
       ? 15 * 60 * 1000 : SESSION_TTL_MS;
@@ -2623,6 +2623,17 @@ export function registerMobileRoutes(app, deps = {}) {
       challenge: created.challenge,
       expiresAt: created.expiresAt,
     };
+    // Additional native invitation for the browser display. Preserve the legacy
+    // response payload for deployed native/TV clients. Only public anchor data
+    // enters the QR; display authorization and all session credentials stay out.
+    const localTrust = typeof deps.localTrust === 'function' ? await deps.localTrust() : null;
+    const nativeInvitation = localTrust ? {
+      protocol: 'sonuvi-device-pairing', version: 1,
+      pairing: { ...qrPayload, baseUrl: localTrust.origin }, localTrust,
+    } : null;
+    const nativeText = nativeInvitation ? JSON.stringify(nativeInvitation) : '';
+    if (Buffer.byteLength(nativeText) > 2200) throw new Error('native_pairing_invitation_too_large');
+    const nativeQRDataUrl = nativeInvitation ? await QRCode.toDataURL(nativeText, { errorCorrectionLevel: 'M', margin: 4, width: 360 }) : null;
     const qrDataUrl = await QRCode.toDataURL(JSON.stringify(qrPayload), {
       errorCorrectionLevel: 'M',
       margin: 1,
@@ -2636,6 +2647,7 @@ export function registerMobileRoutes(app, deps = {}) {
       expiresAt: created.expiresAt,
       qrPayload,
       qrDataUrl,
+      ...(nativeInvitation ? { nativeInvitation, nativeQRDataUrl } : {}),
       displayToken: created.displayToken,
     });
   }));
@@ -2692,7 +2704,7 @@ export function registerMobileRoutes(app, deps = {}) {
     const result = pairingStore.complete({
       requestId: req?.params?.requestId,
       pollToken,
-      issueSession: ({ deviceId }) => issueMobileSession(deviceId),
+      issueSession: ({ deviceId, deviceName, deviceModel }) => issueMobileSession(deviceId, { label: text(deviceName || deviceModel).slice(0, 120) }),
     });
     return res.json({ ok: true, ...result });
   }));
@@ -2716,7 +2728,7 @@ export function registerMobileRoutes(app, deps = {}) {
     }));
   }
   app.post('/v1/mobile/pairing/presentations/:presentationId/cancel', pairingRoute(async (req, res) => res.json({ ok: true, ...pairingStore.cancelPresentation({ presentationId: req?.params?.presentationId, pollToken: text(req?.headers?.['x-mobile-pairing-poll-token']) }) })));
-  app.get('/v1/mobile/pairing/presentations/:presentationId/complete', pairingRoute(async (req, res) => res.json({ ok: true, ...pairingStore.completePresentation({ presentationId: req?.params?.presentationId, pollToken: text(req?.headers?.['x-mobile-pairing-poll-token']), issueSession: ({ deviceId }) => issueMobileSession(deviceId) }) })));
+  app.get('/v1/mobile/pairing/presentations/:presentationId/complete', pairingRoute(async (req, res) => res.json({ ok: true, ...pairingStore.completePresentation({ presentationId: req?.params?.presentationId, pollToken: text(req?.headers?.['x-mobile-pairing-poll-token']), issueSession: ({ deviceId, deviceName, deviceModel }) => issueMobileSession(deviceId, { label: text(deviceName || deviceModel).slice(0, 120) }) }) })));
 
   app.post('/v1/mobile/session', asyncRoute(async (req, res) => {
     const suppliedCode = text(req?.headers?.['x-mobile-enrollment-code']);
@@ -2768,6 +2780,30 @@ export function registerMobileRoutes(app, deps = {}) {
       || verifyMobileToken(refresh,{secret:apiSecret,scope:'controller-web-refresh'});
     if (!session) return errorResponse(res,401,'device session is missing or revoked');
     sessionRegistry.revoke(session.deviceId);
+    return res.json({ ok: true });
+  }));
+
+  // Approval inventory is readable by approved controllers. Management remains
+  // administrator-only below; never expose session IDs, tokens or owner IDs.
+  app.get('/v1/mobile/devices', asyncRoute(async (req, res) => {
+    const session = requireSession(req, res);
+    if (!session) return;
+    if (!sessionRegistry) return errorResponse(res, 503, 'device inventory is unavailable');
+    res.set('Cache-Control', 'no-store');
+    return res.json({ ok: true, currentDeviceId: session.deviceId, devices: sessionRegistry.list()
+      .filter(device => device.status === 'active')
+      .map(({ deviceId, label }) => ({ deviceId, label: label || '', isCurrent: deviceId === session.deviceId })) });
+  }));
+
+  app.post('/v1/mobile/devices/self', asyncRoute(async (req, res) => {
+    const session = requireSession(req, res);
+    if (!session) return;
+    if (!sessionRegistry) return errorResponse(res, 503, 'device inventory is unavailable');
+    const body = req.body || {};
+    if (Object.keys(body).some(key => key !== 'label') || typeof body.label !== 'string'
+      || !body.label.trim() || body.label.length > 120 || /[\x00-\x1f\x7f]/.test(body.label)) return errorResponse(res, 400, 'invalid device name');
+    try { sessionRegistry.describe(session, body.label); }
+    catch { return errorResponse(res, 401, 'device session is missing or revoked'); }
     return res.json({ ok: true });
   }));
 

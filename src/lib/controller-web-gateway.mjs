@@ -17,6 +17,13 @@ const cookie = (req,name) => String(req.headers.cookie || '').split(';').map(s=>
 const equal = (a,b) => {const x=Buffer.from(String(a||'')),y=Buffer.from(String(b||''));return x.length===y.length&&crypto.timingSafeEqual(x,y);};
 const setCookie = (name,value,secure,age) => `${name}=${value}; Path=/; HttpOnly; SameSite=Strict${secure?'; Secure':''}; Max-Age=${age}`;
 const send = (res,status,body,headers={}) => {res.writeHead(status,{'content-type':'application/json','cache-control':'no-store',...headers});res.end(JSON.stringify(body));};
+function browserDeviceLabel(userAgent) {
+  const ua = String(userAgent || '');
+  const browser = /Edg\//.test(ua) ? 'Edge' : /Firefox\//.test(ua) ? 'Firefox' : /Chrom(e|ium)\//.test(ua) ? 'Chrome / Chromium' : /Safari\//.test(ua) ? 'Safari' : 'Browser';
+  const platform = /iPad/.test(ua) ? 'iPad' : /iPhone/.test(ua) ? 'iPhone' : /Android/.test(ua) ? 'Android' : /Linux/.test(ua) ? 'Linux' : /Macintosh/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows' : '';
+  return platform ? `${browser} on ${platform}` : browser;
+}
+
 async function readJson(req) {
   if (!/^application\/json(?:;|$)/i.test(req.headers['content-type'] || '')) throw new Error('JSON body required');
   const chunks=[];let size=0;for await (const chunk of req) {size+=chunk.length;if(size>65536)throw new Error('body too large');chunks.push(chunk);}
@@ -102,7 +109,13 @@ export function createControllerWebGateway({ secret=process.env.SONUVI_CONTROLLE
     const legacy=isControllerDispatchable({method:req.method,pathname:url.pathname});
     const mobile=req.method==='GET'&&mobileRead(url.pathname);
     const browserKey=isBrowserKeyRoute(req.method,url.pathname,url.search.length>0);
-    if(!url.pathname.startsWith('/__controller/')&&!legacy&&!mobile&&!browserKey)return false;
+      const mobilePairingDisplay = !url.search && (
+        (url.pathname === '/v1/mobile/pairing/challenges' && req.method === 'POST') ||
+        (url.pathname === '/v1/mobile/pairing/challenges/cancel' && req.method === 'POST') ||
+        (url.pathname === '/v1/mobile/pairing/requests' && req.method === 'GET') ||
+        (/^\/v1\/mobile\/pairing\/requests\/[\w-]{16,160}\/(approve|reject)$/.test(url.pathname) && req.method === 'POST')
+      );
+    if(!url.pathname.startsWith('/__controller/')&&!legacy&&!mobile&&!browserKey&&!mobilePairingDisplay)return false;
     prune();
     const local=isLoopbackAddress(req.socket.remoteAddress);
     const fixture=allowLoopbackFixture&&local&&/^(127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/.test(req.headers.host||'');
@@ -121,7 +134,7 @@ export function createControllerWebGateway({ secret=process.env.SONUVI_CONTROLLE
         if(sessions.size>=512){send(res,429,{ok:false,error:'Browser capacity reached.'});return true;}
         let body;try{body=await readJson(req);}catch{send(res,400,{ok:false,error:'Invalid sign-in request.'});return true;}
         if(Object.keys(body).sort().join(',')!=='password,username'||typeof body.username!=='string'||typeof body.password!=='string'||body.username.length>128||Buffer.byteLength(body.password)>1024){send(res,400,{ok:false,error:'Invalid sign-in request.'});return true;}
-        const up=await api('POST','/v1/auth/login',{body:{username:body.username,password:body.password,deviceName:'Sonuvi browser'}});
+        const up=await api('POST','/v1/auth/login',{body:{username:body.username,password:body.password,deviceName:browserDeviceLabel(req.headers['user-agent'])}});
         const grant=await up.json();
         if(!up.ok){send(res,up.status,{ok:false,error:up.status===429?'Too many sign-in attempts. Try again shortly.':'Sign-in was not accepted.'});return true;}
         const expiry=expiresAt(grant.expiresAt);
@@ -133,6 +146,22 @@ export function createControllerWebGateway({ secret=process.env.SONUVI_CONTROLLE
       if(url.pathname==='/__controller/session'&&req.method==='GET'){
         if(session){session=await ensureAccess(id,session);if(!session){send(res,401,{ok:false,error:'Controller authorization was revoked; pair again.'},{'set-cookie':setCookie('sonuvi_controller','',secure,0)});return true;}}
         send(res,200,{ok:true,authenticated:!!session,csrfToken:session?.csrf||null,role:session?.role||'controller',expiresAt:session?.accessExpiresAt||null,persistent:!!session?.refreshToken},session?{'set-cookie':controllerCookie(id,secure)}:{});return true;
+      }
+      // Trusted browser displaying a native-device QR: use the same paired
+      // bearer internally, with cookie+CSRF at the browser boundary. No Track
+      // Key or session token is returned to JavaScript.
+      if (mobilePairingDisplay) {
+        if (session) session = await ensureAccess(id, session);
+        if (!session) { send(res,401,{ok:false,error:'Sign in before adding a device.'}); return true; }
+        if (req.method !== 'GET' && !equal(session.csrf, req.headers['x-csrf-token'])) { send(res,403,{ok:false,error:'CSRF validation failed.'}); return true; }
+        const headers = {authorization:`Bearer ${session.accessToken}`};
+        const displayToken = req.headers['x-mobile-pairing-display-token'];
+        if (typeof displayToken === 'string' && displayToken.length <= 256) headers['x-mobile-pairing-display-token'] = displayToken;
+        const decision = /\/(approve|reject)$/.test(url.pathname);
+        const body = decision ? await readJson(req) : req.method === 'POST' ? {} : undefined;
+        if (decision && (Object.keys(body).some(key => key !== 'verificationCode') || typeof body.verificationCode !== 'string' || body.verificationCode.length > 32)) { send(res,400,{ok:false,error:'Enter the matching verification code.'}); return true; }
+        const up = await api(req.method,url.pathname,{headers,...(body ? {body} : {})});
+        send(res,up.status,await up.json()); return true;
       }
       const deviceRemoval=url.pathname.match(/^\/__controller\/devices\/([A-Za-z0-9._:-]{1,200})$/);
       const displayAction = url.pathname === '/__controller/configuration/display' && req.method === 'POST';
@@ -177,7 +206,7 @@ export function createControllerWebGateway({ secret=process.env.SONUVI_CONTROLLE
         if(pairings.size>=128||sessions.size>=512){send(res,429,{ok:false,error:'Controller capacity reached.'});return true;}
         const up=await api('POST','/v1/mobile/pairing/presentations');const p=await up.json();
         if(!up.ok||!p.presentationId||!p.pollToken)throw new Error('pairing unavailable');
-        const device={deviceId:'browser-'+crypto.randomUUID(),deviceName:'Sonuvi browser controller',deviceModel:'Web browser'};
+        const device={deviceId:'browser-'+crypto.randomUUID(),deviceName:browserDeviceLabel(req.headers['user-agent']),deviceModel:'Web browser'};
         const keys=crypto.generateKeyPairSync('ec',{namedCurve:'prime256v1'});
         const message=reversePairingProofMessage({...device,presentationId:p.presentationId,challenge:p.challenge});
         const attestation=await api('POST',`/v1/mobile/pairing/presentations/${encodeURIComponent(p.presentationId)}/attest`,{body:{...device,publicKey:keys.publicKey.export({format:'der',type:'spki'}).toString('base64url'),signature:crypto.sign('sha256',Buffer.from(message),keys.privateKey).toString('base64url'),signatureAlgorithm:'ecdsa-p256-sha256'}});

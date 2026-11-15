@@ -47,14 +47,14 @@
   </section>
 
   <div class="card" data-mobile-pairing>
-    <h1>Pair Mobile Device</h1>
+    <h1>Add another device</h1>
     <p class="sub">Approve the native Now Playing iPhone/iPad/CarPlay app from this authenticated controller.</p>
-    <div class="hint npMobilePairingIntro">The QR code contains only a short-lived pairing challenge and the visible server address. It never contains API secrets or access tokens.</div>
+    <div class="hint npMobilePairingIntro">On the new iPhone or iPad, open Settings → Devices → Add this device and scan the code shown here.</div>
     <div class="npMobilePairingActions">
-      <button class="applyBtn" type="button" data-pair-start>Pair new device</button>
+      <button class="applyBtn" type="button" data-pair-start>Show pairing QR code</button>
       <button class="applyBtn" type="button" data-pair-cancel hidden>Cancel pairing</button>
     </div>
-    <div class="hint npMobilePairingStatus" data-pair-status role="status" aria-live="polite">Pairing requires the configured Track Key.</div>
+    <div class="hint npMobilePairingStatus" data-pair-status role="status" aria-live="polite">Show a code, scan it on your new device, then approve its matching request here.</div>
     <div data-pair-qr-wrap hidden>
       <div class="npMobilePairingGrid">
         <div><img class="npMobilePairingQr" data-pair-qr alt="Pairing QR code" /></div>

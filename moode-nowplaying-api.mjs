@@ -9208,6 +9208,12 @@ const firstAdministratorAuthority = new AdministratorAuthority({
   stateRoot: RUNTIME_STATE_PATHS.stateRoot,
   verifyLoginSession: token => sonuviLogin?.verifyAdministratorSession(token),
 });
+const pairingLocalTrust = async () => {
+  if (process.env.SONUVI_LOCAL_HTTPS_ENABLED !== '1') return null;
+  const bundle = await readLocalTLSBundle({stateRoot:process.env.SONUVI_STATE_ROOT || '/var/lib/sonuvi'});
+  if (!bundle) throw new Error('local_tls_unavailable');
+  return localTrustRecord(bundle);
+};
 if (deviceSessions && MOBILE_API_SECRET) {
   sonuviLogin = new SonuviLogin({
     directory: path.join(RUNTIME_STATE_PATHS.stateRoot, 'data', 'owner-login'),
@@ -9273,6 +9279,7 @@ const startDlnaRuntime = () => dlnaRuntime.start();
 
 
 registerMobileRoutes(app, {
+  localTrust: pairingLocalTrust,
   sessionRegistry: deviceSessions,
   enabled: MOBILE_API_ENABLED,
   apiSecret: MOBILE_API_SECRET,

@@ -2583,3 +2583,51 @@ test('catalog stats exclude downloaded podcasts while retaining music track iden
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.body.counts, {tracks:2, albums:1, artists:1});
 });
+
+
+test('approved controllers see active native and browser devices without credentials or management authority', async t => {
+  const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'sonuvi-device-inventory-'));
+  t.after(() => fs.rmSync(root, {recursive:true,force:true}));
+  const registry = new DeviceSessionRegistry({directory:path.join(root,'devices')});
+  const secret = 'device-inventory-fixture';
+  const sid = registry.authorize('iphone', {label:'iPhone'});
+  registry.authorize('browser-moode', {label:'moOde Chromium'});
+  registry.authorize('tv', {label:'Apple TV'});
+  registry.authorize('removed'); registry.revoke('removed');
+  const app = createApp();
+  registerMobileRoutes(app, {enabled:true,apiSecret:secret,trackIdSecret:'separate-track-secret',sessionRegistry:registry});
+  const handler = app.routes.get('GET /v1/mobile/devices');
+  const token = createMobileSessionToken({secret,deviceId:'iphone',sessionId:sid});
+  const headers = {authorization:`Bearer ${token}`};
+  let res = createResponse();await handler(request(),res);assert.equal(res.statusCode,401);
+  res=createResponse();await handler(request({headers}),res);
+  assert.equal(res.statusCode,200);assert.equal(res.headers['Cache-Control'],'no-store');
+  assert.deepEqual(res.body,{ok:true,currentDeviceId:'iphone',devices:[
+    {deviceId:'iphone',label:'iPhone',isCurrent:true},
+    {deviceId:'browser-moode',label:'moOde Chromium',isCurrent:false},
+    {deviceId:'tv',label:'Apple TV',isCurrent:false},
+  ]});
+  const rename=app.routes.get('POST /v1/mobile/devices/self');
+  res=createResponse();await rename(request({headers,body:{label:'My iPhone',deviceId:'browser-moode'}}),res);assert.equal(res.statusCode,400);
+  res=createResponse();await rename(request({headers,body:{label:'My iPhone'}}),res);assert.equal(res.statusCode,200);
+  assert.equal(registry.list()[0].label,'My iPhone');assert.equal(registry.list()[0].role,'controller');
+  res=createResponse();await app.routes.get('GET /v1/admin/devices')(request({headers}),res);assert.equal(res.statusCode,401);
+  registry.revoke('iphone');res=createResponse();await handler(request({headers}),res);assert.equal(res.statusCode,401);
+  res=createResponse();await rename(request({headers,body:{label:'Resurrect'}}),res);assert.equal(res.statusCode,401);
+  assert.equal(registry.list()[0].status,'revoked');
+});
+
+test('browser pairing optionally includes public origin-bound native trust without changing legacy payload', async () => {
+  const app=createApp();
+  const localTrust={contract:'sonuvi.local-tls-trust.v1',serverId:'sonuvi-'+'a'.repeat(43),origin:'https://fixture.local:8443',anchorDER:'public-test-anchor'};
+  registerMobileRoutes(app,{enabled:true,apiSecret:'test-secret',trackIdSecret:'other-secret',pairingAuthToken:'fixture-key',localTrust:async()=>localTrust});
+  const token=createMobileSessionToken({secret:'test-secret',deviceId:'display'});
+  const res=createResponse();await app.routes.get('POST /v1/mobile/pairing/challenges')(request({headers:{authorization:`Bearer ${token}`}}),res);
+  assert.equal(res.statusCode,200);
+  assert.equal(res.body.qrPayload.protocol,'now-playing-mobile-pairing');
+  assert.equal(res.body.nativeInvitation.protocol,'sonuvi-device-pairing');
+  assert.equal(res.body.nativeInvitation.pairing.baseUrl,localTrust.origin);
+  assert.deepEqual(res.body.nativeInvitation.localTrust,localTrust);
+  assert.equal(JSON.stringify(res.body.nativeInvitation).includes(res.body.displayToken),false);
+  assert.match(res.body.nativeQRDataUrl,/^data:image\/png;base64,/);
+});

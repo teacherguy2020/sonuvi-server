@@ -511,7 +511,7 @@ export class MobilePairingStore {
       if (typeof issueSession !== 'function') {
         throw new MobilePairingError(500, 'session_issuer_unavailable', 'Pairing session issuer unavailable');
       }
-      request.session = issueSession({ deviceId: request.deviceId });
+      request.session = issueSession({ deviceId: request.deviceId, deviceName: request.deviceName, deviceModel: request.deviceModel });
     }
     return {
       status: 'approved',
@@ -722,7 +722,7 @@ export class MobilePairingStore {
     if (typeof issueSession !== 'function') {
       throw new MobilePairingError(500, 'session_issuer_unavailable', 'Pairing session issuer unavailable');
     }
-    const session = issueSession({ deviceId: presentation.deviceId });
+    const session = issueSession({ deviceId: presentation.deviceId, deviceName: presentation.deviceName, deviceModel: presentation.deviceModel });
     presentation.completionConsumed = true;
     presentation.status = 'completed';
     return {
