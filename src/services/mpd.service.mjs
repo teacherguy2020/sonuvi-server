@@ -2,6 +2,24 @@ import net from 'node:net';
 import { MPD_HOST, MPD_PORT } from '../config.mjs';
 import { runtimeCapabilities } from '../lib/runtime-capabilities.mjs';
 
+let playbackHoldProvider = () => false;
+export function setMpdPlaybackHoldProvider(provider) {
+  if (typeof provider !== 'function') throw new TypeError('Playback hold provider must be a function');
+  playbackHoldProvider = provider;
+}
+function assertPlaybackAllowed(command) {
+  const canStart = String(command).split(/\r?\n/).some(line => {
+    const [verb, value] = line.trim().toLowerCase().split(/\s+/);
+    return ['play', 'playid', 'next', 'previous', 'seek', 'seekid', 'seekcur'].includes(verb)
+      || (verb === 'pause' && value !== '1');
+  });
+  if (canStart && playbackHoldProvider()) {
+    const error = new Error('MPD playback is held while Mills owns audio');
+    error.code = 'MILLS_PLAYBACK_HELD';
+    throw error;
+  }
+}
+
 const READ_ONLY_MPD_COMMANDS = new Set([
   'commands', 'notcommands', 'tagtypes', 'urlhandlers', 'decoders', 'status',
   'currentsong', 'stats', 'playlistinfo', 'playlistid', 'listplaylists',
@@ -128,6 +146,7 @@ export function mpdQueryRaw(command, timeoutMs = 3000) {
 export function mpdQueryRawAt(command, { host = MPD_HOST, port = MPD_PORT, timeoutMs = 3000 } = {}) {
   return new Promise((resolve, reject) => {
     try {
+      assertPlaybackAllowed(command);
       const capability = mpdCommandCapability(command);
       const runtime = runtimeCapabilities();
       if (capability.readOnly) runtime.assertExternalRead(capability.capability);
@@ -165,6 +184,9 @@ export function mpdQueryRawAt(command, { host = MPD_HOST, port = MPD_PORT, timeo
       }
 
       if (!commandSent) {
+        // Recheck at the actual write: Mills may have acquired audio while
+        // this connection was waiting for the MPD greeting.
+        try { assertPlaybackAllowed(command); } catch (error) { finish(error); return; }
         commandSent = true;
         // Let MPD finish sending the command response before disconnecting.
         // Pipelining `close` here can truncate large find/search responses

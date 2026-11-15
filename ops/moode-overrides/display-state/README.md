@@ -37,3 +37,19 @@ interrupted priority track first, otherwise start the first waiting request at
 zero, then let the remaining priority tracks and house queue advance normally.
 User queue/seek/play changes are preserved. Duplicate stop cannot restart or
 skip a request. Regression coverage: test/mills-priority-handoff.test.mjs.
+
+### Mandatory playback hold, including Mabel's second call
+
+Mabel's deployed Live client uses `/mpd/start-song` after reserving a selection;
+this is distinct from a `playNow` selection request. Both start-song and
+start-queue now obey the same lock and Mills hold. A delayed start-song cannot
+skip an already-active priority request or restart the same song at zero.
+Responses distinguish `playbackHold: "mills"` from an ordinary spoken-intro
+delay. The Live client skips its follow-up start when a hold is present.
+
+Defense in depth: MPD service checks the physical-source hold before opening
+and immediately before writing a play/resume/advance/seek command, including
+commands embedded in a command list. Read/enqueue/pause commands remain usable.
+Only after successful return to Aux1 does the locked Mills handoff release the
+physical hold and resume the priority/house queue. Tests cover the real second
+callback and a hold acquired while waiting for the MPD greeting.

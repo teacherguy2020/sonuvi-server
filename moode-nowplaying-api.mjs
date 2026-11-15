@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { registerDeferredPlaybackRoutes } from './src/routes/deferred-playback.routes.mjs';
 /**
  * moode-nowplaying-api.mjs -- moOde Now-Playing API (Pi4)
  *
@@ -284,7 +285,7 @@ import {
 } from './src/lib/airplay-state.mjs';
 import {
   mpdEscapeValue, mpdHasACK, parseMpdFirstBlock, parseMpdKeyVals,
-  mpdGetStatus, mpdPlay, mpdPlayId, mpdPause, mpdStop, mpdQueryRaw
+  mpdGetStatus, mpdPlay, mpdPlayId, mpdPause, mpdStop, mpdQueryRaw, setMpdPlaybackHoldProvider
 } from './src/services/mpd.service.mjs';
 import { registerRatingRoutes } from './src/routes/rating.routes.mjs';
 import { registerQueueRoutes } from './src/routes/queue.routes.mjs';
@@ -347,7 +348,8 @@ import {
   withJukeboxMutation,
 } from './src/routes/seeburg.routes.mjs';
 import { registerMultiphoneRoutes } from './src/routes/multiphone.routes.mjs';
-import { getMillsIntegrationState, registerMillsRoutes } from './src/routes/mills.routes.mjs';
+import { getMillsIntegrationState, registerMillsRoutes, isMillsPlaybackHeld } from './src/routes/mills.routes.mjs';
+setMpdPlaybackHoldProvider(isMillsPlaybackHeld);
 import { HarmonyHubClient, sendHarmonyIrCommand } from './src/services/harmony.service.mjs';
 import { createAppleAboutService } from './src/services/apple-about.service.mjs';
 import { createAppleCatalogSearchService } from './src/services/apple-catalog-search.service.mjs';
@@ -6108,32 +6110,8 @@ app.post('/mpd/local-output', async (req, res) => {
   }
 });
 
-app.post('/mpd/start-queue', async (req, res) => {
-  try {
-    if (!requireTrackKey(req, res)) return;
-    await mpdQueryRaw('play 0');
-    return res.json({ ok: true, playbackStarted: true });
-  } catch (e) {
-    return res.status(500).json({ ok: false, error: e?.message || String(e) });
-  }
-});
-
-// Start a previously added MPD song by its stable song ID. This is used by
-// Mabel when the record has been reserved while her retrieval sound plays;
-// using playid avoids queue-position races during that short handoff.
-app.post('/mpd/start-song', async (req, res) => {
-  try {
-    if (!requireTrackKey(req, res)) return;
-    const songId = Number(req.body?.songId);
-    if (!Number.isSafeInteger(songId) || songId < 0) {
-      return res.status(400).json({ ok: false, error: 'songId must be a non-negative integer' });
-    }
-    const raw = await mpdQueryRaw(`playid ${songId}`);
-    if (mpdHasACK(raw)) return res.status(409).json({ ok: false, error: 'MPD rejected starting the song' });
-    return res.json({ ok: true, playbackStarted: true, songId });
-  } catch (e) {
-    return res.status(500).json({ ok: false, error: e?.message || String(e) });
-  }
+registerDeferredPlaybackRoutes(app, {
+  requireTrackKey, mpdQueryRaw, mpdHasACK, parseMpdFirstBlock, getMillsIntegrationState,
 });
 
 app.post('/mpd/play-artist', async (req, res) => {

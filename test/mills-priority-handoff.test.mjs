@@ -1,3 +1,4 @@
+import { registerDeferredPlaybackRoutes } from '../src/routes/deferred-playback.routes.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { registerMillsRoutes, getMillsIntegrationState } from '../src/routes/mills.routes.mjs';
@@ -35,8 +36,8 @@ function fixture({ switchInput, initialState = 'play' } = {}) {
     mpdHasACK: raw => raw.includes('ACK'), parseMpdFirstBlock: parse, jukeboxStatePath: null,
     getMillsIntegrationState, entries: jukeboxEntries,
     switchDenonInput: async input => { inputs.push(input); await switchInput?.(input); } };
-  registerSeeburgRoutes(app,deps); registerMultiphoneRoutes(app,deps); registerMillsRoutes(app,deps);
-  const call = async (route,body = {}) => { const res = { statusCode:200,status(n) { this.statusCode=n;return this; },json(x) { this.body=x;return this; } }; await routes['/integrations/'+route]({body},res); assert.equal(res.statusCode,200,JSON.stringify(res.body));return res.body; };
+  registerDeferredPlaybackRoutes(app,deps); registerSeeburgRoutes(app,deps); registerMultiphoneRoutes(app,deps); registerMillsRoutes(app,deps);
+  const call = async (route,body = {}) => { const res = { statusCode:200,status(n) { this.statusCode=n;return this; },json(x) { this.body=x;return this; } }; await routes[route.startsWith('/') ? route : '/integrations/'+route]({body},res); assert.equal(res.statusCode,200,JSON.stringify(res.body));return res.body; };
   return { call, commands, inputs, status, query, queue: () => items.map(x => ({...x})),
     advance: seconds => { if (state === 'play') elapsed += seconds; }, seek: n => { elapsed=n; } };
 }
@@ -137,4 +138,38 @@ test('Mills with a previously paused house queue can hand off new waiting reques
   const f=fixture({initialState:'pause'}); await f.call('mills/start');
   try {const x=await f.call('seeburg/selection',{number:1}); await f.call('mills/stop');assert.equal(f.status().songid,x.mpdSongId);assert.equal(f.status().elapsed,0);}
   finally {await f.call('mills/stop');}
+});
+
+test('actual Mabel start-song callback cannot bypass Mills or skip the waiting Seeburg request', async () => {
+  const f=fixture();await f.call('mills/start');
+  try {
+    const a=await f.call('seeburg/selection',{number:1});
+    const b=await f.call('multiphone/selection',{number:2,deferPlayback:true});
+    assert.equal(a.playbackHold,'mills');assert.equal(b.playbackHold,'mills');
+    assert.equal(b.queuedBehindJukebox,true);assert.equal(b.jukeboxQueueLength,3);
+    // These are the real extra calls observed in Mabel, not playNow selection.
+    const before=f.status();
+    for (const id of [a.mpdSongId,b.mpdSongId]) {
+      const result=await f.call('/mpd/start-song',{songId:id});
+      assert.equal(result.playbackStarted,false);assert.equal(result.playbackHold,'mills');
+      assert.deepEqual(f.status(),before);
+    }
+    assert.equal((await f.call('/mpd/start-queue')).playbackHold,'mills');
+    f.advance(180);assert.deepEqual(f.status(),before);
+    await f.call('mills/stop');assert.equal(f.status().songid,a.mpdSongId);
+    f.advance(20);
+    const late=await f.call('/mpd/start-song',{songId:b.mpdSongId});
+    assert.equal(late.playbackStarted,false);assert.equal(late.playbackHold,'priority');
+    assert.equal(f.status().songid,a.mpdSongId);assert.equal(f.status().elapsed,20);
+    const repeat=await f.call('/mpd/start-song',{songId:a.mpdSongId});
+    assert.equal(repeat.alreadyPlaying,true);assert.equal(f.status().elapsed,20);
+    assert.deepEqual(f.queue().map(x=>x.id),[a.mpdSongId,b.mpdSongId,1,2]);
+  } finally {await f.call('mills/stop');}
+});
+
+test('ordinary Mabel reservation still starts using its separate start-song callback', async () => {
+  const f=fixture();const x=await f.call('multiphone/selection',{number:1,deferPlayback:true});
+  assert.equal(x.playbackHold,null);assert.equal(x.playbackStarted,false);
+  const r=await f.call('/mpd/start-song',{songId:x.mpdSongId});
+  assert.equal(r.playbackStarted,true);assert.equal(f.status().songid,x.mpdSongId);
 });

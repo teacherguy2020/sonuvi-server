@@ -126,7 +126,7 @@ export function registerMultiphoneRoutes(app, deps) {
             // Mabel may send playNow after its spoken announcement. Keep the
             // original reservation/FIFO position while the physical source owns audio.
             return res.json({ ...result, queued: true, queueLength: Number(status.playlistlength),
-              playbackStarted: false, playbackDeferred: true, queueWasCleared: false,
+              playbackStarted: false, playbackDeferred: true, playbackHold: 'mills', queueWasCleared: false,
               source: 'multiphone', priority: 'jukebox', mpdSongId: Number(existing.id),
               artist: existing.artist || '', title: existing.title || '',
               queuedBehindJukebox: true, jukeboxQueueLength: priorityItems.length,
@@ -202,10 +202,11 @@ export function registerMultiphoneRoutes(app, deps) {
       return res.json({ ...result, queued: true, queueLength: Number(afterStatus.playlistlength), playbackStarted,
         queueWasCleared, source: 'multiphone', priority: 'jukebox', mpdSongId: id,
         artist: trackInfo.artist || '', title: trackInfo.title || '',
-        queuedBehindJukebox: currentIsJukebox,
+        queuedBehindJukebox: millsActive || currentIsJukebox,
         interruptedNormalPlayback: wasPlaying && !currentIsJukebox,
-        jukeboxQueueLength: currentIsJukebox ? pending.length + 2 : 1,
+        jukeboxQueueLength: millsActive ? priorityItems.length + 2 : currentIsJukebox ? pending.length + 2 : 1,
         playbackDeferred,
+        playbackHold: millsActive ? 'mills' : null,
         decision: { currentSongId: currentId, currentPos, currentIsJukebox, pendingJukeboxCount: pending.length },
         playNow });
       });

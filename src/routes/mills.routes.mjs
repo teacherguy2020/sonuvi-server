@@ -6,6 +6,11 @@ import {
 } from './seeburg.routes.mjs';
 
 let millsActive = false;
+let millsStarting = false;
+let millsRestoring = false;
+export function isMillsPlaybackHeld() {
+  return millsStarting || (millsActive && !millsRestoring);
+}
 let lastTransition = null;
 let transitionQueue = Promise.resolve();
 let millsSession = null;
@@ -261,10 +266,15 @@ export function registerMillsRoutes(app, deps) {
           });
         }
         const snapshot = await snapshotMpdSession();
-        await switchToMills(snapshot);
-        const pausedSnapshot = await snapshotMpdSession();
+        millsStarting = true;
+        try { await switchToMills(snapshot); }
+        catch (error) { millsStarting = false; throw error; }
         millsActive = true;
-        millsSession = { active: true, snapshot, pausedSnapshot, displaySelected: false, surrogateStarted: false };
+        millsStarting = false;
+        millsSession = { active: true, snapshot, pausedSnapshot: null, displaySelected: false, surrogateStarted: false };
+        // If checkpoint acquisition fails, keep the physical hold active; a
+        // later stop may release it but must not resume from an unknown state.
+        millsSession.pausedSnapshot = await snapshotMpdSession();
         lastTransition = { state: 'active', at: new Date().toISOString(), input: 'Phono' };
         return res.json({
           ok: true,
@@ -292,46 +302,51 @@ export function registerMillsRoutes(app, deps) {
           return res.json({ ok: true, active: false, duplicate: true, switched: false });
         }
         await switchDenonInput('aux1');
-        const hasPersistedMillsEntries = [...jukeboxEntries.values()].some((entry) => entry?.source === 'mills');
-        if (millsActive || hasPersistedMillsEntries) {
-          await removeMillsSurrogates();
-          const snapshot = millsSession?.pausedSnapshot;
-          const current = await snapshotMpdSession();
-          // Deferred requests are allowed additions; every original ID/order and
-          // paused checkpoint must still match before automatic handoff.
-          const expectedState = snapshot?.state === 'play' ? 'pause' : snapshot?.state;
-          const originalIds = new Set(snapshot?.queue.map(item => item.mpdSongId) || []);
-          const isNewDeferred = item => !originalIds.has(item.mpdSongId)
-            && jukeboxEntries.get(item.mpdSongId)?.deferredByMills;
-          const deferred = current.queue.filter(isNewDeferred);
-          const originalQueue = current.queue.filter(item => !isNewDeferred(item));
-          const unchanged = snapshot && current.state === expectedState
-            && current.currentSongId === snapshot.currentSongId
-            && Math.abs(current.elapsed - snapshot.elapsed) < 1
-            && originalQueue.length === snapshot.queue.length
-            && originalQueue.every((item, index) => item.file === snapshot.queue[index].file
-              && item.mpdSongId === snapshot.queue[index].mpdSongId);
-          if (unchanged) {
-            const interruptedPriority = jukeboxEntries.has(current.currentSongId)
-              && millsSession.snapshot?.state === 'play';
-            if (deferred.length && !interruptedPriority) {
-              const play = await mpdQueryRaw(`playid ${deferred[0].mpdSongId}`);
-              if (!play || mpdHasACK(play)) throw new Error('MPD rejected deferred priority handoff');
-            } else {
-              await resumeMpdSession(millsSession.snapshot);
+        // Physical audio is back on digital input; only the locked handoff
+        // may resume MPD before releasing the logical Mills session.
+        millsRestoring = true;
+        try {
+          const hasPersistedMillsEntries = [...jukeboxEntries.values()].some((entry) => entry?.source === 'mills');
+          if (millsActive || hasPersistedMillsEntries) {
+            await removeMillsSurrogates();
+            const snapshot = millsSession?.pausedSnapshot;
+            const current = await snapshotMpdSession();
+            // Deferred requests are allowed additions; every original ID/order and
+            // paused checkpoint must still match before automatic handoff.
+            const expectedState = snapshot?.state === 'play' ? 'pause' : snapshot?.state;
+            const originalIds = new Set(snapshot?.queue.map(item => item.mpdSongId) || []);
+            const isNewDeferred = item => !originalIds.has(item.mpdSongId)
+              && jukeboxEntries.get(item.mpdSongId)?.deferredByMills;
+            const deferred = current.queue.filter(isNewDeferred);
+            const originalQueue = current.queue.filter(item => !isNewDeferred(item));
+            const unchanged = snapshot && current.state === expectedState
+              && current.currentSongId === snapshot.currentSongId
+              && Math.abs(current.elapsed - snapshot.elapsed) < 1
+              && originalQueue.length === snapshot.queue.length
+              && originalQueue.every((item, index) => item.file === snapshot.queue[index].file
+                && item.mpdSongId === snapshot.queue[index].mpdSongId);
+            if (unchanged) {
+              const interruptedPriority = jukeboxEntries.has(current.currentSongId)
+                && millsSession.snapshot?.state === 'play';
+              if (deferred.length && !interruptedPriority) {
+                const play = await mpdQueryRaw(`playid ${deferred[0].mpdSongId}`);
+                if (!play || mpdHasACK(play)) throw new Error('MPD rejected deferred priority handoff');
+              } else {
+                await resumeMpdSession(millsSession.snapshot);
+              }
             }
+            // A user queue/seek/play change still wins; leave their queue intact.
+            let changed = false;
+            for (const entry of jukeboxEntries.values()) {
+              if (entry.deferredByMills) { delete entry.deferredByMills; changed = true; }
+            }
+            if (changed) persistJukeboxState(deps.jukeboxStatePath);
           }
-          // A user queue/seek/play change still wins; leave their queue intact.
-          let changed = false;
-          for (const entry of jukeboxEntries.values()) {
-            if (entry.deferredByMills) { delete entry.deferredByMills; changed = true; }
-          }
-          if (changed) persistJukeboxState(deps.jukeboxStatePath);
-        }
-        millsActive = false;
-        millsSession = null;
-        lastTransition = { state: 'idle', at: new Date().toISOString(), input: 'Aux 1' };
-        return res.json({ ok: true, active: false, duplicate: false, switched: true, input: 'Aux 1' });
+          millsActive = false;
+          millsSession = null;
+          lastTransition = { state: 'idle', at: new Date().toISOString(), input: 'Aux 1' };
+          return res.json({ ok: true, active: false, duplicate: false, switched: true, input: 'Aux 1' });
+        } finally { millsRestoring = false; }
       }));
     } catch (error) {
       // Keep the active latch set when source restoration fails so a repeated

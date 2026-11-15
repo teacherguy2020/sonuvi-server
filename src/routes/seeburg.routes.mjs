@@ -339,12 +339,13 @@ export function registerSeeburgRoutes(app, deps) {
         queueLength: Number(afterStatus.playlistlength),
         playbackStarted,
         playbackDeferred: millsActive,
+        playbackHold: millsActive ? 'mills' : null,
         queueWasCleared: false,
         source: 'seeburg',
         priority: 'jukebox',
         interruptedNormalPlayback: !currentIsJukebox && wasPlaying,
-        queuedBehindJukebox: currentIsJukebox,
-        jukeboxQueueLength: currentIsJukebox ? pendingJukebox.length + 2 : 1,
+        queuedBehindJukebox: millsActive || currentIsJukebox,
+        jukeboxQueueLength: millsActive ? priorityItems.length + 2 : currentIsJukebox ? pendingJukebox.length + 2 : 1,
         mpdSongId: insertedSongId,
       });
       });
