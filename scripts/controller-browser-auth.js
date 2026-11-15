@@ -36,8 +36,8 @@
   const request = (path,options={}) => fetch('/__controller/'+path,{credentials:'same-origin',cache:'no-store',...options});
   function overlay() {
     let box=document.getElementById('sonuviBrowserPairing');if(box)return box;
-    box=document.createElement('section');box.id='sonuviBrowserPairing';box.style.cssText='position:fixed;inset:0;z-index:99999;display:grid;place-items:center;background:#07101df2;color:white;font:16px system-ui;text-align:center';
-    box.innerHTML='<div style="max-width:400px;padding:24px"><h2>Sign in to Sonuvi</h2><p id="sonuviPairStatus">Checking secure access…</p><form id="sonuviLoginForm"><p><label>Username<br><input id="sonuviLoginUsername" name="username" autocomplete="username" maxlength="128" required></label></p><p><label>Password<br><input id="sonuviLoginPassword" name="password" type="password" autocomplete="current-password" maxlength="1024" required></label></p><button id="sonuviLoginSubmit" type="submit">Sign in</button></form><p>Use your Sonuvi account, not your Pi or SSH password. For a new Server, complete ownership setup in Sonuvi iOS or use verified host recovery.</p><img id="sonuviPairQr" alt="Pairing QR code" style="display:none;width:260px"><p id="sonuviPairCode"></p><button id="sonuviPairStart" type="button">Use trusted-device approval instead</button><button id="sonuviSessionRetry" style="display:none">Retry connection</button></div>';
+    box=document.createElement('section');box.id='sonuviBrowserPairing';box.style.cssText='position:fixed;inset:0;z-index:99999;display:flex;align-items:safe center;justify-content:center;overflow:auto;padding:12px;box-sizing:border-box;background:#07101df2;color:white;font:16px system-ui;text-align:center';
+    box.innerHTML='<div style="max-width:400px;width:100%;max-height:100%;overflow:auto;box-sizing:border-box;padding:12px"><h2 style="margin:0 0 8px">Sign in to Sonuvi</h2><p id="sonuviPairStatus" style="margin:8px 0">Checking secure access…</p><form id="sonuviLoginForm"><p><label>Username<br><input id="sonuviLoginUsername" name="username" autocomplete="username" maxlength="128" required></label></p><p><label>Password<br><input id="sonuviLoginPassword" name="password" type="password" autocomplete="current-password" maxlength="1024" required></label></p><button id="sonuviLoginSubmit" type="submit">Sign in</button></form><p id="sonuviLoginHelp" style="margin:8px 0">Use your Sonuvi account, not your Pi or SSH password. For a new Server, complete ownership setup in Sonuvi iOS or use verified host recovery.</p><img id="sonuviPairQr" alt="Pairing QR code" style="display:none;width:min(260px,40vh);max-width:100%;height:auto"><p id="sonuviPairCode" style="margin:8px 0;font-size:24px;font-weight:bold"></p><button id="sonuviPairStart" type="button">Use trusted-device approval instead</button><button id="sonuviSessionRetry" style="display:none">Retry connection</button></div>';
     document.body.append(box);box.querySelector('#sonuviPairStart').onclick=start;
     box.querySelector('#sonuviLoginForm').onsubmit=signIn;return box;
   }
@@ -75,6 +75,9 @@
       if(!r.ok)throw new Error(j.error||'Could not start pairing');
       box.querySelector('#sonuviPairQr').src=j.qrDataUrl;box.querySelector('#sonuviPairQr').style.display='inline-block';
       box.querySelector('#sonuviPairCode').textContent=j.verificationCode;
+      box.querySelector('#sonuviLoginForm').style.display='none';
+      const help=box.querySelector('#sonuviLoginHelp');if(help)help.style.display='none';
+      box.querySelector('#sonuviPairStart').textContent='Restart pairing';
       status.textContent='Enter this code on an already paired browser.';poll(j.presentationId);
     }catch(error){status.textContent=error.message;}
   }
