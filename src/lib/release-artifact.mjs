@@ -55,6 +55,13 @@ const RELEASE_ROOT_FILES = new Set([
 const RELEASE_CONFIG_FILES = new Set([
   'config/now-playing.config.example.json',
   'config/radio-logo-aliases.json',
+  'config/release-policy.json',
+  'docs/runbooks/sonuvi-moode-companion.md',
+  'scripts/sonuvi-moode-companion.py',
+  'ops/moode-overrides/usr/local/bin/nowplaying-peppy-targets.sh',
+  'ops/moode-overrides/usr/local/bin/peppy-spectrum-bridge.py',
+  'ops/moode-overrides/etc/systemd/system/nowplaying-peppy-targets.service',
+  'ops/moode-overrides/etc/systemd/system/peppy-spectrum-bridge.service',
   'now-playing.config.example.json',
 ]);
 

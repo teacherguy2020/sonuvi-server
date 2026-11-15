@@ -1,0 +1,6 @@
+{
+  "contract": "sonuvi.release-policy.v1",
+  "compatibilityGeneration": 20261115,
+  "baselineCommit": "d11f2a1d935932a63842efc7c7a71e19b62a2dd7",
+  "requiredFeatures": ["designer-routing", "independent-status", "authenticated-peppy", "restricted-display-push", "browser-csrf", "home-paired-source", "queue-wizard-paired-preview", "podcasts-read-only", "moode-companion-enrollment"]
+}

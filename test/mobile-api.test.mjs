@@ -1477,6 +1477,18 @@ test('mobile home exposes local recent history without displaying its shelf', as
   assert.equal(response.body.localRecentHistory.items[0].track.genre, 'Test');
   assert.ok(calls.includes('/config/listening-history/recent-tracks?limit=18'));
   assert.doesNotMatch(JSON.stringify(response.body), /SamsungMoode/);
+
+  const sourceCallsAfterFirstLoad = calls.filter((pathname) => pathname !== '/config/controller-profile');
+  const secondResponse = createResponse();
+  await app.routes.get('GET /v1/mobile/home/rows')?.(request({
+    headers: { authorization: `Bearer ${session.body.accessToken}` },
+  }), secondResponse);
+  assert.equal(secondResponse.statusCode, 200);
+  assert.deepEqual(
+    calls.filter((pathname) => pathname !== '/config/controller-profile'),
+    sourceCallsAfterFirstLoad,
+    'a repeated Home load should reuse the short-lived source cache'
+  );
 });
 
 test('mobile home shelf settings save ordered row sources through the bearer boundary', async () => {

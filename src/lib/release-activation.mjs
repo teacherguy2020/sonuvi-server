@@ -37,7 +37,27 @@ async function activationLayout({ layoutRoot, stateRoot, ownerUID = 0 }) {
   return Object.freeze({ root, releases, current: path.join(root, 'current'), shared, installed: true });
 }
 
+// Signing a development snapshot does not make it a production release.
+// This gate precedes locking, service changes and pointer mutation.
+export function assertProductionReleaseSource(manifest) {
+  if (manifest?.source?.dirty !== false || manifest.source.snapshotStatus === 'development-only-dirty-snapshot') {
+    throw new Error('installed_release_requires_clean_source');
+  }
+}
+
+export async function assertReleaseCompatibility(candidateRoot, previousRoot) {
+  const generation = async root => {
+    let policy;
+    try { policy = JSON.parse(await fs.readFile(path.join(root, 'config/release-policy.json'), 'utf8')); }
+    catch (error) { if (error.code === 'ENOENT') return 0; throw error; }
+    if (policy.contract !== 'sonuvi.release-policy.v1' || !Number.isSafeInteger(policy.compatibilityGeneration) || policy.compatibilityGeneration < 1) throw new Error('invalid_release_compatibility_policy');
+    return policy.compatibilityGeneration;
+  };
+  if (await generation(candidateRoot) < await generation(previousRoot)) throw new Error('release_compatibility_regression');
+}
+
 async function verifySignedCandidate({ candidate, envelope, trustedAnchors }) {
+  assertProductionReleaseSource(candidate.manifest);
   const { metadata } = verifySignedGateCReleaseMetadata({ envelope, trustedAnchors });
   const manifest = await fs.readFile(path.join(candidate.root, 'release-manifest.json'));
   if (metadata.releaseId !== candidate.releaseId || crypto.createHash('sha256').update(manifest).digest('hex') !== metadata.manifestSha256) {
@@ -277,6 +297,7 @@ export async function activateReleaseTransaction({ layoutRoot, stateRoot, ownerU
   const previous = await readCurrentPointer(layout);
   if (!previous) throw new Error('activation requires a verified previous release for rollback');
   if (layout.installed) {
+    await assertReleaseCompatibility(candidateRoot, previous.releaseRoot);
     if (path.dirname(previous.releaseRoot) !== layout.releases || path.basename(previous.releaseRoot) !== previous.releaseId) throw new Error('previous release location is invalid');
     await assertInstalledReleaseTrust(candidateRoot, ownerUID);
     await assertInstalledReleaseTrust(previous.releaseRoot, ownerUID);

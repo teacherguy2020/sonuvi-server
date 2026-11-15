@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import QRCode from 'qrcode';
@@ -782,6 +783,14 @@ export function registerMobileRoutes(app, deps = {}) {
   let catalogCache = { index: null, builtAt: '', catalog: null };
   let albumAddedAtCache = { builtAt: '', values: null, task: null };
   let diagnosticsQueueCache = { expiresAt: 0, items: [], task: null };
+  // Home is revisited frequently while SwiftUI rebuilds its navigation and
+  // shelf views. Coalesce identical source reads and retain their DTOs for a
+  // short presentation TTL so a Home re-render does not fan out to every
+  // Last.fm/local-history endpoint again. Queue stays live and is deliberately
+  // excluded from this cache below.
+  const mobileHomeSourceCache = new Map();
+  const mobileHomeSourceTasks = new Map();
+  const mobileHomeSourceCacheTTLms = 20_000;
 
   const loadCatalog = async () => {
     const index = await getIndex(mpdHost);
@@ -794,6 +803,46 @@ export function registerMobileRoutes(app, deps = {}) {
       };
     }
     return catalogCache.catalog;
+  };
+
+  const loadMobileHomeSource = async (source, limit, fetchSource, bearer) => {
+    const pathname = mobileHomeSourcePath(source, limit);
+    if (!pathname || !fetchSource) return { ok: false, payload: {} };
+    const scope = createHash('sha256').update(String(bearer || '')).digest('hex');
+    const key = `${scope}|${String(source || '').trim()}|${String(limit || '')}`;
+    const now = Date.now();
+    const cached = mobileHomeSourceCache.get(key);
+    if (cached && cached.expiresAt > now) return cached.value;
+    const active = mobileHomeSourceTasks.get(key);
+    if (active) return active;
+
+    const task = (async () => {
+      const result = await fetchSource(pathname).catch(() => null);
+      const value = {
+        ok: Boolean(result?.ok),
+        payload: result?.json || {},
+      };
+      // Do not retain failures: a transient Last.fm or local-history error
+      // should recover on the next Home refresh, while successful responses
+      // are safe to reuse for this short presentation window.
+      if (value.ok) {
+        for (const [entry, cached] of mobileHomeSourceCache) {
+          if (cached.expiresAt <= Date.now()) mobileHomeSourceCache.delete(entry);
+        }
+        while (mobileHomeSourceCache.size >= 256) mobileHomeSourceCache.delete(mobileHomeSourceCache.keys().next().value);
+        mobileHomeSourceCache.set(key, {
+          expiresAt: Date.now() + mobileHomeSourceCacheTTLms,
+          value,
+        });
+      }
+      return value;
+    })();
+    mobileHomeSourceTasks.set(key, task);
+    try {
+      return await task;
+    } finally {
+      if (mobileHomeSourceTasks.get(key) === task) mobileHomeSourceTasks.delete(key);
+    }
   };
 
   const enrichSourceAudio = async (track) => {
@@ -972,14 +1021,7 @@ export function registerMobileRoutes(app, deps = {}) {
         });
         return;
       }
-      const pathname = mobileHomeSourcePath(source, profile.recentCount);
-      const result = pathname && fetchHomeSource
-        ? await fetchHomeSource(pathname).catch(() => null)
-        : null;
-      sourcePayloads.set(source, {
-        ok: Boolean(result?.ok),
-        payload: result?.json || {},
-      });
+      sourcePayloads.set(source, await loadMobileHomeSource(source, profile.recentCount, fetchHomeSource, readBearerToken(req)));
     }));
 
     const catalog = await loadCatalog();
