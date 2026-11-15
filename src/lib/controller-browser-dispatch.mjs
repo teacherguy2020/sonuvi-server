@@ -63,6 +63,7 @@ export function validControllerTarget(target, method = 'GET') {
     return true;
   } catch { return false; }
 }
+const nativeQueuePreview = '/config/queue-wizard/preview';
 const nativeQueueApply = '/config/queue-wizard/apply';
 export function validNativeControllerTarget(target, method = 'GET') {
   if (method === 'GET') {
@@ -75,7 +76,7 @@ export function validNativeControllerTarget(target, method = 'GET') {
       }
     } catch { return false; }
   }
-  return validControllerTarget(target, method) || (method === 'POST' && target === nativeQueueApply);
+  return validControllerTarget(target, method) || (method === 'POST' && [nativeQueueApply,nativeQueuePreview].includes(target));
 }
 export function validNativeControllerBody({method = 'GET', pathname, body} = {}) {
   if (method === 'POST' && pathname === playback && body?.action === 'consume') {
@@ -83,6 +84,15 @@ export function validNativeControllerBody({method = 'GET', pathname, body} = {})
   }
   if (method === 'POST' && pathname === playback && body?.action === 'crop') {
     return Object.keys(body).length === 1;
+  }
+  if (pathname === nativeQueuePreview) {
+    if (method !== 'POST' || !body || typeof body !== 'object' || Array.isArray(body)) return false;
+    const lists=['genres','artists','albums','excludeGenres'];
+    if (Object.keys(body).some(k=>![...lists,'minRating','maxTracks','varietyMode'].includes(k))) return false;
+    for (const key of lists) if (!Array.isArray(body[key]) || body[key].length>5000 || body[key].some(v=>typeof v!=='string'||v.length>2048||/[\x00-\x1f]/.test(v))) return false;
+    return Number.isFinite(body.minRating) && body.minRating>=0 && body.minRating<=5
+      && Number.isInteger(body.maxTracks) && body.maxTracks>=1 && body.maxTracks<=5000
+      && typeof body.varietyMode==='boolean';
   }
   if (pathname !== nativeQueueApply) return validControllerBody({method, pathname, body});
   if (method !== 'POST' || !body || typeof body !== 'object' || Array.isArray(body)) return false;

@@ -2192,7 +2192,7 @@ export function registerMobileRoutes(app, deps = {}) {
       tracks.push(track);
     };
 
-    const filtered = await internalFeatureRequest('/config/queue-wizard/preview', {
+    const filtered = await (fetchControllerRequest || internalFeatureRequest)('/config/queue-wizard/preview', {
       method: 'POST',
       body: {
         genres: Array.isArray(body.genres) ? body.genres : [],
@@ -2203,7 +2203,10 @@ export function registerMobileRoutes(app, deps = {}) {
         maxTracks: Math.max(1, Math.min(5000, Number(body.maxTracks || 250) || 250)),
         varietyMode: body.varietyMode !== false,
       },
-    });
+    }, readBearerToken(req));
+    if (!filtered?.ok || !Array.isArray(filtered?.json?.tracks)) {
+      throw Object.assign(new Error('Queue Wizard preview unavailable'), {code:'QUEUE_WIZARD_PREVIEW_UNAVAILABLE'});
+    }
     for (const row of (Array.isArray(filtered?.json?.tracks) ? filtered.json.tracks : [])) addFile(row?.file);
 
     const playlists = await loadMobilePlaylists();
@@ -2388,6 +2391,7 @@ export function registerMobileRoutes(app, deps = {}) {
     try {
       return await handler(req, res);
     } catch (error) {
+      if (error?.code === 'QUEUE_WIZARD_PREVIEW_UNAVAILABLE') return errorResponse(res, 503, 'Queue Wizard preview unavailable. Please retry.', error.code);
       if (error?.code === 'RADIO_CATALOG_UNAVAILABLE') return errorResponse(res, 503, 'Radio catalog unavailable. Please retry.', error.code);
       log.error('[mobile-api] request failed', {
         method: text(req?.method) || 'UNKNOWN',

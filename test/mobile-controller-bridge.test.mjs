@@ -74,3 +74,28 @@ test('fresh install Home reads use paired grant, with no operator key or fallbac
  assert.equal((await bridge('/config/lastfm/top-albums',{method:'POST'},token)).status,403);
  revoked=true;assert.equal((await bridge('/config/lastfm/top-albums',{},token)).ok,false);
 });
+
+test('Queue Wizard preview works with paired grant and never masks upstream failure as empty results', async t=>{
+ const app=express();app.use(express.json());const secret='wizard-fixture';let revoked=false,fail=false;
+ const authorize=createControllerDispatchAuthorizer({apiSecret:secret,sessionRegistry:{accepts:()=>!revoked}});
+ const file='USB/Fixture/Album/01.flac';
+ app.post('/config/queue-wizard/preview',(req,res)=>{
+  if(!authorize(req))return res.status(403).json({error:'denied'});
+  if(fail)return res.status(503).json({error:'fixture unavailable'});
+  res.json({tracks:[{file}]});
+ });
+ const server=http.createServer(app);await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ t.after(()=>new Promise(r=>{server.close(r);server.closeAllConnections();}));
+ const port=server.address().port,bridge=createMobileControllerBridge({port});
+ registerMobileRoutes(app,{enabled:true,apiSecret:secret,trackIdSecret:'fixture',fetchControllerRequest:bridge,
+  fetchInternalRequest:async()=>{throw Error('legacy operator path used');},getMobilePlaylists:async()=>[],
+  getBrowseIndex:async()=>({tracks:[{file,title:'Song',artist:'Artist',album:'Album'}]}),mpdQueryRaw:async()=> 'OK\n'});
+ const token=createMobileSessionToken({secret,deviceId:'paired'});
+ const preview=()=>fetch(`http://127.0.0.1:${port}/v1/mobile/queue-wizard/preview`,{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify({maxTracks:25,minRating:0})});
+ let r=await preview();assert.equal(r.status,200);const data=await r.json();assert.equal(data.tracks.length,1);
+ fail=true;r=await preview();assert.equal(r.status,503);assert.equal((await r.json()).code,'QUEUE_WIZARD_PREVIEW_UNAVAILABLE');
+ const body={genres:[],artists:[],albums:[],excludeGenres:[],minRating:0,maxTracks:25,varietyMode:true};
+ assert.equal((await bridge('/config/queue-wizard/preview',{method:'POST',body:{...body,command:'id'}},token)).status,403);
+ revoked=true;assert.equal((await bridge('/config/queue-wizard/preview',{method:'POST',body},token)).status,403);
+ assert.equal((await bridge('/config/queue-wizard/preview',{method:'POST',body})).status,403);
+});
