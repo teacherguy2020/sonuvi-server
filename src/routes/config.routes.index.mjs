@@ -76,6 +76,7 @@ export function registerAllConfigRoutes(app, deps) {
   });
 
   registerConfigRuntimeAdminRoutes(app, {
+    authorizeControllerDispatch: deps.authorizeControllerDispatch,
     requireTrackKey: deps.requireTrackKey,
     log: deps.log,
     getLocalHistoryItems: deps.getLocalHistoryItems,

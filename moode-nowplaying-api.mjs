@@ -9790,6 +9790,7 @@ if (!RUNTIME_CAPABILITIES.rehearsal) {
 }
 
 const configRouteHandles = registerAllConfigRoutes(app, {
+  authorizeControllerDispatch,
   getBrowseIndex: (...args) => getBrowseIndex(...args),
   requireTrackKey,
   log,

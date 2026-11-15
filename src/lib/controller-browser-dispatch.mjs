@@ -65,6 +65,16 @@ export function validControllerTarget(target, method = 'GET') {
 }
 const nativeQueueApply = '/config/queue-wizard/apply';
 export function validNativeControllerTarget(target, method = 'GET') {
+  if (method === 'GET') {
+    try {
+      const url = new URL(target, 'http://controller.invalid');
+      if (target.startsWith('/') && !target.startsWith('//') && url.origin === 'http://controller.invalid' && !url.hash
+          && /^\/config\/(lastfm|listening-history)\/(top-albums|top-artists|top-tracks|recent-tracks)$/.test(url.pathname)) {
+        const entries = [...url.searchParams];
+        return entries.length <= 1 && entries.every(([key, value]) => key === 'limit' && /^\d+$/.test(value) && Number(value) >= 1 && Number(value) <= 50);
+      }
+    } catch { return false; }
+  }
   return validControllerTarget(target, method) || (method === 'POST' && target === nativeQueueApply);
 }
 export function validNativeControllerBody({method = 'GET', pathname, body} = {}) {

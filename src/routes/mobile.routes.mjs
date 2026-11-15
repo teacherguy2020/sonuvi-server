@@ -951,8 +951,11 @@ export function registerMobileRoutes(app, deps = {}) {
   };
 
   const loadMobileHomeRows = async (req) => {
-    const profileResult = fetchInternalJson
-      ? await fetchInternalJson('/config/controller-profile').catch(() => null)
+    const fetchHomeSource = fetchControllerRequest
+      ? (pathname) => fetchControllerRequest(pathname, { method: 'GET' }, readBearerToken(req))
+      : fetchInternalJson;
+    const profileResult = fetchHomeSource
+      ? await fetchHomeSource('/config/controller-profile').catch(() => null)
       : null;
     const profile = sanitizeMobileHomeProfile(profileResult?.json?.profile || {});
     const baseUrl = requestBaseUrl(req, mobileBaseUrl);
@@ -970,8 +973,8 @@ export function registerMobileRoutes(app, deps = {}) {
         return;
       }
       const pathname = mobileHomeSourcePath(source, profile.recentCount);
-      const result = pathname && fetchInternalJson
-        ? await fetchInternalJson(pathname).catch(() => null)
+      const result = pathname && fetchHomeSource
+        ? await fetchHomeSource(pathname).catch(() => null)
         : null;
       sourcePayloads.set(source, {
         ok: Boolean(result?.ok),
@@ -4692,7 +4695,7 @@ export function registerMobileRoutes(app, deps = {}) {
 
   app.get('/v1/mobile/home/rows', asyncRoute(async (req, res) => {
     if (!requireSession(req, res)) return;
-    if (!fetchInternalJson) return errorResponse(res, 503, 'mobile home rows are not configured');
+    if (!fetchControllerRequest && !fetchInternalJson) return errorResponse(res, 503, 'mobile home rows are not configured');
     return res.json({ ok: true, ...(await loadMobileHomeRows(req)) });
   }));
 

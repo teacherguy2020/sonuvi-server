@@ -198,6 +198,8 @@ export function registerConfigRuntimeAdminRoutes(app, deps) {
   // behavior used by unrelated compatibility endpoints. A release without an
   // operator credential is not an administrable release.
   const requireTrackKey = (req, res) => {
+    if (req.method === 'GET' && /^\/config\/lastfm\/(top-albums|top-artists|top-tracks|recent-tracks)$/.test(req.path)
+        && deps.authorizeControllerDispatch?.(req)) return true;
     if (!String(trackKey || '').trim()) {
       res.status(503).json({ ok: false, error: 'Runtime administration is unavailable' });
       return false;
