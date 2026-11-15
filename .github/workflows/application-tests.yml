@@ -36,6 +36,11 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
+      - name: Install browser test prerequisites
+        run: |
+          npx playwright install-deps chromium
+          runuser -u node -g root -- npx playwright install chromium
+
       - name: Run Node application tests
         run: runuser -u node -g root -- npm test
 

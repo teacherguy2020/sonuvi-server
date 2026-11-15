@@ -53,7 +53,8 @@ test('moOde plugin retains HTTPS display and maintenance guidance without claimi
   const editor=await fs.readFile(new URL('../scripts/master-configuration-editor.mjs',import.meta.url),'utf8');
   assert.ok(editor.includes('https://sonuvi.local/display.html?mode=index&kiosk=1'));
   for(const file of ['/var/www/daemon/worker.php','/var/www/daemon/watchdog.sh','/usr/local/bin/rgb_moode_service.py'])assert.ok(editor.includes(file));
-  assert.match(editor,/Remote target verification has not been performed/);
+  assert.match(editor,/Operational status has not been checked/);
+  assert.match(editor,/Enablement is a saved preference; it does not imply a verified connection/);
 });
 
 test('pairing uses the canonical resolver across HTTPS and direct HTTP, retaining explicit override', async () => {

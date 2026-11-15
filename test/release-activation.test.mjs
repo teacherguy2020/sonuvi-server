@@ -72,6 +72,9 @@ async function createFixture(t) {
   await write(source, 'scripts/sonuvi-target-installer.mjs', 'console.log("target installer");\n');
   await write(source, 'ops/systemd/sonuvi-api.service.in', '[Service]\nExecStart=/usr/bin/node api.mjs\n');
   await write(source, 'ops/systemd/sonuvi-web.service.in', '[Service]\nExecStart=/usr/bin/node web.mjs\n');
+  for (const name of ['sonuvi-alexa-public.service', 'sonuvi-alexa-public-reconcile.service', 'sonuvi-alexa-public-reconcile.timer']) {
+    await write(source, `ops/systemd/${name}`, '[Unit]\nDescription=Isolated activation fixture\n');
+  }
   await write(source, 'config/now-playing.config.example.json', '{}\n');
   await write(source, 'index.html', '<!doctype html>one');
   await write(source, 'controller.html', '<!doctype html>controller');

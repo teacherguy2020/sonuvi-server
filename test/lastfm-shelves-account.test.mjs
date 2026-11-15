@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {configureBrowseIndexQuality} from '../src/lib/browse-index.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -12,6 +13,11 @@ test('all personal shelves reuse protected API access and authorized identity in
  const old=Object.fromEntries(Object.keys(env).map(key=>[key,process.env[key]])),oldFetch=globalThis.fetch;
  t.after(async()=>{globalThis.fetch=oldFetch;for(const [key,value] of Object.entries(old)){if(value===undefined)delete process.env[key];else process.env[key]=value;}await fs.rm(root,{recursive:true,force:true});});
  Object.assign(process.env,env);
+ configureBrowseIndexQuality({
+   statePaths:{browseIndexPath:path.join(root,'browse-index.json')},
+   capabilities:{rehearsal:false},
+   runExecFile:async()=>({stdout:''}),readMpdRaw:async()=>'',
+ });
  const doc=initializeMasterConfiguration();doc.plugins.lastfm.enabled=true;doc.plugins.lastfm.publicUsername='legacy-account';
  await fs.writeFile(env.NOW_PLAYING_CONFIG_PATH,JSON.stringify(doc));
  await fs.writeFile(env.LASTFM_ENV_FILE,'# sonuvi-lastfm-admin-v1\nLASTFM_API_KEY=fixture-key\nLASTFM_API_SECRET=fixture-secret\nLASTFM_SESSION_KEY=fixture-session\nLASTFM_USERNAME=authorized-account\n');
