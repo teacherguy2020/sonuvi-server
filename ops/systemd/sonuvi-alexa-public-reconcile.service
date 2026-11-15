@@ -1,0 +1,8 @@
+[Unit]
+Description=Reconcile saved Sonuvi Alexa JSON into public HTTPS configuration
+After=network-online.target sonuvi-api.service
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/node /opt/sonuvi/current/scripts/sonuvi-alexa-public-https.mjs
+NoNewPrivileges=true
+PrivateTmp=true

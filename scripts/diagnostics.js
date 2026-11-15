@@ -113,7 +113,7 @@
     { name: '/config/moode/display/status', method: 'GET', path: '/config/moode/display/status' },
     { name: '/config/moode/display', method: 'POST', path: '/config/moode/display', body: { mode: "on" } },
     { name: '/config/moode/browser-url/status', method: 'GET', path: '/config/moode/browser-url/status' },
-    { name: '/config/moode/browser-url', method: 'POST', path: '/config/moode/browser-url', body: { url: "http://sonuvi.local:8101/display.html" } },
+    { name: '/config/moode/browser-url', method: 'POST', path: '/config/moode/browser-url', body: { url: "https://sonuvi.local/display.html?mode=index&kiosk=1" } },
     { name: '/peppy/last-profile', method: 'GET', path: '/peppy/last-profile' },
     { name: '/peppy/last-profile', method: 'POST', path: '/peppy/last-profile', body: { displayMode: "peppy" } },
     { name: '/queue/advance', method: 'POST', path: '/queue/advance', body: { count: 1 } },

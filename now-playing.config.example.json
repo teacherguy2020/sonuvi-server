@@ -1,13 +1,13 @@
 {
   "projectName": "now-playing",
-  "environment": "home",
-  "timezone": "America/Chicago",
+  "environment": "example",
+  "timezone": "UTC",
   "nodes": [
     {
       "name": "pi-main",
       "ip": "sonuvi.local",
       "role": "both",
-      "sshUser": "brianwis"
+      "sshUser": "sonuvi"
     }
   ],
   "ports": {
@@ -28,9 +28,9 @@
   },
   "paths": {
     "musicLibraryRoot": "/var/lib/mpd/music",
-    "moodeUsbMount": "/media/SamsungMoode",
-    "piMountBase": "/mnt/SamsungMoode",
-    "podcastRoot": "/var/lib/mpd/music/NPR-Podcasts",
+    "moodeUsbMount": "/media/Music",
+    "piMountBase": "/var/lib/sonuvi/music",
+    "podcastRoot": "/var/lib/sonuvi/empty-library/podcasts",
     "subscriptionsJson": "./subscriptions.json"
   },
   "features": {
@@ -50,9 +50,13 @@
       "userKey": ""
     },
     "apns": {
-      "topic": "com.brianwis.sonuvi",
+      "topic": "",
       "environment": "auto",
       "tokensPath": "var/mobile-push-tokens.json"
     }
+  },
+  "display": {
+    "idleBrandLine": "Sonuvi",
+    "idleMessageLine": "Ready to play"
   }
 }

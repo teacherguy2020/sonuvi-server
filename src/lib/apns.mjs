@@ -14,6 +14,7 @@ function text(value) {
 
 function normalizeEnvironment(value) {
   const environment = text(value).toLowerCase();
+  if(environment === 'sandbox')return 'development';
   return environment === 'development' || environment === 'production' || environment === 'auto'
     ? environment
     : 'auto';
@@ -109,6 +110,7 @@ function requestOverHttp2({ authority, requestPath, headers, body, timeoutMs = D
 }
 
 export function createApnsProvider({
+  enabled = true,
   keyId = '',
   teamId = '',
   privateKey = '',
@@ -166,6 +168,7 @@ export function createApnsProvider({
     isConfigured,
 
     async send({ deviceToken, payload, environment: requestedEnvironment, collapseId = 'sonuvi-current-track' } = {}) {
+      if(!enabled)return {ok:false,status:0,reason:'provider-disabled',invalidToken:false};
       if (!isConfigured()) {
         return { ok: false, status: 0, reason: 'provider-not-configured', invalidToken: false };
       }

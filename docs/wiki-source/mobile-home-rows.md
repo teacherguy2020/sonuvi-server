@@ -27,8 +27,9 @@ The session must have the existing `mobile-api` bearer scope. A Track Key
 header, an absent token, or an invalid token is not sufficient.
 
 The server reads the authenticated user’s sanitized controller profile and
-uses its `recentRows` selection. When no valid selection is available, the
-server returns the controller defaults:
+uses its `recentRows` selection as the first four shelves. It then returns
+every other supported source below those selected shelves. When no valid
+selection is available, the server uses the controller defaults:
 
 ```json
 ["albums", "playlists", "podcasts", "radio"]
@@ -104,6 +105,11 @@ for existing album, artist, playlist, track, play, and queue actions. Opaque
 track/album/artist/playlist IDs are server-issued. Raw MPD file values,
 filesystem paths, MPD song IDs, Track Keys, and provider credentials are not
 returned.
+
+The response order is stable: the profile's four selected `recentRows` come
+first, followed by every remaining supported source in the published source
+vocabulary. An unavailable producer is still represented honestly by an
+unavailable or empty row, rather than being silently omitted.
 
 The response also includes `localRecentHistory`: a bounded, sanitized,
 row-shaped local-history payload outside `rows`. The server fetches it even
@@ -227,4 +233,4 @@ opaque IDs, artwork proxy URLs, and the absence of MPD paths in serialized
 JSON. The iOS project’s Swift tests and signed device build must remain green
 when this endpoint changes.
 
-*Last reviewed: 2026-10-22 07:41 America/Chicago*
+*Last reviewed: 2026-10-31 08:25 America/Chicago*

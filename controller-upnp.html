@@ -1,6 +1,9 @@
 <!doctype html>
 <html lang="en">
 <head>
+<script src="/__controller/config.js"></script>
+<script src="scripts/controller-browser-auth.js"></script>
+
   <script src="scripts/runtime-auth.js?v=20261024-h2"></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
@@ -176,7 +179,7 @@
         } catch {}
         return `${location.protocol}//${location.hostname || 'sonuvi.local'}:3101`;
       }
-      const base = resolveApiBase();
+      const base = globalThis.SonuviControllerWeb ? location.origin : (resolveApiBase());
       let trackKey = '';
       let keyRequest = null;
 
@@ -245,6 +248,7 @@
       }
       function apiPath(path) { return `${base}${String(path).startsWith('/') ? '' : '/'}${path}`; }
       async function ensureKey() {
+      if (globalThis.SonuviControllerAuth?.enabled) { await globalThis.SonuviControllerAuth.ready; return ""; }
         if (trackKey) return trackKey;
         if (keyRequest) return keyRequest;
         keyRequest = fetchBounded(apiPath('/config/runtime'), { cache:'no-store' }).then((r) => r.json().catch(() => ({}))).then((j) => {

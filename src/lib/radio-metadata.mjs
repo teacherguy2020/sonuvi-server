@@ -267,13 +267,29 @@ export function deriveRadioLookupContext({ artist = '', title = '', album = '', 
   };
 }
 
+// WALM Christmas publishes title-first ICY metadata with a station suffix.
+// Keep this station-scoped: an ordinary song containing "by" is not a pair.
+function parseChristmasVinylTitle({ title, stationName, file }) {
+  let host = '';
+  try { host = new URL(file).hostname.toLowerCase(); } catch {}
+  const station = /\bchristmas\s+vinyl\b/i.test(stationName)
+    || ((host === 'walmradio.com' || host.endsWith('.walmradio.com')) && /\/christmas(?:[_.?/#]|$)/i.test(file));
+  if (!station) return null;
+  const line = text(title).replace(/\s+[-–—]\s+Christmas Vinyl(?: HD)?\s+on\s+(?:www\.)?walmradio\.com\s*$/i, '').trim();
+  // Greedy first group deliberately selects the last standalone "by".
+  const match = line.match(/^(.+)\s+by\s+(.+)$/i);
+  if (!match || !text(match[1]) || !text(match[2])) return null;
+  return { title: text(match[1]), artist: text(match[2]) };
+}
+
 export function normalizeRadioMetadata({ artist = '', title = '', album = '', stationName = '', file = '' } = {}) {
   const raw = { artist: text(artist), title: unwrapStreamTitle(title), album: text(album), stationName: text(stationName), file: text(file) };
+  const parsedWalm = parseChristmasVinylTitle(raw);
   const parsedIheart = parseIheartTitleBlob(raw.title) || parseIheartTitleBlob(raw.artist);
   const normalized = {
     ...raw,
-    artist: text(parsedIheart?.artist || raw.artist),
-    title: text(parsedIheart?.title || raw.title),
+    artist: text(parsedIheart?.artist || parsedWalm?.artist || raw.artist),
+    title: text(parsedIheart?.title || parsedWalm?.title || raw.title),
   };
   const profile = radioMetadataProfile(normalized.stationName, normalized.file);
   const classification = classifyRadioMetadata({ ...normalized, iheart: parsedIheart });
@@ -282,6 +298,7 @@ export function normalizeRadioMetadata({ artist = '', title = '', album = '', st
     : null;
   const lookup = radioLookupDecision({ ...normalized, classification });
   const reasonCodes = [];
+  if (parsedWalm && !parsedIheart) reasonCodes.push('christmas-vinyl-title-by-artist');
   if (parsedIheart) reasonCodes.push(parsedIheart.classification === 'sponsor-ad' ? 'iheart-sponsor-ad' : 'iheart-blob');
   if (classical) reasonCodes.push('classical-fields-extracted');
   if (!lookup.allow) reasonCodes.push(`lookup-suppressed:${lookup.reason}`);

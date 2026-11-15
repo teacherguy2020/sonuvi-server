@@ -101,3 +101,25 @@ test('keeps Davide/MIMIC movement context and curation inputs intact', () => {
   assert.equal(context.conductorHint, 'Charles Dutoit');
   assert.equal(context.programHint, 'Davide');
 });
+
+
+test('Christmas Vinyl splits the last BY and removes only its station suffix', () => {
+  const title='Christmas Auld Lang Syne by Bobby Darin - Christmas Vinyl on walmradio.com';
+  const result=normalizeRadioMetadata({title,stationName:'Christmas Vinyl HD'});
+  assert.equal(result.title,'Christmas Auld Lang Syne');
+  assert.equal(result.artist,'Bobby Darin');
+  assert.equal(result.raw.title,title);
+  assert.equal(result.classification,'generic');
+  assert.equal(result.lookup.allow,true);
+  assert.equal(deriveRadioLookupContext(result).lookupArtist,'Bobby Darin');
+  const repeated=normalizeRadioMetadata({title:'As Time Goes By BY Bing Crosby',file:'https://icecast3.walmradio.com:8443/christmas_opus'});
+  assert.equal(repeated.title,'As Time Goes By');assert.equal(repeated.artist,'Bing Crosby');
+  for(const title of ['Christmas Vinyl',' by ','A song by ']) {
+    const unchanged=normalizeRadioMetadata({title,stationName:'Christmas Vinyl HD'});
+    assert.equal(unchanged.artist,'');
+  }
+  const generic=normalizeRadioMetadata({title:'As Time Goes By',artist:'Bing Crosby',stationName:'Other station'});
+  assert.equal(generic.title,'As Time Goes By');assert.equal(generic.artist,'Bing Crosby');
+  const spoof=normalizeRadioMetadata({title:'Title by Artist',file:'https://walmradio.com.example.net/christmas'});
+  assert.equal(spoof.artist,'');
+});

@@ -22,18 +22,18 @@ export function timingSafeEqualText(a, b) {
   return left.length === right.length && crypto.timingSafeEqual(left, right);
 }
 
-function createSignedToken({ secret, scope, claims = {}, ttlMs, now = Date.now() }) {
+function createSignedToken({ secret, scope, claims = {}, ttlMs, now = Date.now(), persistent = false }) {
   const key = String(secret || '');
   if (!key) throw new Error('mobile token secret is not configured');
 
   const issuedAt = Math.floor(Number(now) / 1000);
-  const expiresAt = issuedAt + Math.max(1, Math.floor(Number(ttlMs || 0) / 1000));
+  const expiresAt = persistent ? null : issuedAt + Math.max(1, Math.floor(Number(ttlMs || 0) / 1000));
   const header = { typ: TOKEN_TYPE, v: TOKEN_VERSION, alg: 'HS256' };
   const payload = {
     ...claims,
     scope: String(scope || ''),
     iat: issuedAt,
-    exp: expiresAt,
+    ...(persistent ? { persistent: true } : { exp: expiresAt }),
     jti: crypto.randomBytes(16).toString('hex'),
   };
   const encodedHeader = base64urlEncode(JSON.stringify(header));
@@ -42,31 +42,62 @@ function createSignedToken({ secret, scope, claims = {}, ttlMs, now = Date.now()
   return `${signed}.${sign(signed, key)}`;
 }
 
-export function createMobileSessionToken({ secret, deviceId, ttlMs = 12 * 60 * 60 * 1000, now } = {}) {
+export function createMobileSessionToken({ secret, deviceId, sessionId, ttlMs = 12 * 60 * 60 * 1000, now } = {}) {
   const normalizedDeviceId = String(deviceId || '').trim();
   if (!normalizedDeviceId) throw new Error('deviceId is required');
   return createSignedToken({
     secret,
     scope: 'mobile-api',
-    claims: { deviceId: normalizedDeviceId },
+    claims: { deviceId: normalizedDeviceId, ...(sessionId ? { sid: sessionId } : {}) },
     ttlMs,
     now,
   });
 }
 
-export function createMobileRefreshToken({ secret, deviceId, ttlMs = 365 * 24 * 60 * 60 * 1000, now } = {}) {
+export function createMobileRefreshToken({ secret, deviceId, sessionId, ttlMs = 365 * 24 * 60 * 60 * 1000, now } = {}) {
   const normalizedDeviceId = String(deviceId || '').trim();
   if (!normalizedDeviceId) throw new Error('deviceId is required');
   return createSignedToken({
     secret,
     scope: 'mobile-refresh',
-    claims: { deviceId: normalizedDeviceId },
+    claims: { deviceId: normalizedDeviceId, ...(sessionId ? { sid: sessionId } : {}) },
     ttlMs,
     now,
   });
 }
 
-export function createMobileMediaTicket({ secret, deviceId, trackId, ttlMs = 5 * 60 * 1000, format = 'mp3', now } = {}) {
+/** A durable renewal-only replacement for the legacy expiring mobile refresh token. */
+export function createPersistentMobileRefreshToken({ secret, deviceId, sessionId, now } = {}) {
+  const normalizedDeviceId = String(deviceId || '').trim();
+  if (!normalizedDeviceId) throw new Error('deviceId is required');
+  return createSignedToken({
+    secret,
+    scope: 'mobile-refresh',
+    claims: { deviceId: normalizedDeviceId, ...(sessionId ? { sid: sessionId } : {}) },
+    now,
+    persistent: true,
+  });
+}
+
+/**
+ * A durable credential identifies the browser-controller renewal pathway. It
+ * is never directly accepted as an API bearer, media ticket, or administrator
+ * credential. Like the durable mobile-refresh credential, it can be exchanged
+ * at the renewal endpoint for the same short-lived mobile API bearer.
+ */
+export function createPersistentControllerRefreshToken({ secret, deviceId, sessionId, now } = {}) {
+  const normalizedDeviceId = String(deviceId || '').trim();
+  if (!normalizedDeviceId) throw new Error('deviceId is required');
+  return createSignedToken({
+    secret,
+    scope: 'controller-web-refresh',
+    claims: { deviceId: normalizedDeviceId, ...(sessionId ? { sid: sessionId } : {}) },
+    now,
+    persistent: true,
+  });
+}
+
+export function createMobileMediaTicket({ secret, deviceId, sessionId, trackId, ttlMs = 5 * 60 * 1000, format = 'mp3', now } = {}) {
   const normalizedDeviceId = String(deviceId || '').trim();
   const normalizedTrackId = String(trackId || '').trim();
   if (!normalizedDeviceId || !normalizedTrackId) throw new Error('deviceId and trackId are required');
@@ -75,6 +106,7 @@ export function createMobileMediaTicket({ secret, deviceId, trackId, ttlMs = 5 *
     scope: 'mobile-media',
     claims: {
       deviceId: normalizedDeviceId,
+      ...(sessionId ? { sid: sessionId } : {}),
       trackId: normalizedTrackId,
       format: String(format || 'mp3'),
     },
@@ -83,7 +115,7 @@ export function createMobileMediaTicket({ secret, deviceId, trackId, ttlMs = 5 *
   });
 }
 
-export function createMobileRadioTicket({ secret, deviceId, stationId, ttlMs = 30 * 60 * 1000, now } = {}) {
+export function createMobileRadioTicket({ secret, deviceId, sessionId, stationId, ttlMs = 30 * 60 * 1000, now } = {}) {
   const normalizedDeviceId = String(deviceId || '').trim();
   const normalizedStationId = String(stationId || '').trim();
   if (!normalizedDeviceId || !normalizedStationId) throw new Error('deviceId and stationId are required');
@@ -92,6 +124,7 @@ export function createMobileRadioTicket({ secret, deviceId, stationId, ttlMs = 3
     scope: 'mobile-radio',
     claims: {
       deviceId: normalizedDeviceId,
+      ...(sessionId ? { sid: sessionId } : {}),
       stationId: normalizedStationId,
     },
     ttlMs,
@@ -105,7 +138,7 @@ export function readBearerToken(req) {
   return String(match?.[1] || '').trim();
 }
 
-export function verifyMobileToken(token, { secret, scope, now = Date.now(), allowExpired = false } = {}) {
+export function verifyMobileToken(token, { secret, scope, now = Date.now(), allowExpired = false, sessionRegistry } = {}) {
   const key = String(secret || '');
   const raw = String(token || '').trim();
   if (!key || !raw) return null;
@@ -130,10 +163,16 @@ export function verifyMobileToken(token, { secret, scope, now = Date.now(), allo
   if (scope && payload?.scope !== scope) return null;
 
   const nowSec = Math.floor(Number(now) / 1000);
+  const persistentRefresh = ['mobile-refresh', 'controller-web-refresh'].includes(scope)
+    && payload?.scope === scope
+    && payload?.persistent === true
+    && payload?.exp === undefined;
   const exp = Number(payload?.exp || 0);
   const iat = Number(payload?.iat || 0);
-  if (!Number.isFinite(exp) || !Number.isFinite(iat) || exp <= 0 || (!allowExpired && exp <= nowSec) || iat > nowSec + 60) return null;
+  if (!Number.isFinite(iat) || iat > nowSec + 60) return null;
+  if (!persistentRefresh && (!Number.isFinite(exp) || exp <= 0 || (!allowExpired && exp <= nowSec))) return null;
 
+  if (sessionRegistry && !sessionRegistry.accepts(payload)) return null;
   return payload;
 }
 
@@ -143,4 +182,10 @@ export function createMobileTrackId({ secret, trackIdentity } = {}) {
   if (!key || !identity) throw new Error('track ID secret and identity are required');
   const digest = crypto.createHmac('sha256', key).update(identity).digest('base64url').slice(0, 32);
   return `trk_${digest}`;
+}
+
+/** A short-lived capability for one immutable cached animation, never general API access. */
+export function createMobileAnimationTicket({ secret, deviceId, sessionId, name, ttlMs = 60 * 60 * 1000, now } = {}) {
+  if (!deviceId || !/^[a-f0-9]{40}\.mp4$/.test(String(name))) throw new Error('invalid animation ticket');
+  return createSignedToken({ secret, scope: 'mobile-animation', claims: { deviceId, name, ...(sessionId ? { sid: sessionId } : {}) }, ttlMs, now });
 }

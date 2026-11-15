@@ -1,0 +1,146 @@
+import crypto from 'node:crypto';
+import { readBearerToken, verifyMobileToken } from './mobile-auth.mjs';
+
+const MAX_AGE_MS = 30_000;
+const reads = new Map(Object.entries({
+  '/status/services': [], '/now-playing': ['_','t'], '/next-up': ['_','t'], '/peppy/last-profile': [], '/peppy/vumeter': [], '/peppy/spectrum': [],
+  '/config/runtime': [], '/config/controller-profile': [], '/config/browse/stats': [],
+  '/config/browse/artists': ['q','limit','offset'], '/config/browse/albums': ['q','artist','limit'],
+  '/config/browse/artist-albums': ['artist'], '/config/browse/album-tracks': ['artist','album'],
+  '/config/library-health/albums': [], '/config/queue-wizard/playlist-preview': ['playlist'],
+  '/config/queue-wizard/options': [], '/config/queue-wizard/playlists': [],
+  '/config/queue-wizard/radio-presets': [], '/config/queue-wizard/radio-favorites': [], '/config/queue-wizard/radio-options': [],
+  '/recent/albums': ['limit'], '/recent/playlists': ['limit'], '/recent/podcasts': ['limit'],
+  '/recent/radio-favorites': ['limit'], '/podcasts': [],
+  '/art/current.jpg': ['v','_','t'], '/art/current_bg_640_blur.jpg': ['v','_','t'],
+  '/art/track_640.jpg': ['file','v','_','t'], '/art/radio-logo.jpg': ['name','file','v','_','t'],
+}));
+export const isLoopbackAddress = (value) => ['127.0.0.1','::1','::ffff:127.0.0.1'].includes(String(value));
+const radioPreview = '/config/queue-wizard/radio-preview';
+const podcastEpisodes = '/podcasts/episodes/list';
+const playback = '/config/diagnostics/playback';
+const transportActions = new Set(['play', 'pause', 'toggle', 'next', 'prev', 'previous', 'stop', 'shuffle', 'shufflequeue', 'undoshuffle', 'repeat']);
+function validPlaybackBody(body) {
+  if (typeof body.action !== 'string') return false;
+  const only = fields => Object.keys(body).every(key => fields.includes(key));
+  if (transportActions.has(body.action)) return only(['action']);
+  if (body.action === 'repeat-mode') return only(['action', 'mode']) && ['off', 'all', 'one'].includes(body.mode);
+  if (body.action === 'seekpct') return only(['action', 'percent']) && Number.isFinite(body.percent) && body.percent >= 0 && body.percent <= 100;
+  if (body.action === 'seekrel') return only(['action', 'seconds']) && Number.isInteger(body.seconds) && body.seconds !== 0 && Math.abs(body.seconds) <= 600;
+  return false;
+}
+export function validControllerBody({ method = 'GET', pathname, body } = {}) {
+  if (method.toUpperCase() !== 'POST') return true;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return false;
+  if (pathname === playback) return validPlaybackBody(body);
+  if (pathname === podcastEpisodes) {
+    if (Object.keys(body).some(k => !['rss', 'limit'].includes(k)) || typeof body.rss !== 'string' || body.rss.length > 2048 || /[\x00-\x1f]/.test(body.rss)) return false;
+    try { const url = new URL(body.rss); if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return false; } catch { return false; }
+    return body.limit === undefined || (Number.isInteger(body.limit) && body.limit >= 1 && body.limit <= 500);
+  }
+  if (pathname !== radioPreview) return false;
+  const fields = new Set(['genres', 'favoriteStations', 'favoritesOnly', 'hqOnly', 'maxStations']);
+  if (Object.keys(body).some(k => !fields.has(k))) return false;
+  for (const k of ['genres', 'favoriteStations']) if (body[k] !== undefined && (!Array.isArray(body[k]) || body[k].length > 2000 || body[k].some(v => typeof v !== 'string' || v.length > 2048 || /[\x00-\x1f]/.test(v)))) return false;
+  for (const k of ['favoritesOnly', 'hqOnly']) if (body[k] !== undefined && typeof body[k] !== 'boolean') return false;
+  return body.maxStations === undefined || (Number.isInteger(body.maxStations) && body.maxStations >= 1 && body.maxStations <= 10000);
+}
+export function isControllerDispatchable({ method = 'GET', pathname = '' } = {}) {
+  return (method.toUpperCase() === 'GET' && reads.has(pathname)) || (method.toUpperCase() === 'POST' && [radioPreview, podcastEpisodes, playback].includes(pathname));
+}
+export function validControllerTarget(target, method = 'GET') {
+  try {
+    const url = new URL(target, 'http://controller.invalid');
+    if (!target.startsWith('/') || target.startsWith('//') || url.origin !== 'http://controller.invalid' || url.hash || !isControllerDispatchable({method, pathname:url.pathname})) return false;
+    const seen = new Set();
+    for (const [key,value] of url.searchParams) {
+      if (seen.has(key) || !(reads.get(url.pathname)||[]).includes(key) || value.length > 2048 || /[\x00-\x1f\\]/.test(value)) return false;
+      seen.add(key);
+      if (['limit','offset'].includes(key) && (!/^\d+$/.test(value) || Number(value) > 10000)) return false;
+      if (key === 'file' && (value.startsWith('/') || value.split('/').some(v => v === '..' || v === '.'))) return false;
+      if (url.pathname === '/art/track_640.jpg' && key === 'file' && /^[a-z][\w+.-]*:/i.test(value)) return false;
+    }
+    return true;
+  } catch { return false; }
+}
+const nativeQueuePreview = '/config/queue-wizard/preview';
+const nativeQueueApply = '/config/queue-wizard/apply';
+export function validNativeControllerTarget(target, method = 'GET') {
+  if (method === 'GET') {
+    try {
+      const url = new URL(target, 'http://controller.invalid');
+      if (target.startsWith('/') && !target.startsWith('//') && url.origin === 'http://controller.invalid' && !url.hash
+          && /^\/config\/(lastfm|listening-history)\/(top-albums|top-artists|top-tracks|recent-tracks)$/.test(url.pathname)) {
+        const entries = [...url.searchParams];
+        return entries.length <= 1 && entries.every(([key, value]) => key === 'limit' && /^\d+$/.test(value) && Number(value) >= 1 && Number(value) <= 50);
+      }
+    } catch { return false; }
+  }
+  return validControllerTarget(target, method) || (method === 'POST' && [nativeQueueApply,nativeQueuePreview].includes(target));
+}
+export function validNativeControllerBody({method = 'GET', pathname, body} = {}) {
+  if (method === 'POST' && pathname === playback && body?.action === 'consume') {
+    return Object.keys(body).every(k => ['action','setTo'].includes(k)) && (body.setTo === undefined || ['on','off'].includes(body.setTo));
+  }
+  if (method === 'POST' && pathname === playback && body?.action === 'crop') {
+    return Object.keys(body).length === 1;
+  }
+  if (pathname === nativeQueuePreview) {
+    if (method !== 'POST' || !body || typeof body !== 'object' || Array.isArray(body)) return false;
+    const lists=['genres','artists','albums','excludeGenres'];
+    if (Object.keys(body).some(k=>![...lists,'minRating','maxTracks','varietyMode'].includes(k))) return false;
+    for (const key of lists) if (!Array.isArray(body[key]) || body[key].length>5000 || body[key].some(v=>typeof v!=='string'||v.length>2048||/[\x00-\x1f]/.test(v))) return false;
+    return Number.isFinite(body.minRating) && body.minRating>=0 && body.minRating<=5
+      && Number.isInteger(body.maxTracks) && body.maxTracks>=1 && body.maxTracks<=5000
+      && typeof body.varietyMode==='boolean';
+  }
+  if (pathname !== nativeQueueApply) return validControllerBody({method, pathname, body});
+  if (method !== 'POST' || !body || typeof body !== 'object' || Array.isArray(body)) return false;
+  const fields = new Set(['mode','keepNowPlaying','tracks','shuffle','forceRandomOff','fastStart','play','playlistName','saveOnly','generateCollage','previewCoverBase64','previewCoverMimeType']);
+  if (Object.keys(body).some(k => !fields.has(k)) || !['append','replace'].includes(body.mode)) return false;
+  if (!Array.isArray(body.tracks) || !body.tracks.length || body.tracks.length > 50000) return false;
+  if (body.tracks.some(file => {
+    if (typeof file !== 'string' || !file || file.length > 4096 || /[\x00-\x1f\\]/.test(file)) return true;
+    if (/^https?:/.test(file)) { try { const u = new URL(file); return !!(u.username || u.password); } catch { return true; } }
+    return file.startsWith('/') || /^[a-z][a-z0-9+.-]*:/i.test(file) || file.split('/').some(p => p === '.' || p === '..');
+  })) return false;
+  for (const key of ['keepNowPlaying','shuffle','forceRandomOff','fastStart','play','saveOnly','generateCollage']) {
+    if (body[key] !== undefined && typeof body[key] !== 'boolean') return false;
+  }
+  if (body.playlistName !== undefined && (typeof body.playlistName !== 'string' || body.playlistName.length > 200 || /[\x00-\x1f/\\]/.test(body.playlistName) || ['.','..'].includes(body.playlistName))) return false;
+  if (body.previewCoverBase64 !== undefined && (typeof body.previewCoverBase64 !== 'string' || body.previewCoverBase64.length > 15000000 || !/^[A-Za-z0-9+/=]*$/.test(body.previewCoverBase64))) return false;
+  return body.previewCoverMimeType === undefined || ['image/jpeg','image/png','image/webp'].includes(body.previewCoverMimeType);
+}
+const material = (method, target, timestamp, nonce) => `${method.toUpperCase()}\n${target}\n${timestamp}\n${nonce}`;
+export function controllerDispatchHeader({ secret, method = 'GET', pathname, target = pathname, now = Date.now(), nonce = crypto.randomBytes(18).toString('base64url') } = {}) {
+  if (!secret) return '';
+  const timestamp = String(Math.floor(now));
+  const mac = crypto.createHmac('sha256', secret).update(material(method,target,timestamp,nonce)).digest('base64url');
+  return `${timestamp}.${nonce}.${mac}`;
+}
+export function verifyControllerDispatch({ secret, header = '', method = 'GET', pathname, target = pathname, now = Date.now() } = {}) {
+  const [timestamp,nonce,mac,...extra] = String(header).split('.');
+  if (!secret || extra.length || !/^\d{10,14}$/.test(timestamp) || !/^[\w-]{24}$/.test(nonce || '') || !/^[\w-]{43}$/.test(mac || '') || Math.abs(now-Number(timestamp)) > MAX_AGE_MS) return false;
+  const expected = controllerDispatchHeader({secret,method,target,now:Number(timestamp),nonce}).split('.')[2];
+  return crypto.timingSafeEqual(Buffer.from(mac), Buffer.from(expected));
+}
+/** Per-process bounded replay protection, plus actual socket and query validation. */
+export function createControllerDispatchAuthorizer({ secret, apiSecret, sessionRegistry } = {}) {
+  const used = new Map();
+  return (req) => {
+    const target = req.originalUrl || req.url || req.path;
+    const now = Date.now();
+    for (const [key,expires] of used) if (expires < now) used.delete(key);
+    const header = String(req.headers?.['x-sonuvi-controller-dispatch'] || '');
+    const native = header === 'native-mobile-session';
+    const validTarget = native ? validNativeControllerTarget : validControllerTarget;
+    const validBody = native ? validNativeControllerBody : validControllerBody;
+    if (!isLoopbackAddress(req.socket?.remoteAddress) || !validTarget(target, req.method) || !validBody({method:req.method, pathname:req.path || target?.split('?')[0], body:req.body})) return false;
+    // Fresh installations reuse the existing paired-controller grant; no additional
+    // shared secret or administrator credential has to be provisioned to the web service.
+    if (native || header === 'mobile-session') return Boolean(verifyMobileToken(readBearerToken(req), { secret: apiSecret, scope: 'mobile-api', now, sessionRegistry }));
+    if (req.method !== 'GET') return false;
+    if (used.has(header) || used.size >= 10000 || !verifyControllerDispatch({secret,header,method:req.method,target,now})) return false;
+    used.set(header, now+MAX_AGE_MS); return true;
+  };
+}

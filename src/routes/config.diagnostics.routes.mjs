@@ -1,4 +1,5 @@
 import { readMoodeRadioCatalog } from '../lib/moode-radio-catalog.mjs';
+import { readEffectiveRuntimeConfig } from '../lib/native-configuration-store.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -306,8 +307,7 @@ export function registerConfigDiagnosticsRoutes(app, deps) {
 
   async function isRatingsEnabled() {
     try {
-      const raw = await fs.readFile(configPath, 'utf8');
-      const cfg = JSON.parse(raw);
+      const cfg = readEffectiveRuntimeConfig(configPath);
       return Boolean(cfg?.features?.ratings ?? true);
     } catch {
       return true;
@@ -319,8 +319,7 @@ export function registerConfigDiagnosticsRoutes(app, deps) {
     if (protectedValue) return protectedValue;
     if (immutableRuntime()) return '';
     try {
-      const raw = await fs.readFile(configPath, 'utf8');
-      const cfg = JSON.parse(raw || '{}');
+      const cfg = readEffectiveRuntimeConfig(configPath);
       return String(cfg?.alexa?.routeWebhookUrl || '').trim();
     } catch {
       return '';
@@ -332,8 +331,7 @@ export function registerConfigDiagnosticsRoutes(app, deps) {
     if (protectedValue) return protectedValue;
     if (immutableRuntime()) return '';
     try {
-      const raw = await fs.readFile(configPath, 'utf8');
-      const cfg = JSON.parse(raw || '{}');
+      const cfg = readEffectiveRuntimeConfig(configPath);
       return String(cfg?.alexa?.stopWebhookUrl || '').trim();
     } catch {
       return '';
@@ -358,8 +356,7 @@ export function registerConfigDiagnosticsRoutes(app, deps) {
         return '';
       }
 
-      const raw = await fs.readFile(configPath, 'utf8');
-      const cfg = JSON.parse(raw || '{}');
+      const cfg = readEffectiveRuntimeConfig(configPath);
       const explicit = String(cfg?.alexa?.[`${name}WebhookUrl`] || '').trim();
       if (explicit) return explicit;
 
@@ -444,7 +441,7 @@ export function registerConfigDiagnosticsRoutes(app, deps) {
     { group: 'Moode/Peppy', method: 'GET', path: '/config/moode/display/status' },
     { group: 'Moode/Peppy', method: 'POST', path: '/config/moode/display', body: { mode: 'on' } },
     { group: 'Moode/Peppy', method: 'GET', path: '/config/moode/browser-url/status' },
-    { group: 'Moode/Peppy', method: 'POST', path: '/config/moode/browser-url', body: { url: 'http://sonuvi.local:8101/display.html' } },
+    { group: 'Moode/Peppy', method: 'POST', path: '/config/moode/browser-url', body: { url: 'https://sonuvi.local/display.html?mode=index&kiosk=1' } },
     { group: 'Moode/Peppy', method: 'GET', path: '/peppy/last-profile' },
     { group: 'Moode/Peppy', method: 'POST', path: '/peppy/last-profile', body: { displayMode: 'peppy' } },
 

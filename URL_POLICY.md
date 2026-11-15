@@ -56,6 +56,8 @@ This project keeps stable canonical URLs while preserving compatibility aliases 
 - API default: `http://<host>:3101`
 - Web default: `http://<host>:8101`
 
+For immutable authenticated LAN controllers, configure direct HTTPS (for example `https://<LAN-IP>:8443`). HTTP8101 redirects to that configured origin; it is not an unauthenticated controller API. See [LAN controller HTTPS](docs/runbooks/controller-lan-https.md).
+
 Ports are configurable via runtime config (`ports.api`, `ports.ui`).
 
 ## Rules for future URL changes

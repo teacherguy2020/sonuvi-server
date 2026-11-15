@@ -1,13 +1,35 @@
-# Example for a NEW Sonuvi HTTPS site; merge into an existing configuration.
-# Do not overwrite existing host bindings, Tailscale, Alexa or media routes.
-sonuvi.local {
-    tls internal
-    @api path /now-playing /next-up /favorites/toggle /queue/* /mpd/* /track /track/* /art/* /_debug/* /alexa/* /podcasts* /rating* /config* /v1/mobile* /upnp* /recent* /peppy/*
-    handle @api {
-        reverse_proxy 127.0.0.1:3101
+# OPTIONAL alias only. Fresh servers already expose their generated HTTPS origin.
+# Replace the generated hostname below with this installation's local-tls hostname.
+# Copy ONLY its PUBLIC root.pem to /etc/caddy/sonuvi-upstream-root.pem (0644).
+# Disable SONUVI_FRESH_BROWSER_HTTPS for this custom443 proxy; retain native8444.
+# Establish client trust for this alias separately. Never copy an old VM's CA.
+https://sonuvi.local {
+  tls internal
+  @foreign {
+    header Origin *
+    not header Origin https://sonuvi.local
+  }
+  @sameOrigin header Origin https://sonuvi.local
+  route {
+  respond @foreign 403
+  handle @sameOrigin {
+    reverse_proxy https://127.0.0.1:8444 {
+      header_up Host sonuvi-generated.local:8444
+      header_up Origin https://sonuvi-generated.local:8444
+      transport http {
+        tls_server_name sonuvi-generated.local
+        tls_trusted_ca_certs /etc/caddy/sonuvi-upstream-root.pem
+      }
     }
-    handle {
-        reverse_proxy 127.0.0.1:8101
+  }
+  handle {
+    reverse_proxy https://127.0.0.1:8444 {
+      header_up Host sonuvi-generated.local:8444
+      transport http {
+        tls_server_name sonuvi-generated.local
+        tls_trusted_ca_certs /etc/caddy/sonuvi-upstream-root.pem
+      }
     }
+  }
+  }
 }
-

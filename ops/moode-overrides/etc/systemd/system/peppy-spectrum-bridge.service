@@ -1,0 +1,14 @@
+[Unit]
+Description=Peppy spectrum FIFO -> HTTP bridge (headless)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/bin/peppy-spectrum-bridge.py
+Restart=always
+RestartSec=1
+User=root
+
+[Install]
+WantedBy=multi-user.target

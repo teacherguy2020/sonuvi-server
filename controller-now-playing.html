@@ -2,6 +2,9 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script src="/__controller/config.js"></script>
+<script src="scripts/controller-browser-auth.js"></script>
+
   <script src="scripts/now-playing-art.js?v=20261028-https1"></script>
   <script src="scripts/runtime-auth.js?v=20261024-h2"></script>
   <meta charset="UTF-8" />
@@ -1104,9 +1107,9 @@
 
     // Local-track album tap -> same album card/actions as controller home
     (function bindAlbumCardFromAlbumLink(){
-      const base = (!location.port || location.port==='80' || location.port==='443')
+      const base = globalThis.SonuviControllerWeb ? location.origin : ((!location.port || location.port==='80' || location.port==='443')
         ? location.origin
-        : `${location.protocol}//${location.hostname||'sonuvi.local'}:3101`;
+        : `${location.protocol}//${location.hostname||'sonuvi.local'}:3101`);
       let runtimeTrackKey='';
       let ctx={album:'',artist:'',art:'',tracks:[]};
       const albumLink=document.getElementById('album-link');
@@ -1115,6 +1118,7 @@
       if(!albumLink||!modal||!tracksHost) return;
 
       async function ensureKey(){
+      if (globalThis.SonuviControllerAuth?.enabled) { await globalThis.SonuviControllerAuth.ready; return ""; }
         if (runtimeTrackKey) return runtimeTrackKey;
         try { const r=await fetch(`${base}/config/runtime`,{cache:'no-store'}); const j=await r.json().catch(()=>({})); runtimeTrackKey=String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim(); } catch {}
         return runtimeTrackKey;

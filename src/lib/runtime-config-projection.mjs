@@ -82,6 +82,7 @@ function projectedFeatures(cfg) {
     showAboutWhenNoPersonnel: bool(features.showAboutWhenNoPersonnel, true),
     moodeDisplayTakeover: bool(features.moodeDisplayTakeover, true),
     lastfm: bool(features.lastfm, false),
+    dlnaMediaServer: bool(features.dlnaMediaServer, false),
   };
 }
 
@@ -175,6 +176,7 @@ export function projectRuntimeAdminConfig(cfg, {
   environment = process.env,
   apnsCredentials = {},
   defaults = {},
+  readMusicSource = () => null,
 } = {}) {
   const source = object(cfg);
   const notifications = object(source.notifications);
@@ -186,6 +188,10 @@ export function projectRuntimeAdminConfig(cfg, {
   const paths = object(source.paths);
   const moodeHost = text(environment.MOODE_SSH_HOST || moode.sshHost || mpd.host || defaults.moodeHost || 'moode.local');
   const moodeBaseRaw = text(environment.MOODE_BASE_URL || moode.baseUrl);
+  // This optional reader is supplied only to authenticated administration.
+  const configuredMusicSource = environment.SONUVI_MUSIC_CONFIGURED === '1' ? readMusicSource() : null;
+  const musicSource = configuredMusicSource?.mountPath === text(environment.MUSIC_LIBRARY_ROOT || paths.musicLibraryRoot)
+    ? configuredMusicSource : null;
 
   return {
     ...projectRuntimePublicConfig(source, { environment }),
@@ -201,6 +207,8 @@ export function projectRuntimeAdminConfig(cfg, {
         ['notifyEnabled', 'TRACK_NOTIFY_ENABLED'], ['pollMs', 'TRACK_NOTIFY_POLL_MS'],
         ['dedupeMs', 'TRACK_NOTIFY_DEDUPE_MS'], ['alexaMaxAgeMs', 'TRACK_NOTIFY_ALEXA_MAX_AGE_MS'],
         ['pathPiMountBase', 'PI4_MOUNT_BASE'], ['pathPodcastRoot', 'PODCAST_ROOT'],
+        ['pathMusicLibraryRoot', 'MUSIC_LIBRARY_ROOT'], ['featureDlnaMediaServer', 'ENABLE_DLNA_MEDIA_SERVER'],
+        ['featureAlexaSkill', 'ENABLE_ALEXA'], ['apiPort', 'PORT'], ['uiPort', 'SONUVI_WEB_PORT'],
       ].filter(([, variable]) => text(environment[variable])).map(([id]) => id),
     },
     alexa: projectedAlexa(source),
@@ -241,20 +249,21 @@ export function projectRuntimeAdminConfig(cfg, {
         : 'toptracks',
     },
     paths: {
-      musicLibraryRoot: text(paths.musicLibraryRoot),
+      musicLibraryRoot: text(environment.MUSIC_LIBRARY_ROOT || paths.musicLibraryRoot),
       moodeUsbMount: text(paths.moodeUsbMount),
-      piMountBase: text(paths.piMountBase),
-      podcastRoot: text(paths.podcastRoot),
+      piMountBase: text(environment.PI4_MOUNT_BASE || paths.piMountBase),
+      podcastRoot: text(environment.PODCAST_ROOT || paths.podcastRoot),
     },
     storage: {
+      ...(musicSource ? { musicSource } : {}),
       mediaPathOverrides: {
         ...(text(environment.PI4_MOUNT_BASE) ? { piMountBase: text(environment.PI4_MOUNT_BASE) } : {}),
         ...(text(environment.PODCAST_ROOT) ? { podcastRoot: text(environment.PODCAST_ROOT) } : {}),
       },
-      musicLibraryRootConfigured: Boolean(text(paths.musicLibraryRoot)),
+      musicLibraryRootConfigured: Boolean(text(environment.MUSIC_LIBRARY_ROOT || paths.musicLibraryRoot)),
       moodeUsbMountConfigured: Boolean(text(paths.moodeUsbMount)),
-      piMountBaseConfigured: Boolean(text(paths.piMountBase)),
-      podcastRootConfigured: Boolean(text(paths.podcastRoot)),
+      piMountBaseConfigured: Boolean(text(environment.PI4_MOUNT_BASE || paths.piMountBase)),
+      podcastRootConfigured: Boolean(text(environment.PODCAST_ROOT || paths.podcastRoot)),
     },
   };
 }
@@ -269,6 +278,23 @@ function updateStringMap(value) {
 
 function updateRecords(value, fields) {
   return limitedRecords(value, fields);
+}
+
+/**
+ * Shared shape validation for both the established web configuration route
+ * and the native administrator route. This validates the persisted runtime
+ * document without accepting arbitrary fields or credentials.
+ */
+export function validateRuntimeConfigShape(cfg) {
+  const errors = [];
+  if (!cfg || typeof cfg !== 'object') errors.push('config must be an object');
+  if (!cfg?.ports || typeof cfg.ports.api !== 'number' || typeof cfg.ports.ui !== 'number') {
+    errors.push('ports.api and ports.ui must be numbers');
+  }
+  if (cfg?.alexa?.enabled && !String(cfg.alexa?.publicDomain || '').trim()) {
+    errors.push('alexa.publicDomain is required when alexa.enabled=true');
+  }
+  return errors;
 }
 
 /**
@@ -307,7 +333,7 @@ export function sanitizeRuntimeConfigUpdate(value) {
   if (hasOwn(incoming, 'features')) {
     const features = object(incoming.features);
     out.features = {};
-    for (const field of ['podcasts', 'ratings', 'radio', 'albumPersonnel', 'showAboutWhenNoPersonnel', 'moodeDisplayTakeover', 'lastfm']) {
+    for (const field of ['podcasts', 'ratings', 'radio', 'albumPersonnel', 'showAboutWhenNoPersonnel', 'moodeDisplayTakeover', 'lastfm', 'dlnaMediaServer']) {
       if (hasOwn(features, field)) out.features[field] = bool(features[field], false);
     }
   }

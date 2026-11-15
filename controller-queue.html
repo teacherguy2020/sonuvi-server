@@ -1,6 +1,9 @@
 <!doctype html>
 <html lang="en">
 <head>
+<script src="/__controller/config.js"></script>
+<script src="scripts/controller-browser-auth.js"></script>
+
   <script src="scripts/runtime-auth.js?v=20261024-h2"></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
@@ -345,7 +348,7 @@
     const EMBEDDED = new URL(location.href).searchParams.get('embedded') === '1';
     if (EMBEDDED) document.body.classList.add('embedded');
 
-    const base = __npResolveApiBase();
+    const base = globalThis.SonuviControllerWeb ? location.origin : (__npResolveApiBase());
     let runtimeTrackKey = '';
     let pollTimer = null;
     let longPressTimer = null;
@@ -501,6 +504,7 @@
     }
 
     async function ensureKey(){
+      if (globalThis.SonuviControllerAuth?.enabled) { await globalThis.SonuviControllerAuth.ready; return ""; }
       if (runtimeTrackKey) return runtimeTrackKey;
       const { r, j } = await fetchJsonWithTimeout(`${base}/config/runtime`, { cache:'no-store' }, 4500);
       if (!r.ok) return '';

@@ -52,6 +52,16 @@ test('external executable inspection fails closed without executing commands', a
   assert.equal(result.resolved.node, '/usr/bin/node');
 });
 
+test('supported immutable runtime inventory excludes build-only npm', async () => {
+  const required = ['node', 'python3', 'mpc', 'ffmpeg', 'ffprobe', 'metaflac', 'curl', 'ssh', 'scp'];
+  const result = await inspectExternalExecutables({
+    manifest: { externalRuntimeDependencies: { executables: required } },
+    find: async (name) => `/usr/bin/${name}`,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.required.includes('npm'), false);
+});
+
 test('remote playback topology requires non-loopback MPD and moOde SSH endpoints without contacting them', () => {
   const missing = inspectRemotePlaybackTopology({ mpdHost: '', moodeSshHost: '127.0.0.1' });
   assert.equal(missing.ok, false);

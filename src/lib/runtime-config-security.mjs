@@ -37,7 +37,7 @@ const ALLOWED_OBJECT_FIELDS = Object.freeze({
   node: new Set(['name', 'ip', 'role', 'sshUser']),
   ports: new Set(['api', 'ui']),
   display: new Set(['idleBrandLine', 'idleMessageLine']),
-  features: new Set(['podcasts', 'ratings', 'radio', 'albumPersonnel', 'showAboutWhenNoPersonnel', 'moodeDisplayTakeover', 'lastfm', 'mpdscribbleControl']),
+  features: new Set(['podcasts', 'ratings', 'radio', 'albumPersonnel', 'showAboutWhenNoPersonnel', 'moodeDisplayTakeover', 'lastfm', 'mpdscribbleControl', 'dlnaMediaServer']),
   mpd: new Set(['host', 'port']),
   moode: new Set(['sshHost', 'sshUser', 'baseUrl']),
   alexa: new Set([

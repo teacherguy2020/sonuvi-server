@@ -89,6 +89,7 @@
   }
 
   async function trackKey() {
+    if (globalThis.SonuviControllerAuth?.enabled) return '';
     const local = localTrackKey();
     if (local) {
       cachedTrackKey = local;
@@ -111,7 +112,7 @@
   }
 
   function displayHeaders(key, includeToken = true) {
-    const headers = { 'x-track-key': key };
+    const headers = key ? { 'x-track-key': key } : {};
     if (includeToken && state.displayToken) {
       headers['X-Mobile-Pairing-Display-Token'] = state.displayToken;
     }
@@ -208,19 +209,21 @@
     state.busy = true;
     setStatus('Creating a short-lived pairing challenge…');
     try {
-      const key = await trackKey();
-      if (!key) throw new Error('track_key_required');
+      const browser = globalThis.SonuviControllerAuth?.enabled;
+      if (browser) await globalThis.SonuviControllerAuth.ready;
+      const key = browser ? '' : await trackKey();
+      if (!browser && !key) throw new Error('track_key_required');
       const body = await pairingRequest('/v1/mobile/pairing/challenges', { method: 'POST', includeDisplayToken: false }, key);
       state.displayToken = text(body.displayToken);
       state.expiresAt = Number(body.expiresAt || 0);
       if (!state.displayToken || !state.expiresAt) throw new Error('invalid_pairing_response');
       if (qrImage) {
-        qrImage.src = text(body.qrDataUrl);
+        qrImage.src = text(body.nativeQRDataUrl || body.qrDataUrl);
         qrImage.alt = `Pairing QR code for ${text(body.baseUrl)}`;
       }
       if (baseUrl) baseUrl.textContent = text(body.baseUrl);
       if (expires) expires.textContent = new Date(state.expiresAt).toLocaleTimeString();
-      if (payload) payload.textContent = JSON.stringify(body.qrPayload || {}, null, 2);
+      if (payload) payload.textContent = JSON.stringify(body.nativeInvitation || body.qrPayload || {}, null, 2);
       if (qrWrap) qrWrap.hidden = false;
       if (startButton) startButton.hidden = true;
       if (cancelButton) cancelButton.hidden = false;

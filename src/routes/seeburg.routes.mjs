@@ -56,6 +56,7 @@ export function loadJukeboxState(statePath = runtimeStatePaths().jukeboxStatePat
         priority: String(entry.priority || 'jukebox'),
         sequence,
         file: String(entry.file),
+        deferredByMills: entry.deferredByMills === true,
         selectionNumber: Number.isSafeInteger(Number(entry.selectionNumber))
           ? Number(entry.selectionNumber)
           : null,
@@ -133,7 +134,14 @@ export function getJukeboxInsertionPosition({
   currentIsJukebox = false,
   priorityItems = [],
   queueWasCleared = false,
+  physicalSourceActive = false,
 } = {}) {
+  // While a physical record owns the amplifier, MPD stays paused. Append
+  // new requests to the waiting block, including items before the house song.
+  if (physicalSourceActive) {
+    const positions = priorityItems.map(item => Number(item.pos)).filter(pos => Number.isSafeInteger(pos) && pos >= 0);
+    return positions.length ? Math.max(...positions) + 1 : Math.max(0, currentPos);
+  }
   if (queueWasCleared || currentPos < 0) return 0;
   if (!currentIsJukebox) return currentPos;
   const livePositions = priorityItems
@@ -202,12 +210,13 @@ export function registerSeeburgRoutes(app, deps) {
     parseMpdFirstBlock,
     seeburgPlaylistName = 'Seeburg Playlist',
     jukeboxStatePath = defaultJukeboxStatePath,
+    getMillsIntegrationState = () => ({ active: false }),
   } = deps;
 
   loadJukeboxState(jukeboxStatePath);
   // Node's test runner executes files concurrently. Keep test fixtures
   // isolated while production integrations continue sharing one FIFO map.
-  const entries = isTestRuntime ? new Map() : jukeboxEntries;
+  const entries = deps.entries ?? (isTestRuntime ? new Map() : jukeboxEntries);
 
   async function resolveSelection(number) {
     const playlist = String(seeburgPlaylistName || 'Seeburg Playlist').trim();
@@ -257,6 +266,7 @@ export function registerSeeburgRoutes(app, deps) {
       if (dryRun) return res.json(result);
 
       return await withJukeboxMutation(async () => {
+      const millsActive = getMillsIntegrationState().active === true;
       const before = await mpdQueryRaw('status');
       if (mpdHasACK(before)) throw new Error('MPD status failed');
 
@@ -264,17 +274,17 @@ export function registerSeeburgRoutes(app, deps) {
       const wasPlaying = String(beforeStatus.state || '').trim().toLowerCase() === 'play';
       const beforeItems = parseMpdBlocks(await mpdQueryRaw('playlistinfo'));
       const currentSongId = Number(beforeStatus.songid || 0) || 0;
-      const currentPos = Number(beforeStatus.song || -1);
+      const currentPos = Number(beforeStatus.song ?? -1);
       if (currentPos >= 0 && !beforeItems.some((item) => Number(item.id || 0) === currentSongId)) {
         const currentInfo = parseMpdBlocks(await mpdQueryRaw(`playlistinfo ${currentPos}:${currentPos + 1}`));
         beforeItems.unshift(...currentInfo.filter((item) => !beforeItems.some((existing) => Number(existing.id || 0) === Number(item.id || 0))));
       }
       reconcileJukeboxState(beforeItems, jukeboxStatePath, entries);
-      // A paused/stopped session is idle for selection purposes. Only an
-      // actively playing jukebox track should protect the pending segment.
+      // A Mills-paused session still owns its queue. Ordinary paused/stopped
+      // sessions retain their existing selection behavior.
       recoverJukeboxEntries(beforeItems, jukeboxStatePath, entries);
       const currentItem = beforeItems.find((item) => Number(item.id || 0) === currentSongId);
-      const currentIsJukebox = wasPlaying && isJukeboxCurrent(currentItem, beforeItems, entries);
+      const currentIsJukebox = (wasPlaying || millsActive) && isJukeboxCurrent(currentItem, beforeItems, entries);
       const priorityItems = beforeItems.filter((item) => isJukeboxItem(item, entries));
       const pendingJukebox = beforeItems
         .filter((item) => Number(item.id || 0) > 0 && Number(item.pos || -1) > currentPos && isJukeboxItem(item, entries))
@@ -293,6 +303,7 @@ export function registerSeeburgRoutes(app, deps) {
         currentPos,
         currentIsJukebox,
         priorityItems,
+        physicalSourceActive: millsActive,
       });
       const moveResult = await mpdQueryRaw(`moveid ${insertedSongId} ${insertionPos}`);
       if (mpdHasACK(moveResult)) throw new Error('MPD rejected positioning the selected track');
@@ -303,11 +314,12 @@ export function registerSeeburgRoutes(app, deps) {
         sequence,
         file: resolved.file,
         selectionNumber: number,
+        deferredByMills: millsActive,
       });
       persistJukeboxState(jukeboxStatePath);
 
       let playbackStarted = false;
-      if (!currentIsJukebox) {
+      if (!currentIsJukebox && !millsActive) {
         const playResult = await mpdQueryRaw(`play ${insertionPos}`);
         if (mpdHasACK(playResult)) throw new Error('MPD rejected starting the selected track');
         playbackStarted = true;
@@ -326,12 +338,14 @@ export function registerSeeburgRoutes(app, deps) {
         queued: true,
         queueLength: Number(afterStatus.playlistlength),
         playbackStarted,
+        playbackDeferred: millsActive,
+        playbackHold: millsActive ? 'mills' : null,
         queueWasCleared: false,
         source: 'seeburg',
         priority: 'jukebox',
         interruptedNormalPlayback: !currentIsJukebox && wasPlaying,
-        queuedBehindJukebox: currentIsJukebox,
-        jukeboxQueueLength: currentIsJukebox ? pendingJukebox.length + 2 : 1,
+        queuedBehindJukebox: millsActive || currentIsJukebox,
+        jukeboxQueueLength: millsActive ? priorityItems.length + 2 : currentIsJukebox ? pendingJukebox.length + 2 : 1,
         mpdSongId: insertedSongId,
       });
       });

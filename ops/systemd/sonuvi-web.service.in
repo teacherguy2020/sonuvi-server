@@ -6,11 +6,16 @@ Requires=sonuvi-api.service
 ConditionPathExists=/opt/sonuvi/current/public/release.json
 
 [Service]
-Type=simple
+Type=exec
 User=@SERVICE_ACCOUNT@
 Group=@SERVICE_ACCOUNT@
 WorkingDirectory=/opt/sonuvi/current
 Environment=SONUVI_RELEASE_ROOT=/opt/sonuvi/releases/@RELEASE_ID@
+Environment=SONUVI_STATE_ROOT=/var/lib/sonuvi
+Environment=SONUVI_LOCAL_HTTPS_ENABLED=1
+Environment=SONUVI_FRESH_BROWSER_HTTPS=1
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 Environment=SONUVI_PUBLIC_WEB_ROOT=/opt/sonuvi/current/public
 Environment=SONUVI_RELEASE_MANIFEST=/opt/sonuvi/current/release-manifest.json
 Environment=SONUVI_RELEASE_ID=@RELEASE_ID@
@@ -32,6 +37,7 @@ ProtectControlGroups=true
 RestrictSUIDSGID=true
 LockPersonality=true
 ReadOnlyPaths=/opt/sonuvi/current /var/lib/sonuvi/checkpoints
+ReadWritePaths=/var/lib/sonuvi/data
 
 [Install]
 WantedBy=multi-user.target

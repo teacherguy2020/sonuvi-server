@@ -27,9 +27,10 @@ test('HTTP artwork and safe HTTPS artwork remain unchanged',()=>{
  assert.equal(art('https://sonuvi.local').trackUrl('https://cdn.example.test/image.jpg','song.flac'),'https://cdn.example.test/image.jpg');
  assert.equal(art('https://sonuvi.local').trackUrl('/art/track.jpg','song.flac'),'https://sonuvi.local/art/track.jpg');
 });
-const pages=['app.html','index.html','player-render.html','player.html','peppy.html','config.html','controller-now-playing.html','controller-now-playing-grid.html','controller-now-playing-tablet.html','diagnostics.html','display.html','displays.html','visualizer.html','mobile.html','kiosk-designer.html'];
+const pages=['app.html','index.html','player-render.html','player.html','peppy.html','config.html','controller-now-playing.html','controller-now-playing-grid.html','controller-now-playing-tablet.html','diagnostics.html','display.html','visualizer.html','mobile.html','kiosk-designer.html'];
 test('all affected pages parse and load the current shared helper before consumers',()=>{
  for(const page of pages){
+  if(page==='config.html')continue; // Master Settings uses the authenticated same-origin gateway; browser-tested separately.
   const s=fs.readFileSync(path.join(root,page),'utf8');
   assert.match(s,/scripts\/now-playing-art\.js\?v=20261028-https1/,page);
   if(s.includes('scripts/index-ui.js'))assert(s.indexOf('scripts/now-playing-art.js')<s.indexOf('scripts/index-ui.js'),page);
@@ -40,17 +41,25 @@ test('all affected pages parse and load the current shared helper before consume
  }
 });
 test('affected consumers use the shared API resolver',()=>{
- for(const file of ['config.html','player.html','peppy.html','scripts/index-ui.js','scripts/diagnostics.js','display.html','displays.html','visualizer.html','mobile.html','kiosk-designer.html']){
+ for(const file of ['config.html','player.html','peppy.html','scripts/index-ui.js','scripts/diagnostics.js','display.html','visualizer.html','mobile.html','kiosk-designer.html']){
+  if(file==='config.html')continue;
   const s=fs.readFileSync(path.join(root,file),'utf8');
   assert.match(s,/globalThis\.NPArt\.apiBase\(\)/,file);
   assert.doesNotMatch(s,/const LAN_API_PORT|const LAN_STATIC_PORT/,file);
  }
 });
-test('repository proxy example routes Peppy through API and preserves web/API ports',()=>{
+test('Displays uses the authenticated same-origin administrator gateway',()=>{
+ const s=fs.readFileSync(path.join(root,'displays.html'),'utf8');
+ assert.match(s,/controller-browser-auth\.js/);
+ assert.match(s,/fetch\('\/__controller\/configuration\/display'/);
+ assert.doesNotMatch(s,/:3101|:8101|http:\/\//);
+});
+test('repository proxy example preserves browser gateway TLS and rejects foreign origins',()=>{
  const s=fs.readFileSync(path.join(root,'ops/caddy/sonuvi.Caddyfile.example'),'utf8');
- assert.match(s,/\/peppy\/\*/);
- assert.match(s,/reverse_proxy 127\.0\.0\.1:3101/);
- assert.match(s,/reverse_proxy 127\.0\.0\.1:8101/);
+ assert.match(s,/reverse_proxy https:\/\/127\.0\.0\.1:8444/);
+ assert.match(s,/tls_trusted_ca_certs/);
+ assert.match(s,/respond @foreign 403/);
+ assert.doesNotMatch(s,/tls_insecure_skip_verify|reverse_proxy 127\.0\.0\.1:3101/);
 });
 test('embedded now-playing first-paint artwork uses the shared origin',()=>{
  for(const page of ['controller-now-playing.html','controller-now-playing-tablet.html','controller-now-playing-grid.html']){

@@ -377,9 +377,10 @@ export function createPibuzQobuzAdapter({
   randomImpl = Math.random,
 } = {}) {
   if (typeof fetchImpl !== 'function') throw new Error('PiBuZ fetch implementation is unavailable');
-  const parsedHost = baseUrl ? normalizeHost(baseUrl) : normalizeHost(host);
+  const configured = Boolean(String(baseUrl || host || '').trim());
+  const parsedHost = configured ? normalizeHost(baseUrl || host) : null;
   const parsedPort = normalizePort(port);
-  const base = `${parsedHost.protocol}//${parsedHost.hostname.includes(':') ? `[${parsedHost.hostname}]` : parsedHost.hostname}:${parsedPort}`;
+  const base = parsedHost ? `${parsedHost.protocol}//${parsedHost.hostname.includes(':') ? `[${parsedHost.hostname}]` : parsedHost.hostname}:${parsedPort}` : '';
   const requestTimeoutMs = Math.max(100, Number(timeoutMs) || DEFAULT_TIMEOUT_MS);
   const maxStaleMs = Math.max(0, Number(staleMs) || DEFAULT_STALE_MS);
   const responseLimit = Math.max(1024, Number(maxJsonBytes) || DEFAULT_MAX_JSON_BYTES);
@@ -443,6 +444,7 @@ export function createPibuzQobuzAdapter({
   }
 
   async function request(pathname, { accept = 'application/json', signal, retainSignal = false } = {}) {
+    if (!configured) throw new Error('PiBuZ receiver is not configured');
     const allowedPath = ['/api/status', '/api/now-playing', '/api/queue', '/api/events'].includes(pathname);
     if (!allowedPath) throw new Error('PiBuZ endpoint is not allowed');
     capabilities.assertExternalRead('pibuz.read');
@@ -1030,6 +1032,7 @@ export function createPibuzQobuzAdapter({
     fetchArtwork,
     getEventState: eventStateSnapshot,
     startEvents() {
+      if (!configured) return Promise.resolve();
       if (eventTask) return eventTask;
       stopped = false;
       eventRetryMs = retryBaseMs;
@@ -1056,7 +1059,7 @@ export function createPibuzQobuzAdapter({
       eventState.activeConnections = 0;
       eventState.backoffMs = 0;
     },
-    endpoint: `${base}/api`,
+    endpoint: configured ? `${base}/api` : '',
   };
 }
 

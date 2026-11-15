@@ -4,9 +4,15 @@ set -eu
 python3 - <<'PY'
 from pathlib import Path
 import re
+import json
+from urllib.parse import urlsplit
 
-VUMETER_TARGET = 'http://sonuvi.local:3101/peppy/vumeter'
-SPECTRUM_TARGET = 'http://sonuvi.local:3101/peppy/spectrum'
+ORIGIN = json.loads(Path('/etc/sonuvi-display.json').read_text())['origin'].rstrip('/')
+u = urlsplit(ORIGIN)
+if u.scheme != 'https' or not u.hostname or u.username or u.password or u.path or u.query or u.fragment:
+    raise SystemExit('A provisioned HTTPS Sonuvi origin is required')
+VUMETER_TARGET = ORIGIN + '/__peppy/vumeter'
+SPECTRUM_TARGET = ORIGIN + '/__peppy/spectrum'
 
 
 def update_section(text, section_name, updates):

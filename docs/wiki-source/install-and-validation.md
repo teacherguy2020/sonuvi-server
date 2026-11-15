@@ -318,3 +318,56 @@ The important practical truth is:
 ## Timestamp
 
 Last updated: 2026-10-28 America/Chicago
+
+## Official Debian cloud-image first install — 2026-11-12
+
+The lab installer now recognizes the official Debian 13 cloud image's enabled
+`mirror+file:///etc/apt/mirrors/debian.list` source. It validates every entry in
+that fixed mirror list against the canonical Debian archive and does not rewrite
+APT sources or relax package verification. Direct legacy/deb822 sources remain
+supported; disabled, source-only, arbitrary-path and foreign-mirror inputs are
+covered by rejection regressions in `test/sonuvi-debian-node-bootstrap.test.mjs`.
+
+Real disposable-VM verification of Server source `69b3030` and signed release
+`sonuvi-57080758c393d18cd76558f8c8f02b3c56d6a99e532bb97c22e9b967158f0fca`
+completed exact-kit activation, real APT dependencies, signed release staging,
+first-install activation, both systemd services and exact-release health. This
+ends at awaiting-administrator-enrollment; physical owner-account creation and
+iPad acceptance are not inferred. Matching native build547 is digest-bound to
+this package. The original failed VM was preserved; the disposable validation
+VM was restored from an offline preinstall checkpoint for the user's retry.
+
+See [SFTP and lab TLS contract](../runbooks/sonuvi-ios-gate-c-sftp-and-lab-tls.md)
+for the supported format and partial-install boundary. A generic bootstrap error
+can follow creation of the kit and public trust anchor; do not blindly retry or
+erase that state. Test and retain an offline clean checkpoint before mutation.
+
+Last updated: 2026-11-12.
+
+## Guided music setup — 2026-11-12 candidate
+
+Server installation and music readiness are distinct. After owner enrollment,
+the native installer discovers `moode.local` and bounded `_mpd._tcp` LAN
+advertisements from the Server, with manual private-LAN address/MPD port entry.
+The listener chooses a player and one SMB music share, checks sample files as
+the Sonuvi service account, then explicitly confirms read-only connection and
+catalog import. Additional tracks on other storage are reported and excluded;
+the selected share's podcasts remain available through the podcast projection.
+
+The fixed `sonuvi-music-setup.mjs` command requires sudo over pinned SSH and
+rechecks the machine-derived target identity. It accepts no commands, paths,
+mount flags or service names. SMB credentials, when needed, go only through
+stdin and protected root-only files; guest access is supported. CIFS mounts
+use SMB3, `ro,nosuid,nodev,noexec` and the service UID/GID. Only the fixed Sonuvi
+mount unit, root-managed environment/drop-in and sanitized setup status are
+created. Existing host setup is not overwritten; a partial apply is not blindly
+replayed. moOde settings, queue, media files and remote SSH authorization are
+not changed. HTTPS identity, owner accounts and controller grants are retained.
+
+The configured catalog is activated only after file verification and index
+creation. Status rechecks the actual read-only mount and player/file access;
+zero tracks is not reported as music-ready. The Settings music-setup entry
+continues setup after closing the installer. Multi-share aggregation, SMB1,
+remote storage administration and automatic rollback of partial host setup are
+not implemented. Existing production installations retain their prior catalog
+behavior unless this explicit setup is completed.

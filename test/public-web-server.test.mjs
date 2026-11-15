@@ -54,7 +54,9 @@ test('public web server serves only H2 allowlisted regular files with no travers
   const rootResponse = await request(server, '/');
   assert.equal(rootResponse.statusCode, 200);
   assert.match(rootResponse.body, /Public/);
+  assert.equal(rootResponse.headers['cache-control'], 'no-cache');
   assert.equal((await request(server, '/scripts/index.js?v=1')).statusCode, 200);
+  assert.equal((await request(server, '/scripts/index.js?v=1')).headers['cache-control'], 'public, max-age=300');
   assert.equal((await request(server, '/.env')).statusCode, 404);
   assert.equal((await request(server, '/%2e%2e/.env')).statusCode, 404);
   assert.equal((await request(server, '/src/server.mjs')).statusCode, 404);
@@ -75,6 +77,11 @@ test('generated public root preserves the declared PWA manifest, start URL, and 
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 
+  for (const module of ['master-configuration-editor.mjs', 'master-configuration-draft.mjs']) {
+    const response = await request(server, '/scripts/' + module);
+    assert.equal(response.statusCode, 200);
+    assert.match(response.headers['content-type'], /^text\/javascript/);
+  }
   const manifestResponse = await request(server, '/manifest.webmanifest');
   assert.equal(manifestResponse.statusCode, 200);
   const manifest = JSON.parse(manifestResponse.body);

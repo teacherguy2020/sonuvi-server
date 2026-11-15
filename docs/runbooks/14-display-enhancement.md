@@ -87,19 +87,14 @@ In moOde, go to:
 
 - **Configure -> Peripherals -> Local display -> Web UI target URL**
 
-For moOde r1034 and later, set it to the portless LAN-proxy URL:
+For moOde r1034 and later, set it to the portless canonical LAN URL:
 
-- `http://<WEB_HOST>/display.html?kiosk=1`
+- `https://sonuvi.local/display.html?mode=index&kiosk=1`
 
-For example:
-
-- `http://sonuvi.local/display.html?kiosk=1`
-
-Do not use `http://<WEB_HOST>:8101/display.html?kiosk=1` as the moOde Target
-URL. r1034's dual-display validation rejects an explicit port, while the
-standard LAN proxy serves this route on HTTP port 80 and forwards it to the
-Sonuvi web service. The `:8101` address may still be appropriate for
-direct service access and internal Chromium launch commands documented below.
+Do not use `http://<WEB_HOST>:8101/display.html?kiosk=1` or an HTTP URL as the
+moOde Target URL. The `:8101` address is an internal service endpoint, not the
+browser target. Keep the URL portless so moOde and the Sonuvi wake/LED workers
+agree on the same HTTPS origin.
 
 This is the recommended handoff URL for the display system in this project.
 

@@ -1,0 +1,252 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import http from 'node:http';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import { createMobileAnimationTicket, createMobileSessionToken } from '../src/lib/mobile-auth.mjs';
+import { startControllerStack, listen, close } from './helpers/controller-stack.mjs';
+import { createControllerWebGateway } from '../src/lib/controller-web-gateway.mjs';
+import { controllerDispatchHeader, createControllerDispatchAuthorizer } from '../src/lib/controller-browser-dispatch.mjs';
+
+const raw = (port,headers={}) => new Promise((resolve,reject)=>{http.get({host:'127.0.0.1',port,path:'/__controller/session',headers},r=>{r.resume();r.on('end',()=>resolve(r.statusCode));}).on('error',reject);});
+test('Settings keeps Track Key administration outside ordinary controller dispatch',async t=>{
+ const temp=await fs.mkdtemp(path.join(os.tmpdir(),'sonuvi-settings-gateway-'));t.after(()=>fs.rm(temp,{recursive:true,force:true}));
+ const sessionId='s'.repeat(43),csrf='c'.repeat(43),trackKey='fixture-settings-track-key';
+ const sessionFile=path.join(temp,'sessions.json');
+ await fs.writeFile(sessionFile,JSON.stringify({version:2,origin:'',sessions:[[sessionId,{csrf,accessToken:'fixture-access',refreshToken:'fixture-refresh',accessExpiresAt:Date.now()+3600000,role:'controller'}]]}),{mode:0o600});
+ const calls=[];
+ const api=http.createServer((req,res)=>{let body='';req.on('data',chunk=>body+=chunk);req.on('end',()=>{
+   calls.push({method:req.method,path:req.url,trackKey:req.headers['x-track-key']||'',dispatch:req.headers['x-sonuvi-controller-dispatch']||'',body});
+   const key=req.headers['x-track-key']===trackKey;
+   if(req.url==='/config/runtime/admin'&&req.method==='GET'&&key){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true,config:{contract:'sonuvi.runtime-admin-config.v1'}}));return;}
+   if(req.url==='/config/runtime'&&req.method==='POST'&&key){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true,changed:true}));return;}
+   res.writeHead(403,{'content-type':'application/json'});res.end(JSON.stringify({ok:false,error:'Forbidden'}));
+ });});
+ const apiPort=await listen(api);t.after(()=>close(api));
+ const gateway=createControllerWebGateway({apiPort,allowLoopbackFixture:true,sessionFile});
+ const web=http.createServer((req,res)=>gateway(req,res));const webPort=await listen(web);t.after(()=>close(web));
+ const origin=`http://127.0.0.1:${webPort}`,cookie=`sonuvi_controller=${sessionId}`;
+ const request=(path,options={})=>fetch(origin+path,{...options,headers:{cookie,...(options.headers||{})}});
+ const admin=await request('/config/runtime/admin',{headers:{'x-track-key':trackKey}});assert.equal(admin.status,200);assert.equal((await admin.json()).config.contract,'sonuvi.runtime-admin-config.v1');
+ const denied=await request('/config/runtime/admin');assert.equal(denied.status,403);
+ const save=await request('/config/runtime',{method:'POST',headers:{origin,'content-type':'application/json','x-csrf-token':csrf,'x-track-key':trackKey},body:JSON.stringify({config:{paths:{musicLibraryRoot:'/fixture'}}})});assert.equal(save.status,200);
+ assert.deepEqual(calls.map(({method,path,trackKey:forwarded,dispatch})=>({method,path,trackKey:forwarded,dispatch})),[
+   {method:'GET',path:'/config/runtime/admin',trackKey,dispatch:''},
+   {method:'GET',path:'/config/runtime/admin',trackKey:'',dispatch:''},
+   {method:'POST',path:'/config/runtime',trackKey,dispatch:''},
+ ]);
+});
+test('HTTPS transport, Host and Origin are independently required',async t=>{
+ const gateway=createControllerWebGateway({secret:'fixture',origin:'https://controller.test'});const s=http.createServer((req,res)=>gateway(req,res));await listen(s);t.after(()=>close(s));
+ assert.equal(await raw(s.address().port,{host:'controller.test',origin:'https://controller.test','x-forwarded-proto':'https'}),503);
+ const proxy=createControllerWebGateway({secret:'fixture',origin:'https://controller.test',trustLoopbackProxy:true});const p=http.createServer((req,res)=>proxy(req,res));await listen(p);t.after(()=>close(p));
+ assert.equal(await raw(p.address().port,{host:'evil.test',origin:'https://controller.test','x-forwarded-proto':'https'}),403);
+ assert.equal(await raw(p.address().port,{host:'controller.test',origin:'https://evil.test','x-forwarded-proto':'https'}),403);
+ assert.equal(await raw(p.address().port,{host:'controller.test',origin:'https://controller.test','x-forwarded-proto':'https'}),200);
+});
+test('dispatch is loopback, exact-query, expiry and replay bound, never administration',()=>{
+ const secret='fixture',target='/config/browse/albums?q=Jazz';const authorize=createControllerDispatchAuthorizer({secret});
+ const req={method:'GET',path:'/config/browse/albums',originalUrl:target,socket:{remoteAddress:'127.0.0.1'},headers:{'x-sonuvi-controller-dispatch':controllerDispatchHeader({secret,target})}};
+ assert.equal(authorize({...req,socket:{remoteAddress:'192.0.2.3'}}),false);
+ assert.equal(authorize({...req,originalUrl:target+'x'}),false);assert.equal(authorize(req),true);assert.equal(authorize(req),false);
+ for(const value of ['/config/runtime/admin','/art/track_640.jpg?src=http://127.0.0.1/private','/art/track_640.jpg?file=../secret'])assert.equal(authorize({...req,path:value.split('?')[0],originalUrl:value,headers:{'x-sonuvi-controller-dispatch':controllerDispatchHeader({secret,target:value})}}),false);
+ assert.equal(authorize({...req,headers:{'x-sonuvi-controller-dispatch':controllerDispatchHeader({secret,target,now:Date.now()-60000})}}),false);
+ const native=createControllerDispatchAuthorizer({apiSecret:secret});const paired={...req,headers:{'x-sonuvi-controller-dispatch':'mobile-session',authorization:`Bearer ${createMobileSessionToken({secret,deviceId:'paired'})}`}};
+ assert.equal(native({...paired,path:'/peppy/last-profile',originalUrl:'/peppy/last-profile'}),true);
+ assert.equal(native({...paired,method:'POST',path:'/peppy/last-profile',originalUrl:'/peppy/last-profile',body:{displayMode:'moode'}}),false);
+ assert.equal(native({...paired,path:'/peppy/last-profile',originalUrl:'/peppy/last-profile?url=http://private'}),false);
+ assert.equal(native(paired),true);assert.equal(native({...paired,originalUrl:'/config/runtime/admin',path:'/config/runtime/admin'}),false);
+ assert.equal(native({...paired,socket:{remoteAddress:'192.0.2.3'}}),false);
+ assert.equal(native({...paired,headers:{'x-sonuvi-controller-dispatch':'mobile-session'}}),false);
+});
+test('real attestation/approval, catalog data, scoped media tickets and cookie CSRF',async t=>{
+ const s=await startControllerStack();t.after(()=>s.close());
+ const request=(p,options={})=>fetch(s.url+p,options);
+ assert.equal((await request('/config/browse/albums')).status,401);
+ const created=await request('/__controller/pairings',{method:'POST',headers:{origin:s.url}});assert.equal(created.status,201);const pairing=await created.json();assert.match(pairing.verificationCode,/\d/);
+ const pairingCookie=created.headers.getSetCookie()[0].split(';')[0];
+ assert.equal((await request(`/__controller/pairings/${pairing.presentationId}/complete`)).status,401);
+ await s.approve(pairing.presentationId,pairing.verificationCode);
+ const completed=await request(`/__controller/pairings/${pairing.presentationId}/complete`,{headers:{cookie:pairingCookie}});assert.equal(completed.status,200);const session=await completed.json();assert.equal(session.status,'approved');assert.equal(session.accessToken,undefined);
+ const sessionCookie=completed.headers.getSetCookie()[0].split(';')[0];const headers={cookie:sessionCookie};
+ const radioHeaders={authorization:`Bearer ${s.trustedToken}`};
+ const options=await fetch(`http://127.0.0.1:${s.apiPort}/v1/mobile/radio/options`,{headers:radioHeaders});assert.deepEqual((await options.json()).genres,['EDM','Jazz','R&B','Rock']);
+ const filtered=await fetch(`http://127.0.0.1:${s.apiPort}/v1/mobile/radio?genre=jazz&favoritesOnly=true`,{headers:radioHeaders});assert.equal((await filtered.json()).items.length,1);
+ assert.equal((await fetch(`http://127.0.0.1:${s.apiPort}/v1/mobile/radio/options`)).status,401);
+ const albums=await request('/config/browse/albums',{headers});assert.equal(albums.status,200);assert.equal((await albums.json()).albums[0].album,'Fixture Album');
+ const playlistResponse=await request('/v1/mobile/playlists?limit=200',{headers});assert.equal(playlistResponse.status,200);
+ const playlists=await playlistResponse.json();assert.equal(playlists.items[0].name,'Fixture Playlist');
+ const artPath='/v1/mobile/playlists/'+playlists.items[0].id+'/artwork';
+ assert.equal((await request(artPath)).status,401);
+ assert.equal((await request(artPath+'?url=http://private',{headers})).status,400);
+ assert.equal((await request('/v1/mobile/playlists?limit=201',{headers})).status,400);
+ const art=await request(artPath,{headers});assert.equal(art.status,200);assert.match(art.headers.get('content-type'),/^image\/jpeg/);assert.ok((await art.arrayBuffer()).byteLength>100);
+ assert.equal((await request('/v1/mobile/playlists/'+playlists.items[0].id+'/delete',{method:'POST',headers})).status,405);
+ const episodeHeaders={...headers,origin:s.url,'content-type':'application/json','x-csrf-token':session.csrfToken};
+ const episodeBody=JSON.stringify({rss:'https://example.invalid/feed',limit:200});
+ assert.equal((await request('/podcasts/episodes/list',{method:'POST',headers:episodeHeaders,body:episodeBody})).status,200);
+ assert.equal((await request('/podcasts/episodes/list',{method:'POST',headers:{...episodeHeaders,'x-csrf-token':''},body:episodeBody})).status,403);
+ assert.equal((await request('/podcasts/episodes/list',{method:'POST',headers:episodeHeaders,body:JSON.stringify({rss:'https://example.invalid/feed',download:true})})).status,400);
+ assert.equal((await request('/podcasts/episodes/list',{method:'POST',headers:episodeHeaders,body:JSON.stringify({rss:'file:///etc/passwd'})})).status,400);
+ assert.equal((await request('/podcasts/download-one',{method:'POST',headers:episodeHeaders,body:episodeBody})).status,405);
+ const recent=await (await request('/recent/albums',{headers})).json();assert.equal(recent.items[0].album,'Fixture Album');
+ assert.equal((await request('/config/runtime/admin',{headers})).status,404);
+ assert.equal((await request('/art/track_640.jpg?src=http://127.0.0.1/private',{headers})).status,400);
+ const motion=await request('/v1/mobile/animated-art?artist=Fixture%20Artist&album=Fixture%20Album',{headers});assert.equal(motion.status,200);const m=await motion.json();assert.equal(m.hasMotion,true);assert.equal(new URL(m.mediaUrl).origin,s.url);
+ assert.equal((await fetch(m.mediaUrl)).status,401);
+ const video=await fetch(m.mediaUrl,{headers:{...headers,range:'bytes=100-199'}});assert.equal(video.status,206);assert.equal((await video.arrayBuffer()).byteLength,100);
+ const native=await fetch(`http://127.0.0.1:${s.apiPort}/v1/mobile/animated-art?artist=Fixture%20Artist&album=Fixture%20Album`,{headers:{authorization:`Bearer ${s.trustedToken}`}});const nm=await native.json();assert.ok(new URL(nm.mediaUrl).searchParams.get('ticket'));assert.equal((await fetch(nm.mediaUrl)).status,200);
+ assert.equal((await fetch(nm.mediaUrl.replace(s.mediaName,'b'.repeat(40)+'.mp4'))).status,401);
+ const expired=new URL(nm.mediaUrl);expired.searchParams.set('ticket',createMobileAnimationTicket({secret:s.apiSecret,deviceId:'expired',name:s.mediaName,now:Date.now()-7200000}));assert.equal((await fetch(expired)).status,401);
+ const escaped='c'.repeat(40)+'.mp4';const outside=path.join(s.temp,'not-an-animation');await fs.writeFile(outside,'private');await fs.symlink(outside,path.join(s.paths.animatedArtH264Dir,escaped));
+ assert.equal((await fetch(`http://127.0.0.1:${s.apiPort}/v1/mobile/animated-art/media/${escaped}`,{headers:radioHeaders})).status,404);
+ assert.equal((await request('/__controller/logout',{method:'POST',headers:{...headers,origin:s.url}})).status,403);
+ assert.equal((await request('/__controller/logout',{method:'POST',headers:{...headers,origin:s.url,'x-csrf-token':session.csrfToken}})).status,200);
+ assert.equal((await request('/config/browse/albums',{headers})).status,401);
+});
+
+test('LAN browser read contracts and fresh-browser approval survive web restart without exposing administration',async t=>{
+ const s=await startControllerStack({persistentSessions:true});t.after(()=>s.close());
+ const pair=async()=>{const r=await fetch(s.url+'/__controller/pairings',{method:'POST',headers:{origin:s.url}});assert.equal(r.status,201);return {body:await r.json(),cookie:r.headers.getSetCookie()[0].split(';')[0]};};
+ const complete=async p=>{const r=await fetch(s.url+'/__controller/pairings/'+p.body.presentationId+'/complete',{headers:{cookie:p.cookie}});assert.equal(r.status,200);return {body:await r.json(),cookie:r.headers.getSetCookie()[0].split(';')[0]};};
+ const first=await pair();await s.approve(first.body.presentationId,first.body.verificationCode);const trusted=await complete(first);
+ const headers={origin:s.url,cookie:trusted.cookie,'content-type':'application/json','x-csrf-token':trusted.body.csrfToken};
+ const preview=body=>fetch(s.url+'/config/queue-wizard/radio-preview',{method:'POST',headers,body:JSON.stringify(body)});
+ assert.equal((await preview({genres:['Jazz'],favoritesOnly:true,maxStations:4000})).status,200);
+ assert.equal((await (await preview({genres:['Jazz']})).json()).tracks[0].stationName,'Jazz Radio');
+ assert.equal((await preview({genres:['Jazz'],command:'play'})).status,400);
+ assert.equal((await fetch(s.url+'/config/queue-wizard/radio-preview',{method:'POST',headers:{...headers,'x-csrf-token':''},body:'{}'})).status,403);
+ assert.equal((await fetch(s.url+'/config/queue-wizard/apply',{method:'POST',headers,body:'{}'})).status,405);
+ const recent=await (await fetch(s.url+'/recent/radio-favorites',{headers})).json();assert.equal(recent.items[0].title,'Jazz Radio');
+ const fresh=await pair();
+ assert.equal((await fetch(s.url+'/__controller/pairings/pending')).status,401);
+ const pending=await (await fetch(s.url+'/__controller/pairings/pending',{headers})).json();assert.ok(pending.items.some(x=>x.presentationId===fresh.body.presentationId));assert.equal(pending.items[0].verificationCode,undefined);
+ const endpoint=s.url+'/__controller/pairings/'+fresh.body.presentationId+'/approve';
+ assert.equal((await fetch(endpoint,{method:'POST',headers:{...headers,'x-csrf-token':''},body:JSON.stringify({verificationCode:fresh.body.verificationCode})})).status,403);
+ assert.equal((await fetch(endpoint,{method:'POST',headers,body:JSON.stringify({verificationCode:'wrong'})})).ok,false);
+ assert.equal((await fetch(endpoint,{method:'POST',headers,body:JSON.stringify({verificationCode:fresh.body.verificationCode})})).status,200);
+ const second=await complete(fresh);assert.equal(second.body.accessToken,undefined);
+ await s.restartWeb();
+ const resumed=await fetch(s.url+'/config/browse/albums',{headers:{cookie:second.cookie}});assert.equal(resumed.status,200);assert.equal((await resumed.json()).albums[0].album,'Fixture Album');
+ assert.equal((await fetch(s.url+'/config/runtime/admin',{headers:{cookie:second.cookie}})).status,404);
+});
+
+test('completed pairing survives a transient renewal outage without another pairing',async t=>{
+ let renewals=0;
+ const s=await startControllerStack({persistentSessions:true,onSessionRefresh:(_req,res)=>{renewals++;res.status(503).json({ok:false,error:'temporary outage'});}});t.after(()=>s.close());
+ const created=await fetch(s.url+'/__controller/pairings',{method:'POST',headers:{origin:s.url}});const pairing=await created.json();const pairingCookie=created.headers.getSetCookie()[0].split(';')[0];
+ await s.approve(pairing.presentationId,pairing.verificationCode);
+ const completed=await fetch(s.url+'/__controller/pairings/'+pairing.presentationId+'/complete',{headers:{cookie:pairingCookie}});assert.equal(completed.status,200);const session=await completed.json();const cookie=completed.headers.getSetCookie()[0].split(';')[0];
+ assert.equal(renewals,0);
+ const refresh=await fetch(s.url+'/__controller/refresh',{method:'POST',headers:{cookie,origin:s.url,'x-csrf-token':session.csrfToken}});assert.equal(refresh.status,502);assert.equal(renewals,1);
+ assert.equal((await fetch(s.url+'/config/browse/albums',{headers:{cookie}})).status,200);
+ await s.restartWeb();
+ assert.equal((await fetch(s.url+'/config/browse/albums',{headers:{cookie}})).status,200);
+});
+
+test('logout wins against an in-flight renewal and remains logged out after restart',async t=>{
+ let clock=1_800_000_000_000, releaseRenewal, renewalStarted;
+ const started=new Promise(resolve=>{renewalStarted=resolve;});
+ const temp=await fs.mkdtemp(path.join(os.tmpdir(),'sonuvi-controller-logout-race-'));const sessionFile=path.join(temp,'sessions.json');const sessionId='c'.repeat(43);
+ await fs.writeFile(sessionFile,JSON.stringify({origin:'',sessions:[[sessionId,{csrf:'csrf',accessToken:'expired-access',accessExpiresAt:clock-1,refreshToken:'persistent-controller-refresh'}]]}),{mode:0o600});
+ const api=http.createServer((req,res)=>{if(req.method==='POST'&&req.url==='/v1/mobile/session/refresh'){req.resume();renewalStarted();releaseRenewal=()=>{res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({accessToken:'late-access',refreshToken:'persistent-controller-refresh',expiresAt:new Date(clock+12*60*60*1000).toISOString()}));};return;}res.writeHead(404);res.end();});
+ await listen(api);t.after(async()=>{await close(api);await fs.rm(temp,{recursive:true,force:true});});
+ const createWeb=()=>{const gateway=createControllerWebGateway({apiPort:api.address().port,allowLoopbackFixture:true,sessionFile,now:()=>clock});return http.createServer((req,res)=>gateway(req,res));};
+ let web=createWeb();await listen(web);t.after(()=>close(web));
+ const origin='http://127.0.0.1:'+web.address().port;const headers={cookie:'sonuvi_controller='+sessionId};
+ const waiting=fetch(origin+'/__controller/session',{headers});await started;
+ const logout=await fetch(origin+'/__controller/logout',{method:'POST',headers:{...headers,origin,'x-csrf-token':'csrf'}});assert.equal(logout.status,200);
+ releaseRenewal();const result=await waiting;assert.equal(result.status,401);assert.deepEqual(await result.json(),{ok:false,error:'Controller authorization was revoked; pair again.'});const clearedCookie=result.headers.get('set-cookie')||'';assert.match(clearedCookie,/^sonuvi_controller=;/);assert.match(clearedCookie,/(?:^|;\s*)Max-Age=0(?:;|$)/);
+ assert.equal(JSON.parse(await fs.readFile(sessionFile,'utf8')).sessions.length,0);
+ await close(web);web=createWeb();await new Promise(resolve=>web.listen(0,'127.0.0.1',resolve));
+ const restarted=await fetch('http://127.0.0.1:'+web.address().port+'/__controller/session',{headers});assert.equal(restarted.status,200);assert.equal((await restarted.json()).authenticated,false);
+});
+
+test('persistent browser grants silently renew past access, browser and yearly legacy limits',async t=>{
+ let clock=1_800_000_000_000,renewals=0;
+ const temp=await fs.mkdtemp(path.join(os.tmpdir(),'sonuvi-persistent-controller-'));const sessionFile=path.join(temp,'sessions.json');
+ const sessionId='a'.repeat(43);
+ await fs.writeFile(sessionFile,JSON.stringify({origin:'',sessions:[[sessionId,{csrf:'csrf',accessToken:'expired-access',accessExpiresAt:clock-1,refreshToken:'persistent-controller-refresh'}]]}),{mode:0o600});
+ const api=http.createServer((req,res)=>{if(req.method==='POST'&&req.url==='/v1/mobile/session/refresh'){renewals++;req.resume();res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({accessToken:'access-'+renewals,refreshToken:'persistent-controller-refresh',expiresAt:new Date(clock+12*60*60*1000).toISOString()}));return;}res.writeHead(404);res.end();});
+ await listen(api);t.after(async()=>{await close(api);await fs.rm(temp,{recursive:true,force:true});});
+ const createWeb=()=>{const gateway=createControllerWebGateway({apiPort:api.address().port,allowLoopbackFixture:true,sessionFile,now:()=>clock});return http.createServer((req,res)=>gateway(req,res));};
+ let web=createWeb();await listen(web);t.after(()=>close(web));
+ const request=()=>fetch('http://127.0.0.1:'+web.address().port+'/__controller/session',{headers:{cookie:'sonuvi_controller='+sessionId}});
+ const [first,second]=await Promise.all([request(),request()]);
+ assert.equal(first.status,200);assert.equal(second.status,200);assert.equal(renewals,1);
+ assert.match(first.headers.get('set-cookie'),/Max-Age=29808000/);
+ clock+=12*60*60*1000;
+ assert.equal((await request()).status,200);assert.equal(renewals,2);
+ await close(web);web=createWeb();await new Promise(resolve=>web.listen(0,'127.0.0.1',resolve));
+ clock+=366*24*60*60*1000;
+ assert.equal((await request()).status,200);assert.equal(renewals,3);
+ const logout=await fetch('http://127.0.0.1:'+web.address().port+'/__controller/logout',{method:'POST',headers:{cookie:'sonuvi_controller='+sessionId,origin:'http://127.0.0.1:'+web.address().port,'x-csrf-token':'csrf'}});
+ assert.equal(logout.status,200);
+ assert.equal((await request()).status,200);assert.equal((await (await request()).json()).authenticated,false);
+});
+
+test('legacy browser state migrates only through signed authority and retains grants through transient failure',async t=>{
+ let clock=1_800_000_000_000,mode='ok',migrationCalls=0;
+ const temp=await fs.mkdtemp(path.join(os.tmpdir(),'sonuvi-controller-migration-'));const sessionFile=path.join(temp,'sessions.json');
+ const sessionId='b'.repeat(43);
+ await fs.writeFile(sessionFile,JSON.stringify({origin:'',sessions:[[sessionId,{csrf:'csrf',accessToken:'legacy-signed-access',expiresAt:clock+60*60*1000}]]}),{mode:0o600});
+ const api=http.createServer((req,res)=>{if(req.method==='POST'&&req.url==='/v1/mobile/session/refresh'){migrationCalls+=req.headers['x-mobile-session-migration']==='1'?1:0;req.resume();if(mode==='failure'){res.writeHead(503);res.end();return;}if(mode==='revoked'){res.writeHead(401);res.end();return;}res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({accessToken:'renewed-access',refreshToken:'persistent-controller-refresh',expiresAt:new Date(clock+12*60*60*1000).toISOString()}));return;}res.writeHead(404);res.end();});
+ await listen(api);t.after(async()=>{await close(api);await fs.rm(temp,{recursive:true,force:true});});
+ const gateway=createControllerWebGateway({apiPort:api.address().port,allowLoopbackFixture:true,sessionFile,now:()=>clock});const web=http.createServer((req,res)=>gateway(req,res));await listen(web);t.after(()=>close(web));
+ const request=()=>fetch('http://127.0.0.1:'+web.address().port+'/__controller/session',{headers:{cookie:'sonuvi_controller='+sessionId}});
+ assert.equal((await request()).status,200);assert.equal(migrationCalls,1);
+ let stored=JSON.parse(await fs.readFile(sessionFile,'utf8'));assert.equal(stored.version,2);assert.equal(stored.sessions[0][1].refreshToken,'persistent-controller-refresh');
+ clock+=12*60*60*1000;mode='failure';assert.equal((await request()).status,502);
+ stored=JSON.parse(await fs.readFile(sessionFile,'utf8'));assert.equal(stored.sessions.length,1);
+ mode='revoked';assert.equal((await request()).status,401);
+ stored=JSON.parse(await fs.readFile(sessionFile,'utf8'));assert.equal(stored.sessions.length,0);
+});
+
+test('restart bridge requires cookie and CSRF and forwards only owner restart routes',async t=>{
+ const temp=await fs.mkdtemp(path.join(os.tmpdir(),'sonuvi-restart-gateway-'));t.after(()=>fs.rm(temp,{recursive:true,force:true}));
+ const sessionFile=path.join(temp,'sessions.json'),sessionId='r'.repeat(43),csrf='restart-csrf',calls=[];
+ await fs.writeFile(sessionFile,JSON.stringify({version:2,origin:'',sessions:[[sessionId,{csrf,accessToken:'owner-fixture',refreshToken:'refresh-fixture',accessExpiresAt:Date.now()+3600000,role:'administrator'}]]}),{mode:0o600});
+ const api=http.createServer((req,res)=>{req.resume();calls.push({path:req.url,authorization:req.headers.authorization});res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true}));});await listen(api);t.after(()=>close(api));
+ const gateway=createControllerWebGateway({apiPort:api.address().port,allowLoopbackFixture:true,sessionFile});const web=http.createServer((req,res)=>gateway(req,res));await listen(web);t.after(()=>close(web));
+ const origin='http://127.0.0.1:'+web.address().port,headers={origin,cookie:'sonuvi_controller='+sessionId,'content-type':'application/json','x-csrf-token':csrf};
+ assert.equal((await fetch(origin+'/__controller/configuration/restart',{method:'POST',headers:{origin,'content-type':'application/json'},body:'{}'})).status,401);
+ assert.equal((await fetch(origin+'/__controller/configuration/restart',{method:'POST',headers:{...headers,'x-csrf-token':''},body:'{}'})).status,403);
+ assert.equal(calls.length,0);
+ assert.equal((await fetch(origin+'/__controller/configuration/restart/status',{headers})).status,200);
+ assert.equal((await fetch(origin+'/__controller/configuration/restart',{method:'POST',headers,body:'{}'})).status,200);
+ assert.deepEqual(calls.map(x=>x.path),['/v1/admin/configuration/master/restart/status','/v1/admin/configuration/master/restart']);
+ assert.ok(calls.every(x=>x.authorization==='Bearer owner-fixture'));
+});
+
+test('Alexa check bridge requires cookie and CSRF and forwards only saved-settings check',async t=>{
+ const temp=await fs.mkdtemp(path.join(os.tmpdir(),'sonuvi-restart-gateway-'));t.after(()=>fs.rm(temp,{recursive:true,force:true}));
+ const sessionFile=path.join(temp,'sessions.json'),sessionId='r'.repeat(43),csrf='restart-csrf',calls=[];
+ await fs.writeFile(sessionFile,JSON.stringify({version:2,origin:'',sessions:[[sessionId,{csrf,accessToken:'owner-fixture',refreshToken:'refresh-fixture',accessExpiresAt:Date.now()+3600000,role:'administrator'}]]}),{mode:0o600});
+ const api=http.createServer((req,res)=>{req.resume();calls.push({path:req.url,authorization:req.headers.authorization});res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true}));});await listen(api);t.after(()=>close(api));
+ const gateway=createControllerWebGateway({apiPort:api.address().port,allowLoopbackFixture:true,sessionFile});const web=http.createServer((req,res)=>gateway(req,res));await listen(web);t.after(()=>close(web));
+ const origin='http://127.0.0.1:'+web.address().port,headers={origin,cookie:'sonuvi_controller='+sessionId,'content-type':'application/json','x-csrf-token':csrf};
+ assert.equal((await fetch(origin+'/__controller/configuration/plugins/alexa/check',{method:'POST',headers:{origin,'content-type':'application/json'},body:'{}'})).status,401);
+ assert.equal((await fetch(origin+'/__controller/configuration/plugins/alexa/check',{method:'POST',headers:{...headers,'x-csrf-token':''},body:'{}'})).status,403);
+ assert.equal(calls.length,0);
+
+ assert.equal((await fetch(origin+'/__controller/configuration/plugins/alexa/check',{method:'POST',headers,body:'{}'})).status,200);
+ assert.deepEqual(calls.map(x=>x.path),['/v1/admin/configuration/master/plugins/alexa/check']);
+ assert.ok(calls.every(x=>x.authorization==='Bearer owner-fixture'));
+});
+
+test('display switch bridge requires cookie and CSRF and forwards only the authenticated display route',async t=>{
+ const temp=await fs.mkdtemp(path.join(os.tmpdir(),'sonuvi-restart-gateway-'));t.after(()=>fs.rm(temp,{recursive:true,force:true}));
+ const sessionFile=path.join(temp,'sessions.json'),sessionId='r'.repeat(43),csrf='restart-csrf',calls=[];
+ await fs.writeFile(sessionFile,JSON.stringify({version:2,origin:'',sessions:[[sessionId,{csrf,accessToken:'owner-fixture',refreshToken:'refresh-fixture',accessExpiresAt:Date.now()+3600000,role:'administrator'}]]}),{mode:0o600});
+ const api=http.createServer((req,res)=>{req.resume();calls.push({path:req.url,authorization:req.headers.authorization});res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true}));});await listen(api);t.after(()=>close(api));
+ const gateway=createControllerWebGateway({apiPort:api.address().port,allowLoopbackFixture:true,sessionFile});const web=http.createServer((req,res)=>gateway(req,res));await listen(web);t.after(()=>close(web));
+ const origin='http://127.0.0.1:'+web.address().port,headers={origin,cookie:'sonuvi_controller='+sessionId,'content-type':'application/json','x-csrf-token':csrf};
+ assert.equal((await fetch(origin+'/__controller/configuration/display',{method:'POST',headers:{origin,'content-type':'application/json'},body:'{}'})).status,401);
+ assert.equal((await fetch(origin+'/__controller/configuration/display',{method:'POST',headers:{...headers,'x-csrf-token':''},body:'{}'})).status,403);
+ assert.equal(calls.length,0);
+
+ assert.equal((await fetch(origin+'/__controller/configuration/display',{method:'POST',headers,body:'{}'})).status,200);
+ assert.deepEqual(calls.map(x=>x.path),['/v1/admin/configuration/master/display']);
+ assert.ok(calls.every(x=>x.authorization==='Bearer owner-fixture'));
+});

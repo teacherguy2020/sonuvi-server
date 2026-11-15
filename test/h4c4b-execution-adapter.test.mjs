@@ -245,11 +245,11 @@ test('H4C.4B validates the internal bridge ownership and rejects an egress-capab
 test('H4C.4B inventory accepts only Node startup and rejects an enabled integration executable', async () => {
   const manifest = {
     externalRuntimeDependencies: {
-      executables: ['node', 'npm', 'python3', 'mpc', 'ffmpeg', 'ffprobe', 'metaflac', 'curl', 'ssh', 'scp'],
+      executables: ['node', 'python3', 'mpc', 'ffmpeg', 'ffprobe', 'metaflac', 'curl', 'ssh', 'scp'],
     },
   };
   const absentIntegration = async () => ({
-    stdout: 'node=present\nnpm=present\npython3=absent\nmpc=absent\nffmpeg=absent\nffprobe=absent\nmetaflac=absent\ncurl=absent\nssh=absent\nscp=absent\n',
+    stdout: 'node=present\npython3=absent\nmpc=absent\nffmpeg=absent\nffprobe=absent\nmetaflac=absent\ncurl=absent\nssh=absent\nscp=absent\n',
     stderr: '',
   });
   const inventory = await inspectH4c4bRuntimeDependencies({ manifest, runDocker: absentIntegration });
@@ -257,7 +257,7 @@ test('H4C.4B inventory accepts only Node startup and rejects an enabled integrat
   assert.equal(inventory.availability.mpc, false);
 
   const enabledMpc = async () => ({
-    stdout: 'node=present\nnpm=present\npython3=absent\nmpc=present\nffmpeg=absent\nffprobe=absent\nmetaflac=absent\ncurl=absent\nssh=absent\nscp=absent\n',
+    stdout: 'node=present\npython3=absent\nmpc=present\nffmpeg=absent\nffprobe=absent\nmetaflac=absent\ncurl=absent\nssh=absent\nscp=absent\n',
     stderr: '',
   });
   await assert.rejects(inspectH4c4bRuntimeDependencies({ manifest, runDocker: enabledMpc }), /unexpectedly exposes an integration executable/);

@@ -18,6 +18,7 @@
   const queueWrapEl = document.getElementById('queueWrap');
 
   let API_BASE = (() => {
+    if (globalThis.SonuviControllerWeb) return location.origin;
     const q = new URLSearchParams(window.location.search);
     const override = (q.get('api') || '').trim();
     if (override) return override.replace(/\/$/, '');
@@ -74,7 +75,7 @@
         const uiPort = Number(j?.config?.ports?.ui || 8101);
         const proto = location.protocol || 'http:';
         const host = location.hostname || 'sonuvi.local';
-        API_BASE = `${proto}//${host}:${apiPort}`;
+        API_BASE = globalThis.SonuviControllerWeb ? location.origin : `${proto}//${host}:${apiPort}`;
         if (apiHintEl) apiHintEl.textContent = `${host}:${apiPort}`;
         if (webHintEl) webHintEl.textContent = `${host}:${uiPort}`;
         const k = String(globalThis.SonuviRuntimeAuth?.trackKey?.() || '').trim();
@@ -924,8 +925,8 @@ async function loadEpisodes() {
       setStatus('Refreshing subscription state…');
       logEl.textContent = '';
 
-      log('→ GET /podcasts/refresh');
-      const j = await apiGet('/podcasts/refresh');
+      log('→ GET /podcasts');
+      const j = await apiGet('/podcasts');
 
       renderSubscriptions(j.items || []);
       log('✓ Loaded subscriptions', { count: (j.items || []).length });

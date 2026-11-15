@@ -1,6 +1,20 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+test('credential rotation and disconnect are honored by the next submission',async()=>{
+  let current={apiKey:'fixture-key',apiSecret:'fixture-secret',sessionKey:'first'},calls=0;
+  const scrobbler=createLastfmScrobbler({getCredentials:()=>current,fetchImpl:async(url,options)=>{
+    calls++;assert.equal(new URLSearchParams(options.body).get('sk'),current.sessionKey);
+    return {ok:true,json:async()=>({scrobbles:{'@attr':{accepted:1}}})};
+  }});
+  const event={artist:'Artist',title:'Track',durationSec:300,elapsedSec:180};
+  assert.equal((await scrobbler.submit(event)).state,'submitted');
+  current={...current,sessionKey:'second'};
+  assert.equal((await scrobbler.submit(event)).state,'submitted');
+  current={};assert.equal(scrobbler.configured,false);
+  assert.equal((await scrobbler.submit(event)).attempted,false);assert.equal(calls,2);
+});
+
 import {
   createLastfmScrobbler,
   lastfmScrobbleThreshold,
@@ -77,6 +91,16 @@ test('Last.fm failure is returned as state and does not throw', async () => {
   assert.equal(result.state, 'failed');
   assert.equal(result.attempted, true);
   assert.equal(result.error, 'offline');
+});
+
+test('HTTP success is not accepted scrobbling when ignored or missing acceptance', async () => {
+  for (const body of [{}, {scrobbles:{'@attr':{accepted:'0',ignored:'1'},scrobble:{ignoredMessage:{code:'3','#text':'Timestamp too old'}}}}]) {
+    const scrobbler = createLastfmScrobbler({apiKey:'fixture',apiSecret:'fixture',sessionKey:'fixture',
+      fetchImpl:async()=>({ok:true,status:200,json:async()=>body})});
+    const result = await scrobbler.submit({artist:'Artist',title:'Track',durationSec:300,elapsedSec:180});
+    assert.equal(result.state,'failed');
+    assert.equal(result.attempted,true);
+  }
 });
 
 test('MPD is excluded by the caller contract and missing credentials never submit', async () => {

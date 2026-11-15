@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { readEffectiveRuntimeConfig } from '../lib/native-configuration-store.mjs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { MPD_HOST } from '../config.mjs';
@@ -58,8 +59,7 @@ export function registerConfigQueueWizardPreviewRoute(app, deps) {
 
   async function isRatingsEnabled() {
     try {
-      const raw = await fs.readFile(configPath, 'utf8');
-      const cfg = JSON.parse(raw);
+      const cfg = readEffectiveRuntimeConfig(configPath);
       return Boolean(cfg?.features?.ratings ?? true);
     } catch {
       return true;

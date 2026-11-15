@@ -43,10 +43,11 @@ function parseMpdId(raw) {
 export function registerMultiphoneRoutes(app, deps) {
   const { requireTrackKey, mpdQueryRaw, mpdEscapeValue, mpdHasACK, parseMpdFirstBlock,
     multiphonePlaylistName = 'Multiphone Playlist',
+    getMillsIntegrationState = () => ({ active: false }),
     jukeboxStatePath = (process.env.NODE_TEST_CONTEXT || process.argv.includes('--test')) ? null : runtimeStatePaths().jukeboxStatePath } = deps;
   const playlistName = String(multiphonePlaylistName || 'Multiphone Playlist').trim();
   loadJukeboxState(jukeboxStatePath);
-  const entries = (process.env.NODE_TEST_CONTEXT || process.argv.includes('--test')) ? new Map() : jukeboxEntries;
+  const entries = deps.entries ?? ((process.env.NODE_TEST_CONTEXT || process.argv.includes('--test')) ? new Map() : jukeboxEntries);
 
   async function resolve(number) {
     const raw = await mpdQueryRaw(`listplaylist ${mpdEscapeValue(playlistName)}`);
@@ -79,6 +80,7 @@ export function registerMultiphoneRoutes(app, deps) {
       if (dryRun) return res.json(result);
 
       return await withJukeboxMutation(async () => {
+      const millsActive = getMillsIntegrationState().active === true;
       const before = await mpdQueryRaw('status');
       if (mpdHasACK(before)) throw new Error('MPD status failed');
       const status = parseMpdFirstBlock(before);
@@ -92,11 +94,11 @@ export function registerMultiphoneRoutes(app, deps) {
       }
       reconcileJukeboxState(items, jukeboxStatePath, entries);
       recoverJukeboxEntries(items, jukeboxStatePath, entries);
-      // A paused/stopped session is idle for selection purposes. Only an
-      // actively playing jukebox track should protect the pending segment.
+      // A Mills-paused session still owns its queue. Ordinary paused/stopped
+      // sessions retain their existing selection behavior.
       const currentItem = items.find((item) => Number(item.id || 0) === currentId);
-      const currentIsJukebox = wasPlaying && isJukeboxCurrent(currentItem, items, entries);
-      const queueWasCleared = !wasPlaying && !currentIsJukebox;
+      const currentIsJukebox = (wasPlaying || millsActive) && isJukeboxCurrent(currentItem, items, entries);
+      const queueWasCleared = !millsActive && !wasPlaying && !currentIsJukebox;
       if (queueWasCleared) {
         beginJukeboxSession({ source: 'multiphone', files: resolved.files, fresh: true });
         persistJukeboxState(jukeboxStatePath);
@@ -117,9 +119,19 @@ export function registerMultiphoneRoutes(app, deps) {
         // server-owned and may be rebuilt after a restart, but the pending
         // MPD item itself still identifies the record to promote.
         const existing = items
-          .filter((item) => Number(item.pos || -1) > currentPos)
+          .filter((item) => millsActive ? entries.get(Number(item.id))?.deferredByMills : Number(item.pos ?? -1) > currentPos)
           .find((item) => item.file === resolved.file || entries.get(Number(item.id))?.file === resolved.file);
         if (existing) {
+          if (millsActive) {
+            // Mabel may send playNow after its spoken announcement. Keep the
+            // original reservation/FIFO position while the physical source owns audio.
+            return res.json({ ...result, queued: true, queueLength: Number(status.playlistlength),
+              playbackStarted: false, playbackDeferred: true, playbackHold: 'mills', queueWasCleared: false,
+              source: 'multiphone', priority: 'jukebox', mpdSongId: Number(existing.id),
+              artist: existing.artist || '', title: existing.title || '',
+              queuedBehindJukebox: true, jukeboxQueueLength: priorityItems.length,
+              playNow: true, promotedExisting: false });
+          }
           const position = currentPos + 1;
           const move = await mpdQueryRaw(`moveid ${Number(existing.id)} ${position}`);
           if (mpdHasACK(move)) throw new Error('MPD rejected promoting the selected track');
@@ -160,6 +172,7 @@ export function registerMultiphoneRoutes(app, deps) {
         currentIsJukebox,
         priorityItems,
         queueWasCleared,
+        physicalSourceActive: millsActive,
       });
       const move = await mpdQueryRaw(`moveid ${id} ${position}`);
       if (mpdHasACK(move)) throw new Error('MPD rejected positioning the selected track');
@@ -172,11 +185,12 @@ export function registerMultiphoneRoutes(app, deps) {
         sequence: nextJukeboxSequence(),
         file: resolved.file,
         selectionNumber: number,
+        deferredByMills: millsActive,
       });
       persistJukeboxState(jukeboxStatePath);
       let playbackStarted = false;
-      const playbackDeferred = deferPlayback && (queueWasCleared || !currentIsJukebox);
-      if ((queueWasCleared || !currentIsJukebox) && !deferPlayback) {
+      const playbackDeferred = millsActive || (deferPlayback && (queueWasCleared || !currentIsJukebox));
+      if ((queueWasCleared || !currentIsJukebox) && !deferPlayback && !millsActive) {
         const play = await mpdQueryRaw(`play ${position}`);
         if (mpdHasACK(play)) throw new Error('MPD rejected starting the selected track');
         playbackStarted = true;
@@ -188,10 +202,11 @@ export function registerMultiphoneRoutes(app, deps) {
       return res.json({ ...result, queued: true, queueLength: Number(afterStatus.playlistlength), playbackStarted,
         queueWasCleared, source: 'multiphone', priority: 'jukebox', mpdSongId: id,
         artist: trackInfo.artist || '', title: trackInfo.title || '',
-        queuedBehindJukebox: currentIsJukebox,
+        queuedBehindJukebox: millsActive || currentIsJukebox,
         interruptedNormalPlayback: wasPlaying && !currentIsJukebox,
-        jukeboxQueueLength: currentIsJukebox ? pending.length + 2 : 1,
+        jukeboxQueueLength: millsActive ? priorityItems.length + 2 : currentIsJukebox ? pending.length + 2 : 1,
         playbackDeferred,
+        playbackHold: millsActive ? 'mills' : null,
         decision: { currentSongId: currentId, currentPos, currentIsJukebox, pendingJukeboxCount: pending.length },
         playNow });
       });

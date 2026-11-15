@@ -158,6 +158,9 @@ export function createRuntimeStatePaths({ cwd = process.cwd(), env = process.env
       fallback: resolveWithin(configRoot, 'now-playing.config.json', 'runtime config'),
     }),
     exampleConfigPath: resolveWithin(releaseRoot, 'config/now-playing.config.example.json', 'example config'),
+    // Owner edits use the dedicated service-owned directory, even when an older
+    // systemd unit still names the read-only legacy credential file.
+    lastfmAdminEnvPath: sharedStateEnabled ? path.join(protectedRoot, 'integrations/lastfm/credentials.env') : null,
     lastfmEnvPath: protectedFile({
       env,
       name: 'LASTFM_ENV_FILE',
@@ -180,6 +183,7 @@ export function createRuntimeStatePaths({ cwd = process.cwd(), env = process.env
     }),
     audioQualityCatalogPath: defaultPath(dataRoot, 'audio-quality-catalog.json', 'AUDIO_QUALITY_CATALOG_PATH'),
     audioQualityCheckpointPath: defaultPath(dataRoot, 'audio-quality-checkpoint.json', 'AUDIO_QUALITY_CHECKPOINT_PATH'),
+    dlnaMediaServerIdentityPath: defaultPath(dataRoot, 'dlna-media-server-identity.json', 'DLNA_MEDIA_SERVER_IDENTITY_PATH'),
 
     // User-visible history, profile, playlists, radio, and controller state.
     listeningHistoryPath: defaultPath(dataRoot, 'listening-history.jsonl', 'LISTENING_HISTORY_PATH'),

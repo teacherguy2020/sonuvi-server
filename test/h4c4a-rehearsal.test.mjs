@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import os from 'node:os';
 import test from 'node:test';
 
 import {
@@ -17,9 +16,13 @@ import {
 import { createRuntimeCapabilities } from '../src/lib/runtime-capabilities.mjs';
 
 const RELEASE_ID = `sonuvi-${'a'.repeat(64)}`;
+// The production guard rejects home-directory paths. On macOS, os.tmpdir()
+// is commonly under the home directory in this workspace, so use the real
+// system temporary directory for synthetic bind-mount fixtures instead.
+const H4C4A_TEST_TMP_ROOT = process.platform === 'darwin' ? '/private/tmp' : '/tmp';
 
 async function temporaryRoot(t, label) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), `sonuvi-h4c4a-${label}-`));
+  const root = await fs.mkdtemp(path.join(H4C4A_TEST_TMP_ROOT, `sonuvi-h4c4a-${label}-`));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   return root;
 }

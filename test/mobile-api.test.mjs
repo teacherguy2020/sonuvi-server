@@ -1,8 +1,14 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
+import { DeviceSessionRegistry } from '../src/lib/sonuvi-device-sessions.mjs';
 
 import { registerMobileRoutes } from '../src/routes/mobile.routes.mjs';
-import { createMobileRefreshToken, createMobileSessionToken, verifyMobileToken } from '../src/lib/mobile-auth.mjs';
+import { createMobileRefreshToken, createMobileSessionToken, createPersistentControllerRefreshToken, createPersistentMobileRefreshToken, verifyMobileToken } from '../src/lib/mobile-auth.mjs';
+import { MOBILE_HOME_ROW_IDS } from '../src/lib/mobile-home-rows.mjs';
 
 function createApp() {
   const routes = new Map();
@@ -109,6 +115,59 @@ function registerFixture(extra = {}) {
   return app;
 }
 
+test('registered session logout revokes access, refresh, pairing approval and media; another device survives', async t => {
+  const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'sonuvi-api-session-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const sessionRegistry = new DeviceSessionRegistry({ directory: path.join(root, 'registry') });
+  const app = registerFixture({ sessionRegistry });
+  async function enroll(deviceId) {
+    const res = createResponse();
+    await app.routes.get('POST /v1/mobile/session')(request({ headers: { 'x-mobile-enrollment-code': 'one-time-code' }, body: { deviceId } }), res);
+    assert.equal(res.statusCode, 200);
+    return res.body;
+  }
+  const phone = await enroll('phone'), tv = await enroll('tv');
+  const authorized = { authorization: `Bearer ${phone.accessToken}` };
+  const deniedAdmin = createResponse();
+  await app.routes.get('GET /v1/admin/devices')(request({ headers: authorized }), deniedAdmin);
+  assert.equal(deniedAdmin.statusCode, 401);
+  const logout = createResponse();
+  await app.routes.get('POST /v1/mobile/session/logout')(request({ headers: authorized }), logout);
+  assert.equal(logout.statusCode, 200);
+  for (const route of ['GET /v1/mobile/genres', 'POST /v1/mobile/pairing/challenges', 'POST /v1/mobile/media-authorizations']) {
+    const res = createResponse();
+    await app.routes.get(route)(request({ headers: authorized }), res);
+    assert.ok([401, 403].includes(res.statusCode), route);
+  }
+  for (const headers of [{ 'x-mobile-refresh-token': phone.refreshToken }, { ...authorized, 'x-mobile-session-migration': '1' }]) {
+    const res = createResponse();
+    await app.routes.get('POST /v1/mobile/session/refresh')(request({ headers }), res);
+    assert.equal(res.statusCode, 401);
+  }
+  const other = createResponse();
+  await app.routes.get('POST /v1/mobile/session/refresh')(request({ headers: { 'x-mobile-refresh-token': tv.refreshToken } }), other);
+  assert.equal(other.statusCode, 200);
+  assert.ok(other.body.accessToken);
+});
+
+test('legacy API renewal registers a revocable controller without escalating administrator authority', async t => {
+  const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'sonuvi-api-migration-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const registry = new DeviceSessionRegistry({ directory: path.join(root, 'registry') });
+  const app = registerFixture({ sessionRegistry: registry });
+  const legacy = createMobileRefreshToken({ secret: 'api-secret-for-test', deviceId: 'old-ipad' });
+  const res = createResponse();
+  await app.routes.get('POST /v1/mobile/session/refresh')(request({ headers: { 'x-mobile-refresh-token': legacy } }), res);
+  assert.equal(res.statusCode, 200);
+  const claims = verifyMobileToken(res.body.accessToken, { secret: 'api-secret-for-test', scope: 'mobile-api', sessionRegistry: registry });
+  assert.ok(claims.sid);
+  assert.equal(registry.list()[0].role, 'controller');
+  registry.revoke('old-ipad');
+  const replay = createResponse();
+  await app.routes.get('POST /v1/mobile/session/refresh')(request({ headers: { 'x-mobile-refresh-token': legacy } }), replay);
+  assert.equal(replay.statusCode, 401);
+});
+
 test('mobile session enrollment uses its own credential and issues a scoped token', async () => {
   const app = registerFixture();
   const res = createResponse();
@@ -145,7 +204,12 @@ test('mobile session refresh silently replaces an expired access token', async (
 
   assert.equal(refreshed.statusCode, 200);
   assert.ok(refreshed.body.accessToken);
-  assert.equal(refreshed.body.refreshToken, enrolled.body.refreshToken);
+  assert.notEqual(refreshed.body.refreshToken, enrolled.body.refreshToken);
+  assert.ok(verifyMobileToken(refreshed.body.refreshToken, {
+    secret: 'api-secret-for-test',
+    scope: 'mobile-refresh',
+    now: Date.now() + (2 * 365 * 24 * 60 * 60 * 1_000),
+  }));
   assert.equal(verifyMobileToken(refreshed.body.accessToken, {
     secret: 'api-secret-for-test',
     scope: 'mobile-api',
@@ -156,6 +220,68 @@ test('mobile session refresh silently replaces an expired access token', async (
     headers: { 'x-mobile-refresh-token': 'not-a-refresh-token' },
   }), invalid);
   assert.equal(invalid.statusCode, 401);
+});
+
+test('durable mobile and controller refresh credentials exchange only for expiring API bearers', async () => {
+  const app = registerFixture();
+  const enrolled = createResponse();
+  await app.routes.get('POST /v1/mobile/session')?.(request({
+    headers: { 'x-mobile-enrollment-code': 'one-time-code' },
+    body: { deviceId: 'ipad-browser' },
+  }), enrolled);
+  assert.ok(verifyMobileToken(enrolled.body.refreshToken, {
+    secret: 'api-secret-for-test',
+    scope: 'mobile-refresh',
+    now: Date.now() + (2 * 365 * 24 * 60 * 60 * 1_000),
+  }));
+
+  const durable = createResponse();
+  await app.routes.get('POST /v1/mobile/session/refresh')?.(request({
+    headers: {
+      'x-mobile-refresh-token': enrolled.body.refreshToken,
+      'x-mobile-persistent-controller-refresh': '1',
+    },
+  }), durable);
+  assert.equal(durable.statusCode, 200);
+  assert.ok(verifyMobileToken(durable.body.refreshToken, {
+    secret: 'api-secret-for-test',
+    scope: 'controller-web-refresh',
+    now: Date.now() + (2 * 365 * 24 * 60 * 60 * 1_000),
+  }));
+  assert.equal(verifyMobileToken(durable.body.refreshToken, {
+    secret: 'api-secret-for-test',
+    scope: 'mobile-api',
+  }), null);
+  assert.equal(verifyMobileToken(durable.body.accessToken, {
+    secret: 'api-secret-for-test',
+    scope: 'mobile-api',
+    now: Date.now() + (13 * 60 * 60 * 1_000),
+  }), null);
+
+  const ordinary = createMobileRefreshToken({
+    secret: 'api-secret-for-test',
+    deviceId: 'ipad-browser',
+    now: Date.now() - (366 * 24 * 60 * 60 * 1_000),
+  });
+  assert.equal(verifyMobileToken(ordinary, {
+    secret: 'api-secret-for-test',
+    scope: 'mobile-refresh',
+  }), null);
+  const manuallyPersistent = createPersistentControllerRefreshToken({
+    secret: 'api-secret-for-test',
+    deviceId: 'ipad-browser',
+    now: Date.now() - (366 * 24 * 60 * 60 * 1_000),
+  });
+  assert.ok(verifyMobileToken(manuallyPersistent, {
+    secret: 'api-secret-for-test',
+    scope: 'controller-web-refresh',
+  }));
+  const durableMobile = createPersistentMobileRefreshToken({ secret: 'api-secret-for-test', deviceId: 'ipad-browser' });
+  assert.ok(verifyMobileToken(durableMobile, { secret: 'api-secret-for-test', scope: 'mobile-refresh', now: Date.now() + (2 * 365 * 24 * 60 * 60 * 1_000) }));
+  const header = Buffer.from(JSON.stringify({ typ: 'now-playing-mobile', v: 1, alg: 'HS256' })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify({ scope: 'mobile-api', deviceId: 'ipad-browser', iat: Math.floor(Date.now() / 1000), persistent: true, jti: 'persistent-access-must-fail' })).toString('base64url');
+  const invalidPersistentAccess = header+'.'+payload+'.'+crypto.createHmac('sha256', 'api-secret-for-test').update(header+'.'+payload).digest('base64url');
+  assert.equal(verifyMobileToken(invalidPersistentAccess, { secret: 'api-secret-for-test', scope: 'mobile-api' }), null);
 });
 
 test('mobile session refresh rejects expired refresh tokens and ordinary routes reject expired access tokens', async () => {
@@ -184,6 +310,17 @@ test('mobile session refresh rejects expired refresh tokens and ordinary routes 
     headers: { authorization: `Bearer ${expiredAccessToken}` },
   }), ordinaryResponse);
   assert.equal(ordinaryResponse.statusCode, 401);
+});
+
+test('mobile session refresh accepts a valid legacy access token only with migration intent', async () => {
+  const app = registerFixture();
+  const legacyToken = createMobileSessionToken({ secret: 'api-secret-for-test', deviceId: 'legacy-valid-iphone' });
+  const migrated = createResponse();
+  await app.routes.get('POST /v1/mobile/session/refresh')?.(request({
+    headers: { authorization: `Bearer ${legacyToken}`, 'x-mobile-session-migration': '1' },
+  }), migrated);
+  assert.equal(migrated.statusCode, 200);
+  assert.equal(verifyMobileToken(migrated.body.refreshToken, { secret: 'api-secret-for-test', scope: 'mobile-refresh' }).deviceId, 'legacy-valid-iphone');
 });
 
 test('mobile session refresh migrates a legacy expired access token once', async () => {
@@ -930,6 +1067,67 @@ test('mobile radio station artwork uses the catalog logo name behind an opaque U
   assert.deepEqual(artworkDescriptor, { kind: 'radio', reference: 'iHeart Rat Pack Radio' });
 });
 
+test('mobile Mills now-playing exposes display state and proxies canonical artwork', async () => {
+  let artworkDescriptor = null;
+  const millsArtwork = 'http://moode.local/coverart.php/Mills%20Track.flac';
+  const app = registerFixture({
+    millsIntegrationConfigured: true,
+    getMillsIntegrationState: () => ({ active: true }),
+    fetchInternalJson: async (pathname) => pathname === '/now-playing'
+      ? {
+        ok: true,
+        status: 200,
+        json: {
+          state: 'pause',
+          displayTitle: 'Mills Track',
+          displayArtist: 'Mills Artist',
+          displayLine3: 'Mills Album',
+          file: 'USB/SamsungMoode/Mills Playlist/Mills Track.flac',
+          displayArtUrl: millsArtwork,
+          albumArtUrl: millsArtwork,
+          millsMode: true,
+          displayOnly: true,
+          displayMode: 'mills',
+        },
+      }
+      : { ok: true, json: {} },
+    serveHomeArtwork: async (res, descriptor) => {
+      artworkDescriptor = descriptor;
+      return res.json({ ok: true, descriptor });
+    },
+  });
+
+  const sessionRes = createResponse();
+  await app.routes.get('POST /v1/mobile/session')?.(request({
+    headers: { 'x-mobile-enrollment-code': 'one-time-code' },
+    body: { deviceId: 'appletv-brian' },
+  }), sessionRes);
+
+  const response = createResponse();
+  await app.routes.get('GET /v1/mobile/now-playing')?.(request({
+    headers: { authorization: `Bearer ${sessionRes.body.accessToken}` },
+  }), response);
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.body.integrations, {
+    mills: { installed: true, enabled: true, active: true },
+  });
+  assert.equal(response.body.millsMode, true);
+  assert.equal(response.body.displayMode, 'mills');
+  assert.equal(response.body.displayOnly, true);
+  assert.equal(response.body.title, 'Mills Track');
+  assert.match(response.body.artworkUrl, /\/v1\/mobile\/home\/artwork\/har_/);
+
+  const artworkId = response.body.artworkUrl.split('/').at(-1);
+  const artworkResponse = createResponse();
+  await app.routes.get('GET /v1/mobile/home/artwork/:artworkId')?.(request({
+    headers: { authorization: `Bearer ${sessionRes.body.accessToken}` },
+    params: { artworkId },
+  }), artworkResponse);
+  assert.equal(artworkResponse.statusCode, 200);
+  assert.deepEqual(artworkDescriptor, { kind: 'url', reference: millsArtwork });
+});
+
 test('mobile direct radio metadata returns enriched art and a safe Apple Music link', async () => {
   const app = registerFixture({
     fetchInternalJson: async (pathname) => pathname === '/now-playing'
@@ -1269,11 +1467,28 @@ test('mobile home exposes local recent history without displaying its shelf', as
   }), response);
 
   assert.equal(response.statusCode, 200);
-  assert.deepEqual(response.body.rows.map((row) => row.id), profile.recentRows);
+  assert.deepEqual(response.body.rows.map((row) => row.id), [
+    ...profile.recentRows,
+    ...MOBILE_HOME_ROW_IDS.filter((row) => !profile.recentRows.includes(row)),
+  ]);
+  assert.ok(calls.includes('/config/lastfm/top-albums?limit=18'));
+  assert.ok(calls.includes('/config/listening-history/top-tracks?limit=18'));
   assert.equal(response.body.localRecentHistory.id, 'local-recenttracks');
   assert.equal(response.body.localRecentHistory.items[0].track.genre, 'Test');
   assert.ok(calls.includes('/config/listening-history/recent-tracks?limit=18'));
   assert.doesNotMatch(JSON.stringify(response.body), /SamsungMoode/);
+
+  const sourceCallsAfterFirstLoad = calls.filter((pathname) => pathname !== '/config/controller-profile');
+  const secondResponse = createResponse();
+  await app.routes.get('GET /v1/mobile/home/rows')?.(request({
+    headers: { authorization: `Bearer ${session.body.accessToken}` },
+  }), secondResponse);
+  assert.equal(secondResponse.statusCode, 200);
+  assert.deepEqual(
+    calls.filter((pathname) => pathname !== '/config/controller-profile'),
+    sourceCallsAfterFirstLoad,
+    'a repeated Home load should reuse the short-lived source cache'
+  );
 });
 
 test('mobile home shelf settings save ordered row sources through the bearer boundary', async () => {
@@ -1341,6 +1556,7 @@ test('mobile now-playing returns safe metadata and proxies raw artwork behind be
           title: 'First',
           artist: 'Test Artist',
           album: 'Test Album',
+          year: '2009',
           displayTitle: 'First',
           displayArtist: 'Test Artist',
           displayLine3: 'Test Album',
@@ -1395,6 +1611,7 @@ test('mobile now-playing returns safe metadata and proxies raw artwork behind be
   assert.equal(response.body.aboutProvider, 'apple');
   assert.equal(response.body.appleMusicUrl, null);
   assert.equal(response.body.radioYear, null);
+  assert.equal(response.body.year, '2009');
   assert.match(response.body.artworkUrl, /\/v1\/mobile\/home\/artwork\/har_/);
   assert.match(response.body.backgroundArtworkUrl, /\/v1\/mobile\/home\/artwork\/har_/);
   assert.doesNotMatch(JSON.stringify(response.body), /coverart|secret-file|SamsungMoode/);
@@ -2353,4 +2570,64 @@ test('mobile radio catalog failures propagate explicitly while valid empty catal
   }
   const app=registerFixture({fetchInternalRequest:async()=>({ok:true,json:{ok:true,tracks:[]}})});
   const empty=createResponse();await app.routes.get('GET /v1/mobile/radio')(request({headers}),empty);assert.equal(empty.statusCode,200);assert.deepEqual(empty.body.items,[]);
+});
+
+
+test('catalog stats exclude downloaded podcasts while retaining music track identities', async () => {
+  const index = fixtureIndex();
+  index.tracks.push({...index.tracks[0], file:'USB/Podcasts/Show/episode.mp3', artist:'Podcast Host', albumArtist:'Podcast Host', album:'Show'});
+  const app = registerFixture({getBrowseIndex:async () => index});
+  const token = createMobileSessionToken({secret:'api-secret-for-test', deviceId:'fixture-ipad'});
+  const response = createResponse();
+  await app.routes.get('GET /v1/mobile/catalog/stats')(request({headers:{authorization:'Bearer '+token}}), response);
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.body.counts, {tracks:2, albums:1, artists:1});
+});
+
+
+test('approved controllers see active native and browser devices without credentials or management authority', async t => {
+  const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'sonuvi-device-inventory-'));
+  t.after(() => fs.rmSync(root, {recursive:true,force:true}));
+  const registry = new DeviceSessionRegistry({directory:path.join(root,'devices')});
+  const secret = 'device-inventory-fixture';
+  const sid = registry.authorize('iphone', {label:'iPhone'});
+  registry.authorize('browser-moode', {label:'moOde Chromium'});
+  registry.authorize('tv', {label:'Apple TV'});
+  registry.authorize('removed'); registry.revoke('removed');
+  const app = createApp();
+  registerMobileRoutes(app, {enabled:true,apiSecret:secret,trackIdSecret:'separate-track-secret',sessionRegistry:registry});
+  const handler = app.routes.get('GET /v1/mobile/devices');
+  const token = createMobileSessionToken({secret,deviceId:'iphone',sessionId:sid});
+  const headers = {authorization:`Bearer ${token}`};
+  let res = createResponse();await handler(request(),res);assert.equal(res.statusCode,401);
+  res=createResponse();await handler(request({headers}),res);
+  assert.equal(res.statusCode,200);assert.equal(res.headers['Cache-Control'],'no-store');
+  assert.deepEqual(res.body,{ok:true,currentDeviceId:'iphone',devices:[
+    {deviceId:'iphone',label:'iPhone',isCurrent:true},
+    {deviceId:'browser-moode',label:'moOde Chromium',isCurrent:false},
+    {deviceId:'tv',label:'Apple TV',isCurrent:false},
+  ]});
+  const rename=app.routes.get('POST /v1/mobile/devices/self');
+  res=createResponse();await rename(request({headers,body:{label:'My iPhone',deviceId:'browser-moode'}}),res);assert.equal(res.statusCode,400);
+  res=createResponse();await rename(request({headers,body:{label:'My iPhone'}}),res);assert.equal(res.statusCode,200);
+  assert.equal(registry.list()[0].label,'My iPhone');assert.equal(registry.list()[0].role,'controller');
+  res=createResponse();await app.routes.get('GET /v1/admin/devices')(request({headers}),res);assert.equal(res.statusCode,401);
+  registry.revoke('iphone');res=createResponse();await handler(request({headers}),res);assert.equal(res.statusCode,401);
+  res=createResponse();await rename(request({headers,body:{label:'Resurrect'}}),res);assert.equal(res.statusCode,401);
+  assert.equal(registry.list()[0].status,'revoked');
+});
+
+test('browser pairing optionally includes public origin-bound native trust without changing legacy payload', async () => {
+  const app=createApp();
+  const localTrust={contract:'sonuvi.local-tls-trust.v1',serverId:'sonuvi-'+'a'.repeat(43),origin:'https://fixture.local:8443',anchorDER:'public-test-anchor'};
+  registerMobileRoutes(app,{enabled:true,apiSecret:'test-secret',trackIdSecret:'other-secret',pairingAuthToken:'fixture-key',localTrust:async()=>localTrust});
+  const token=createMobileSessionToken({secret:'test-secret',deviceId:'display'});
+  const res=createResponse();await app.routes.get('POST /v1/mobile/pairing/challenges')(request({headers:{authorization:`Bearer ${token}`}}),res);
+  assert.equal(res.statusCode,200);
+  assert.equal(res.body.qrPayload.protocol,'now-playing-mobile-pairing');
+  assert.equal(res.body.nativeInvitation.protocol,'sonuvi-device-pairing');
+  assert.equal(res.body.nativeInvitation.pairing.baseUrl,localTrust.origin);
+  assert.deepEqual(res.body.nativeInvitation.localTrust,localTrust);
+  assert.equal(JSON.stringify(res.body.nativeInvitation).includes(res.body.displayToken),false);
+  assert.match(res.body.nativeQRDataUrl,/^data:image\/png;base64,/);
 });

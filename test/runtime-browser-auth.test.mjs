@@ -15,7 +15,8 @@ test('browser surfaces use a local credential accessor instead of server Track K
   const htmlPages = entries.filter((name) => name.endsWith('.html'));
   for (const page of htmlPages) {
     const source = await fs.readFile(path.join(root, page), 'utf8');
-    if (!redirectOnlyPages.has(page)) {
+    if (page==='config.html')assert.match(source,/scripts\/controller-browser-auth\.js/);
+    else if (!redirectOnlyPages.has(page)) {
       assert.match(source, /scripts\/runtime-auth\.js/);
     }
     assert.doesNotMatch(source, /config\?\.trackKey|config\.trackKey|fullConfig/);
@@ -32,6 +33,7 @@ test('browser surfaces use a local credential accessor instead of server Track K
   assert.doesNotMatch(helper, /fetch\s*\(/);
 
   const configPage = await fs.readFile(path.join(root, 'config.html'), 'utf8');
-  assert.match(configPage, /\/config\/runtime\/admin/);
-  assert.match(configPage, /Raw configuration writes are disabled/);
+  assert.match(configPage, /\/__controller\/configuration/);
+  assert.match(configPage, /mountMasterConfigurationEditor/);
+  assert.doesNotMatch(configPage, /Raw configuration writes are disabled/);
 });

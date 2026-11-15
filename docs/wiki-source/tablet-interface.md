@@ -182,6 +182,15 @@ This page should remain closely linked with:
 
 ## Current status
 
+### Interaction note — 2026-11-12
+
+In landscape, `#libraryList` is a nested two-column navigation scroller. Its
+touch gestures remain owned by that scroller in both directions, including at
+its top and bottom edges. The document-level pull-to-refresh handler clears
+its tracking for library-originated or cancelled touches, so returning to the
+Home row cannot reload the controller. Pull-to-refresh remains available for
+ordinary page-level touches at the document top.
+
 At the moment, this page is a tablet-oriented hub page rather than a fully exhaustive implementation guide.
 
 That is intentional.
@@ -189,3 +198,5 @@ That is intentional.
 Its role is to establish the tablet interface as a first-class branch of the knowledge base and to connect it to the richer drill-down pages that already exist.
 
 As the wiki grows, this page should become one of the main starting points for understanding how humans actually interact with the system in a controller-heavy, pane-rich, tablet-sized context.
+
+*Last reviewed: 2026-11-12 America/Chicago*

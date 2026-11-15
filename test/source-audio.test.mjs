@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -133,6 +133,39 @@ test('probes a source file once and reuses the stat-keyed cache', async () => {
   }
 });
 
+test('reuses a valid legacy source-audio cache entry without running ffprobe', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'sonuvi-source-audio-migration-'));
+  try {
+    const media = path.join(root, 'track.flac');
+    const cachePath = path.join(root, 'cache.json');
+    await writeFile(media, 'test source');
+    const mediaStat = await stat(media);
+    await writeFile(cachePath, JSON.stringify({
+      version: 1,
+      files: {
+        'track.flac': {
+          probeVersion: 2,
+          sizeBytes: mediaStat.size,
+          modifiedMs: mediaStat.mtimeMs,
+          sourceAudio: { codec: 'FLAC', codecKind: 'lossless', bitDepth: 24, sampleRateHz: 96_000, channels: 2 },
+        },
+      },
+    }), 'utf8');
+    let calls = 0;
+    const probe = createSourceAudioProbe({
+      resolveFile: async () => media,
+      cachePath,
+      runExecFile: async () => { calls += 1; throw new Error('must not probe'); },
+    });
+    const record = await probe.getRecord('track.flac');
+    assert.equal(record.status, 'verified');
+    assert.equal(record.sourceAudio.codec, 'FLAC');
+    assert.equal(calls, 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('source probe fails closed for inaccessible files and ffprobe failures', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'sonuvi-source-audio-failure-'));
   try {
@@ -151,6 +184,39 @@ test('source probe fails closed for inaccessible files and ffprobe failures', as
       ffprobePath: path.join(root, 'missing-ffprobe'),
     });
     assert.equal(await ffprobeFailure.get('track.m4a'), null);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('failed source probes are cached with a bounded retry window', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'sonuvi-source-audio-retry-'));
+  try {
+    const media = path.join(root, 'track.flac');
+    await writeFile(media, 'test source');
+    let clock = Date.parse('2026-11-01T00:00:00.000Z');
+    let calls = 0;
+    const probe = createSourceAudioProbe({
+      resolveFile: async () => media,
+      cachePath: path.join(root, 'retry-cache.json'),
+      runExecFile: async () => {
+        calls += 1;
+        throw new Error('ffprobe unavailable');
+      },
+      now: () => clock,
+      retryDelayMs: 60_000,
+    });
+
+    const first = await probe.getRecord('track.flac');
+    const second = await probe.getRecord('track.flac');
+    assert.equal(first.status, 'failed');
+    assert.equal(second.status, 'failed');
+    assert.equal(calls, 1);
+
+    clock += 60_000;
+    const retried = await probe.getRecord('track.flac');
+    assert.equal(retried.status, 'failed');
+    assert.equal(calls, 2);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

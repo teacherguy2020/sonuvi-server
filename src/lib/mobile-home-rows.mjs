@@ -79,6 +79,16 @@ export function sanitizeMobileHomeProfile(input = {}) {
   };
 }
 
+/// Orders Home rows so the four profile-selected shelves stay at the front,
+/// while every other supported source remains discoverable below them.
+export function orderedMobileHomeRowIDs(profile = {}) {
+  const selected = sanitizeMobileHomeProfile(profile).recentRows;
+  return [
+    ...selected,
+    ...MOBILE_HOME_ROW_IDS.filter((row) => !selected.includes(row)),
+  ];
+}
+
 export function mobileHomeRowDefinition(source) {
   return ROW_DEFINITIONS[text(source).toLocaleLowerCase()] || null;
 }
@@ -467,8 +477,8 @@ export function buildMobileHomeRows({
   };
 
   const rows = safeProfile.showRecent
-    ? safeProfile.recentRows
-      .map((source) => buildMobileHomeRow(source, sourcePayloads.get(source) || {}, context))
+    ? orderedMobileHomeRowIDs(safeProfile)
+      .map((source) => buildMobileHomeRow(source, sourcePayloads.get(source) || { ok: false, payload: {} }, context))
       .filter(Boolean)
     : [];
 

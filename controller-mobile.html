@@ -1,6 +1,9 @@
 <!doctype html>
 <html lang="en">
 <head>
+<script src="/__controller/config.js"></script>
+<script src="scripts/controller-browser-auth.js"></script>
+
   <script src="scripts/runtime-auth.js?v=20261024-h2"></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
@@ -763,13 +766,14 @@
       r.style.setProperty('--quick-line', cSecondary || t.line || '#2a3a58');
       r.style.setProperty('--quick-bg-menu', t.quickBgMenu || 'rgba(10,16,28,.94)');
     }
-    const base=(!location.port || location.port==='80' || location.port==='443')
+    const base = globalThis.SonuviControllerWeb ? location.origin : ((!location.port || location.port==='80' || location.port==='443')
       ? location.origin
-      : `${location.protocol}//${location.hostname||'sonuvi.local'}:3101`;
+      : `${location.protocol}//${location.hostname||'sonuvi.local'}:3101`);
     let runtimeTrackKey='';
     let runtimeMoodeHost='moode.local';
     let quickIndex=[];
     async function ensureKey(){
+      if (globalThis.SonuviControllerAuth?.enabled) { await globalThis.SonuviControllerAuth.ready; return ""; }
       if (runtimeTrackKey) return runtimeTrackKey;
       try {
         const r=await fetch(`${base}/config/runtime`,{cache:'no-store'});
@@ -1149,6 +1153,14 @@
     }
 
     async function getRecentAlbumsForRail(){
+      if (globalThis.SonuviControllerWeb) {
+        await globalThis.SonuviControllerAuth.ready;
+        const response = await fetch(`${base}/recent/albums?limit=60`, { cache: 'no-store' });
+        if (!response.ok) throw new Error('Recent albums unavailable');
+        const payload = await response.json();
+        return (payload.items || []).map(row => ({ album: row.album, artist: row.artist,
+          sampleFile: row.file, folder: row.folder, thumbUrl: row.art, addedTs: row.maxId }));
+      }
       const now = Date.now();
 
       if (!Array.isArray(recentAlbumsCache.albums) || !recentAlbumsCache.albums.length) {
@@ -1272,7 +1284,7 @@
         renderIpadRail('ipadRailAlbums', [], 'albums', true);
         renderIpadRail('ipadRailPodcasts', [], 'podcasts', true);
 
-        const cachedPlaylists = loadRecentCache(RECENT_PLAYLISTS_CACHE_KEY).items;
+        const cachedPlaylists = (globalThis.SonuviControllerAuth?.enabled ? {items:[]} : loadRecentCache(RECENT_PLAYLISTS_CACHE_KEY)).items;
         const cachedRadio = loadRecentCache(RECENT_RADIO_CACHE_KEY).items;
         if (cachedPlaylists.length) {
           ipadRecentItems.playlists = cachedPlaylists.slice(0, limit);
@@ -1310,6 +1322,7 @@
         ipadRecentItems.podcasts = podcasts.map((p, idx)=>({ kind:'podcast', title:String(p?.title||'(podcast)').trim(), art:String(p?.art||`${base}/art/current.jpg`), rss:String((pr.json?.items||[])[idx]?.rss||'').trim() }));
         renderIpadRail('ipadRailPodcasts', ipadRecentItems.podcasts, 'podcasts');
 
+        const artwork = globalThis.SonuviControllerAuth?.enabled ? await globalThis.SonuviControllerAuth.playlistArtwork() : null;
         const pl = await fetchJsonWithTimeout(`${base}/config/queue-wizard/playlists`, { cache:'no-store', headers:reqHeaders(false) }, 3200);
         const playlists = (pl.ok && pl.json?.ok && Array.isArray(pl.json.playlists))
           ? pl.json.playlists.slice(0, limit).map((n)=>{
@@ -1317,8 +1330,8 @@
               const safe = title.replace(/\s+/g,'_');
               return {
                 title,
-                art:`http://${runtimeMoodeHost}/imagesw/playlist-covers/${encodeURIComponent(title)}.jpg`,
-                artAlt:`http://${runtimeMoodeHost}/imagesw/playlist-covers/${encodeURIComponent(safe)}.jpg`
+                art:artwork ? artwork.get(title) || '' : `http://${runtimeMoodeHost}/imagesw/playlist-covers/${encodeURIComponent(title)}.jpg`,
+                artAlt:artwork ? '' : `http://${runtimeMoodeHost}/imagesw/playlist-covers/${encodeURIComponent(safe)}.jpg`
               };
             })
           : [];
@@ -1474,7 +1487,7 @@
         }
         if (src === 'playlists') {
           try {
-            const cachedPl = loadRecentCache(RECENT_PLAYLISTS_CACHE_KEY).items;
+            const cachedPl = (globalThis.SonuviControllerAuth?.enabled ? {items:[]} : loadRecentCache(RECENT_PLAYLISTS_CACHE_KEY)).items;
             if (Array.isArray(cachedPl) && cachedPl.length) {
               recentItems = cachedPl.slice(0, recentLimit());
               rail.innerHTML = '';
@@ -1486,6 +1499,7 @@
             }
           } catch {}
 
+          const artwork = globalThis.SonuviControllerAuth?.enabled ? await globalThis.SonuviControllerAuth.playlistArtwork() : null;
           const pl = await fetchJsonWithTimeout(`${base}/config/queue-wizard/playlists`, { cache:'no-store', headers:reqHeaders(false) }, 3200);
           const names = (pl.ok && pl.json?.ok && Array.isArray(pl.json.playlists)) ? pl.json.playlists : [];
           const cleaned = names
@@ -1510,8 +1524,8 @@
               kind:'playlist',
               playlist:n,
               title:n,
-              art:`http://${runtimeMoodeHost}/imagesw/playlist-covers/${encodeURIComponent(n)}.jpg`,
-              artAlt:`http://${runtimeMoodeHost}/imagesw/playlist-covers/${encodeURIComponent(safe)}.jpg`
+              art:artwork ? artwork.get(n) || '' : `http://${runtimeMoodeHost}/imagesw/playlist-covers/${encodeURIComponent(n)}.jpg`,
+              artAlt:artwork ? '' : `http://${runtimeMoodeHost}/imagesw/playlist-covers/${encodeURIComponent(safe)}.jpg`
             };
           });
           if (recentItems.length) saveRecentCache(RECENT_PLAYLISTS_CACHE_KEY, recentItems);

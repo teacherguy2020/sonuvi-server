@@ -85,6 +85,7 @@ function makeMpdFixture({ state = 'stop', song = -1, elapsed = 0, queue = [] } =
       currentElapsed = Number(command.split(/\s+/)[2]);
       return 'OK\n';
     }
+    if (command === 'pause 0') { currentState = 'play'; return 'OK\n'; }
     if (command === 'pause 1') {
       currentState = 'pause';
       return 'OK\n';
@@ -136,7 +137,7 @@ test('Mills start and stop switch Denon once and ignore duplicates', async () =>
   assert.equal(res.body.duplicate, true);
   assert.equal(res.body.surrogateStarted, false);
   assert.equal(res.body.awaitingSelection, true);
-  assert.equal(commands.length, 2);
+  assert.equal(commands.length, 4);
 
   res = makeResponse();
   await app.routes['POST /integrations/mills/stop']({ body: {} }, res);
@@ -329,8 +330,9 @@ test('Mills snapshots and pauses playback, waits for slots, and restores the pla
   assert.equal(res.statusCode, 200);
   assert.deepEqual(inputs, ['phono', 'aux1']);
   assert.deepEqual(fixture.getQueue(), ['House/Before.flac', 'House/Current.flac', 'House/After.flac']);
-  assert.ok(fixture.commands.some((command) => command.startsWith('playid')));
-  assert.ok(fixture.commands.includes('seekid 105 42.500') || fixture.commands.some((command) => command.startsWith('seekid ')));
+  assert.ok(fixture.commands.includes('pause 0'));
+  assert.equal(fixture.commands.includes('clear'), false);
+  assert.equal(fixture.getStatus().songid, 11);
 });
 
 test('Mills restores paused and stopped sessions without a physical selection', async () => {
@@ -358,10 +360,10 @@ test('Mills restores paused and stopped sessions without a physical selection', 
     assert.equal(res.statusCode, 200);
     assert.deepEqual(fixture.getQueue(), [`House/${initialState}.flac`]);
     if (initialState === 'pause') {
-      assert.ok(fixture.commands.some((command) => command.startsWith('playid')));
-      assert.ok(fixture.commands.includes('pause 1'));
+      assert.equal(fixture.getStatus().state, 'pause');
+      assert.equal(fixture.commands.includes('pause 0'), false);
     } else {
-      assert.ok(fixture.commands.includes('stop'));
+      assert.equal(fixture.getStatus().state, 'stop');
       assert.equal(fixture.commands.some((command) => command.startsWith('playid')), false);
     }
   }
@@ -384,10 +386,10 @@ test('Mills stop remains retryable when MPD cleanup or restoration fails', async
     mpdHasACK: (raw) => String(raw).includes('ACK'),
     parseMpdFirstBlock: () => fixture.getStatus(),
     mpdQueryRaw: async (command) => {
-      if (command === 'clear' && failClear) {
+      if (command === 'pause 0' && failClear) {
         failClear = false;
         fixture.commands.push(command);
-        return 'ACK [50@0] {clear} forced test failure\n';
+        return 'ACK [50@0] {pause} forced test failure\n';
       }
       return fixture.mpdQueryRaw(command);
     },
@@ -406,3 +408,41 @@ test('Mills stop remains retryable when MPD cleanup or restoration fails', async
   assert.deepEqual(inputs, ['phono', 'aux1', 'aux1']);
   assert.deepEqual(fixture.getQueue(), ['House/BeforeRetry.flac']);
 });
+
+for (const change of ['replace', 'resume', 'seek']) {
+  test(`Mills delayed stop preserves user ${change} instead of restoring stale snapshot`, async () => {
+    const app = makeApp();
+    const fixture = makeMpdFixture({ state: 'play', song: 0, elapsed: 12,
+      queue: [{ file: 'Old/Album.flac', id: 10 }] });
+    registerMillsRoutes(app, { requireTrackKey: () => true, switchDenonInput: async () => {},
+      mpdEscapeValue: JSON.stringify, mpdHasACK: raw => String(raw).includes('ACK'),
+      parseMpdFirstBlock: () => fixture.getStatus(), mpdQueryRaw: fixture.mpdQueryRaw });
+    await app.routes['POST /integrations/mills/start']({body:{}}, makeResponse());
+    if (change === 'replace') {
+      await fixture.mpdQueryRaw('clear');
+      await fixture.mpdQueryRaw('addid "New/Album.flac"');
+    }
+    if(change==='seek')await fixture.mpdQueryRaw('seekid 10 30');
+    else await fixture.mpdQueryRaw('play 0');
+    const before = fixture.getQueue(); const start = fixture.commands.length;
+    const res = makeResponse();
+    await app.routes['POST /integrations/mills/stop']({body:{}}, res);
+    assert.equal(res.statusCode, 200); assert.equal(res.body.active, false);
+    assert.deepEqual(fixture.getQueue(), before); assert.equal(fixture.getStatus().state, change==='seek'?'pause':'play');
+    assert.equal(fixture.commands.slice(start).some(c => /^(clear$|play(?: |id )|seekid |pause |stop$|addid )/.test(c)), false);
+  });
+}
+
+ test('Mills resume uses post-switch pause checkpoint, preserving amplifier-switch elapsed time and queue IDs', async () => {
+  const app=makeApp();
+  const fixture=makeMpdFixture({state:'play',song:0,elapsed:12,queue:[{file:'House/Current.flac',id:10}]});
+  registerMillsRoutes(app,{requireTrackKey:()=>true,switchDenonInput:async input=>{
+    if(input==='phono')await fixture.mpdQueryRaw('seekid 10 15.5');
+  },mpdEscapeValue:JSON.stringify,mpdHasACK:raw=>String(raw).includes('ACK'),
+  parseMpdFirstBlock:()=>fixture.getStatus(),mpdQueryRaw:fixture.mpdQueryRaw});
+  await app.routes['POST /integrations/mills/start']({body:{}},makeResponse());
+  const res=makeResponse();await app.routes['POST /integrations/mills/stop']({body:{}},res);
+  assert.equal(res.statusCode,200);assert.equal(fixture.getStatus().state,'play');
+  assert.equal(fixture.getStatus().elapsed,15.5);assert.equal(fixture.getStatus().songid,10);
+  assert.equal(fixture.commands.includes('clear'),false);
+ });

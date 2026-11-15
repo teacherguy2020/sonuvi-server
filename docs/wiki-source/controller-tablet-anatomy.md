@@ -175,6 +175,7 @@ The library/category list is anchored by:
 - `.rowWrap`
 
 Visible row targets include:
+- Home
 - Playlists
 - Artists
 - Albums
@@ -198,6 +199,21 @@ Visible row-level queue actions include:
 
 ### Why it matters
 This list is not just navigation. At least some rows expose richer action behavior directly in the tablet shell.
+
+### Landscape tablet navigation
+
+On landscape tablet profiles, the library card has the same bounded width as the
+small square Now Playing card and uses two columns. **Home** is the first,
+keyboard-operable row. It returns to the existing recents/home surface by
+closing the embedded pane and clearing the `pane` and `genre` URL state; it
+does not reload the shell, reset playback/preferences, or overwrite the saved
+last-library preference.
+
+The landscape navigation card is a dedicated vertical touch scroll region when
+a short Safari viewport cannot show all rows. Its two-column rows retain a
+44px minimum instead of fractionally shrinking into clipped content. The Live
+Queue row keeps its horizontal swipe actions; a vertical scroll gesture is
+suppressed from becoming a queue-navigation tap.
 
 ### Companion pages
 - `queue-wizard-internals.md`
@@ -466,4 +482,4 @@ controls and cannot safely pause, seek, shuffle, or stop the Pibuz renderer;
 the server-side diagnostics playback route enforces the same boundary for
 clients that bypass this shell.
 
-*Last reviewed: 2026-10-28 America/Chicago*
+*Last reviewed: 2026-11-12 America/Chicago*

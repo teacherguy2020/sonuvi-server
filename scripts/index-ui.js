@@ -412,12 +412,12 @@ async function resolveLocalMotionMp4(artist, album) {
   if (!a || !b) return '';
   if (localMotionCache.has(k)) return String(localMotionCache.get(k) || '');
   try {
-    const url = `${API_BASE}/config/library-health/animated-art/lookup?artist=${encodeURIComponent(a)}&album=${encodeURIComponent(b)}`;
+    const url = `${API_BASE}${globalThis.SonuviControllerWeb ? "/v1/mobile/animated-art" : "/config/library-health/animated-art/lookup"}?artist=${encodeURIComponent(a)}&album=${encodeURIComponent(b)}`;
     const key = await ensureRuntimeTrackKey();
     const headers = key ? { 'x-track-key': key } : {};
     const r = await fetch(url, { headers });
     const j = await r.json().catch(() => ({}));
-    const mp4 = String(j?.hit?.mp4 || '').trim();
+    const mp4 = String(j?.mediaUrl || j?.hit?.mp4 || '').trim();
     localMotionCache.set(k, mp4);
     return mp4;
   } catch {

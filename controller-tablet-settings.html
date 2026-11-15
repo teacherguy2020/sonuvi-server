@@ -1,6 +1,8 @@
 <!doctype html>
 <html lang="en">
 <head>
+  <script src="/__controller/config.js"></script>
+  <script src="scripts/controller-browser-auth.js"></script>
   <script src="scripts/runtime-auth.js?v=20261024-h2"></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -92,15 +94,21 @@
 
   </div>
 
+  <section class="card" id="sonuviAccountSettings" hidden aria-labelledby="sonuviAccountTitle" style="margin-bottom:12px">
+    <h1 id="sonuviAccountTitle">Account and devices</h1>
+    <p class="sub">Manage this browser’s Sonuvi session and connect your other devices.</p>
+    <div id="sonuviAccountActions" class="settingActions" style="display:flex;flex-wrap:wrap;gap:10px"></div>
+  </section>
+
   <div class="card" data-mobile-pairing>
-    <h1>Pair Mobile Device</h1>
+    <h1>Add another device</h1>
     <p class="sub">Approve the native Sonuvi iPhone/CarPlay app from this authenticated controller.</p>
-    <div class="hint npMobilePairingIntro">The QR code contains only a short-lived pairing challenge and the visible server address. It never contains API secrets or access tokens.</div>
+    <div class="hint npMobilePairingIntro">On the new iPhone or iPad, open Settings → Devices → Add this device and scan the code shown here.</div>
     <div class="npMobilePairingActions">
-      <button class="applyBtn" type="button" data-pair-start>Pair new device</button>
+      <button class="applyBtn" type="button" data-pair-start>Show pairing QR code</button>
       <button class="applyBtn" type="button" data-pair-cancel hidden>Cancel pairing</button>
     </div>
-    <div class="hint npMobilePairingStatus" data-pair-status role="status" aria-live="polite">Pairing requires the configured Track Key.</div>
+    <div class="hint npMobilePairingStatus" data-pair-status role="status" aria-live="polite">Show a code, scan it on your new device, then approve its matching request here.</div>
     <div data-pair-qr-wrap hidden>
       <div class="npMobilePairingGrid">
         <div><img class="npMobilePairingQr" data-pair-qr alt="Pairing QR code" /></div>

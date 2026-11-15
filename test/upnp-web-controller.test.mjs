@@ -59,14 +59,14 @@ test('UPnP controller page exposes provider-neutral browsing, search, queue, and
   assert.match(page, /UPNP_REQUEST_TIMEOUT/);
 });
 
-test('Config exposes a disabled Qobuz Account action and safe status endpoint', async () => {
-  const page = await read('config.html');
+test('Qobuz plugin retains account limitations, owner status and guarded session release', async () => {
+  const page = await read('scripts/master-configuration-editor.mjs');
   const routes = await read('src/routes/config.qobuz-account.routes.mjs');
-  assert.match(page, /id="qobuzAccountSection"/);
-  assert.match(page, /id="qobuzAccountConnectBtn"[^>]*disabled/);
-  assert.match(page, /config\/qobuz\/account\/status/);
+  assert.match(page, /id='qobuzAccountSection'/);
+  assert.match(page, /id='qobuzAccountConnectBtn';connect.disabled=true/);
+  assert.match(page, /plugins\/qobuz\/account\/status/);
   assert.match(page, /qobuzSessionReleaseBtn/);
-  assert.match(page, /config\/qobuz\/session\/release/);
+  assert.match(page, /plugins\/qobuz\/session\/release/);
   assert.match(page, /Do not enter a Qobuz password or token/);
   assert.match(routes, /lastVerifiedAt: null/);
   assert.match(routes, /QOBUZ_RELEASE_UNCONFIRMED/);

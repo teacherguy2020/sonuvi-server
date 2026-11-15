@@ -6,6 +6,7 @@ import { registerConfigQueueWizardBasicRoutes } from '../src/routes/config.queue
 import { registerMobileRoutes } from '../src/routes/mobile.routes.mjs';
 import { registerConfigBrowseRoutes } from '../src/routes/config.browse.routes.mjs';
 import { createMobileSessionToken, createMobileTrackId } from '../src/lib/mobile-auth.mjs';
+import { createRadioFeatureService } from '../src/lib/radio-feature-service.mjs';
 import { radioDisplayName } from '../src/lib/radio-display.mjs';
 import { radioCatalogFixture } from './fixtures/moode-radio-catalog.mjs';
 
@@ -35,6 +36,7 @@ function sharedFixture(fetchImpl=async()=>jsonResponse(rows)) {
   };
   registerMobileRoutes(mobile, {
     enabled:true, apiSecret:'api-test-secret', trackIdSecret:'track-test-secret',
+    radioFeatures:createRadioFeatureService({readRadioCatalog:()=>{reads++;return readMoodeRadioCatalog({baseUrl:'http://moode.test',fetchImpl})}}),
     fetchInternalRequest:async(path,options={})=>{
       const r=await controllerCall(options.method||'GET',path,{body:options.body||{}});
       return {ok:r.statusCode<400,status:r.statusCode,json:r.body};

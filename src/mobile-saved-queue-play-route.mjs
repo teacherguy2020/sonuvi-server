@@ -31,6 +31,7 @@ export function createMobileSavedQueuePlayRoute({
   secret,
   now = Date.now,
   verify = verifyMobileToken,
+  sessionRegistry,
 } = {}) {
   if (!service || typeof service.play !== 'function' || typeof service.status !== 'function') {
     throw new Error('saved queue play route service is incomplete');
@@ -39,7 +40,7 @@ export function createMobileSavedQueuePlayRoute({
 
   function auth(headers) {
     try {
-      return authenticatedPrincipal({ headers, secret, now: now(), verify });
+      return authenticatedPrincipal({ headers, secret, now: now(), verify: (token, options) => verify(token, { ...options, sessionRegistry }) });
     } catch {
       return null;
     }

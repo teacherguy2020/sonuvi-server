@@ -3,9 +3,11 @@ import assert from 'node:assert/strict';
 
 import { buildMobileCatalog } from '../src/lib/mobile-track-identity.mjs';
 import {
+  MOBILE_HOME_ROW_IDS,
   buildMobileLocalRecentHistory,
   buildMobileHomeRows,
   mobileHomeSourcePath,
+  orderedMobileHomeRowIDs,
   sanitizeMobileHomeProfile,
 } from '../src/lib/mobile-home-rows.mjs';
 
@@ -39,6 +41,27 @@ test('mobile home profile preserves configured rows and safe defaults', () => {
   assert.equal(profile.recentCount, 30);
   assert.equal(profile.theme, 'dark');
   assert.equal(mobileHomeSourcePath('local-toptracks', 18), '/config/listening-history/top-tracks?limit=18');
+});
+
+test('mobile Home puts configured shelves first and preserves every remaining source', () => {
+  const profile = {
+    recentRows: ['local-toptracks', 'queue', 'radio', 'podcasts'],
+  };
+  const expected = [
+    ...profile.recentRows,
+    ...MOBILE_HOME_ROW_IDS.filter((row) => !profile.recentRows.includes(row)),
+  ];
+
+  assert.deepEqual(orderedMobileHomeRowIDs(profile), expected);
+
+  const result = buildMobileHomeRows({
+    profile,
+    catalog: catalog(),
+    sourcePayloads: new Map(),
+  });
+
+  assert.deepEqual(result.rows.map((row) => row.id), expected);
+  assert.equal(result.rows[4].available, false);
 });
 
 test('mobile home queue row exposes upcoming queue tracks without raw MPD paths', () => {
@@ -118,7 +141,13 @@ test('mobile home rows normalize local track and playlist art through mobile DTO
     ]),
   });
 
-  assert.equal(result.rows.length, 4);
+  assert.equal(result.rows.length, MOBILE_HOME_ROW_IDS.length);
+  assert.deepEqual(result.rows.slice(0, 4).map((row) => row.id), [
+    'local-toptracks',
+    'playlists',
+    'radio',
+    'podcasts',
+  ]);
   assert.equal(result.rows[0].items[0].track.title, 'Track');
   assert.equal(result.rows[0].items[0].albumItem.album, 'Album');
   assert.match(result.rows[0].items[0].artworkUrl, /\/v1\/mobile\/artwork\//);

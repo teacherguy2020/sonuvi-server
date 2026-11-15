@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { registerRemoteAccessRoute, createRemoteNativeListener, REMOTE_PROXY_PORT } from './src/lib/sonuvi-remote-access.mjs';
+import { registerDeferredPlaybackRoutes } from './src/routes/deferred-playback.routes.mjs';
 /**
  * moode-nowplaying-api.mjs -- moOde Now-Playing API (Pi4)
  *
@@ -25,6 +27,24 @@
 // network, and state-write boundaries before legacy route modules capture
 // Node built-in helpers.
 import './src/lib/rehearsal-runtime-boundary.mjs';
+import './src/config/master-runtime-bootstrap.mjs';
+import { createMobileControllerBridge } from './src/lib/mobile-controller-bridge.mjs';
+import { readEffectiveRuntimeConfig, writeNativeRuntimeConfig } from './src/lib/native-configuration-store.mjs';
+import { startLibraryHealthScan, waitForLibraryHealthScan } from './src/routes/config.library-health-read.routes.mjs';
+import { runtimeDiagnostics as nativeRuntimeDiagnostics } from './src/lib/config-runtime-diagnostics.mjs';
+import { installRuntimeShutdown } from './src/lib/runtime-shutdown.mjs';
+import { resolveHardwareCompatibility, createHardwareCompatibilityServer } from './src/lib/hardware-compatibility.mjs';
+import { loadLocalTLSListener } from './src/lib/sonuvi-local-tls-listener.mjs';
+import { startLocalAdvertisement } from './src/lib/sonuvi-lan-discovery.mjs';
+import { localTrustRecord, readLocalTLSBundle, LOCAL_TLS_PORT } from './src/lib/sonuvi-local-tls.mjs';
+
+// Validate explicit hardware exposure before starting any runtime listeners.
+const hardwareCompatibilityConfig = resolveHardwareCompatibility({ apiHost: API_LISTEN_HOST, apiPort: PORT, trackKey: TRACK_KEY });
+let hardwareCompatibilityRuntime = null;
+let localTLSRuntime = null;
+let remoteNativeListener = null;
+let localAdvertisement = null;
+import { lookupAnimatedArt, resolveAnimatedMediaFile } from './src/routes/config.library-health-animated-art.routes.mjs';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
@@ -231,9 +251,9 @@ if (!globalThis.File && NodeFile) globalThis.File = NodeFile;
 import { ProxyAgent, setGlobalDispatcher, Agent } from 'undici';
 import {
   FFMPEG, CURL, MPD_PLAYLIST_DIR, FAVORITES_PATH, MOODE_SSH_USER, MOODE_SSH_HOST, PORT,
-  MOODE_BASE_URL, PUBLIC_BASE_URL, LOCAL_ADDRESS, MPD_HOST, MPD_PORT, MOODE_USB_PREFIX,
+  MOODE_BASE_URL, PUBLIC_BASE_URL, LOCAL_ADDRESS, MPD_HOST, MPD_PORT, MOODE_USB_PREFIX, FRESH_INSTALL_MODE, API_LISTEN_HOST,
   PI4_MOUNT_BASE, METAFLAC, TRACK_KEY, LASTFM_API_KEY, LASTFM_API_SECRET, LASTFM_SESSION_KEY, LASTFM_MPD_MODE,
-  ENABLE_ALEXA, TRANSCODE_TRACKS, TRACK_CACHE_DIR,
+  ENABLE_ALEXA, ENABLE_DLNA_MEDIA_SERVER, DLNA_LAN_ADDRESS, DLNA_PORT, TRANSCODE_TRACKS, TRACK_CACHE_DIR,
   FAVORITES_PLAYLIST_NAME, FAVORITES_REFRESH_MS, ITUNES_SEARCH_URL, ITUNES_COUNTRY,
   ITUNES_TIMEOUT_MS, ITUNES_TTL_HIT_MS, ITUNES_TTL_MISS_MS,
   APPLE_MUSIC_DEVELOPER_TOKEN, APPLE_MUSIC_COUNTRY, APPLE_MUSIC_TIMEOUT_MS,
@@ -246,7 +266,7 @@ import {
   MOBILE_PUBLIC_BASE_URL, MOBILE_TRACK_CACHE_DIR, MOBILE_TRANSCODE_TRACKS,
   MOBILE_VIDEO_ROOT, MOBILE_VIDEO_CATALOG_PATH,
   APNS_KEY_ID, APNS_TEAM_ID, APNS_PRIVATE_KEY_PATH, APNS_PRIVATE_KEY, APNS_TOPIC,
-  APNS_ENVIRONMENT, MOBILE_PUSH_TOKENS_PATH,
+  APNS_ENVIRONMENT, APNS_ENABLED, MOBILE_PUSH_TOKENS_PATH,
   PUSHOVER_TOKEN, PUSHOVER_USER_KEY,
   HARMONY_HOST, HARMONY_PORT, HARMONY_DOMAIN, HARMONY_HUB_ID,
   HARMONY_DENON_DEVICE_ID, HARMONY_INPUT_PHONO, HARMONY_INPUT_AUX1,
@@ -258,6 +278,7 @@ import { execFileStrict } from './src/lib/exec.mjs';
 import { createRuntimeCapabilities, rehearsalReadOnlyMiddleware } from './src/lib/runtime-capabilities.mjs';
 import { publicRuntimeReleaseIdentity, resolveRuntimePublicWebRoot, resolveRuntimeReleaseIdentity } from './src/lib/release-runtime.mjs';
 import { hasConfiguredTrackKey, isAuthorizedTrackKey } from './src/lib/track-key-auth.mjs';
+import { createControllerDispatchAuthorizer } from './src/lib/controller-browser-dispatch.mjs';
 import { radioDisplayName, radioStationNameForFile } from './src/lib/radio-display.mjs';
 import {
   isAirplayCurrentSong,
@@ -266,14 +287,15 @@ import {
 } from './src/lib/airplay-state.mjs';
 import {
   mpdEscapeValue, mpdHasACK, parseMpdFirstBlock, parseMpdKeyVals,
-  mpdGetStatus, mpdPlay, mpdPlayId, mpdPause, mpdStop, mpdQueryRaw
+  mpdGetStatus, mpdPlay, mpdPlayId, mpdPause, mpdStop, mpdQueryRaw, setMpdPlaybackHoldProvider
 } from './src/services/mpd.service.mjs';
 import { registerRatingRoutes } from './src/routes/rating.routes.mjs';
 import { registerQueueRoutes } from './src/routes/queue.routes.mjs';
 import { registerTrackRoutes } from './src/routes/track.routes.mjs';
 import { registerArtRoutes, serveTrackArtwork } from './src/routes/art.routes.mjs';
 import { registerMobileRoutes } from './src/routes/mobile.routes.mjs';
-import { getBrowseIndex } from './src/lib/browse-index.mjs';
+import { configureBrowseIndexQuality, getBrowseIndex as getMpdBrowseIndex, getBrowseIndexStatus as getMpdBrowseIndexStatus } from './src/lib/browse-index.mjs';
+import { createRuntimeBrowseIndexProvider } from './src/lib/fresh-install-browse-index.mjs';
 import { buildMobileCatalog } from './src/lib/mobile-track-identity.mjs';
 import { createSourceAudioProbe } from './src/lib/source-audio.mjs';
 import { createLiveRadioAudioProbe } from './src/lib/live-radio-audio.mjs';
@@ -295,16 +317,28 @@ import { createSavedQueuePlayService } from './src/saved-queue-play-service.mjs'
 import { createQobuzConnectController } from './src/lib/qobuz-connect-control.mjs';
 import { createListeningHistoryStore } from './src/lib/listening-history.mjs';
 import { createLastfmScrobbler } from './src/lib/lastfm-scrobbler.mjs';
+import { loadProtectedLastfmEnvironment } from './src/lib/protected-runtime-secrets.mjs';
 import { createApnsProvider } from './src/lib/apns.mjs';
 import { resolveApnsMediaUrl } from './src/lib/apns-artwork.mjs';
 import { createMobilePushTokenStore } from './src/lib/mobile-push-store.mjs';
+import { createRadioFeatureService } from './src/lib/radio-feature-service.mjs';
+import { readMoodeRadioCatalog } from './src/lib/moode-radio-catalog.mjs';
 import { createMobileVideoCatalog } from './src/lib/mobile-video-catalog.mjs';
+import { AdministratorAuthority } from './src/lib/sonuvi-admin-authority.mjs';
+import { DeviceSessionRegistry } from './src/lib/sonuvi-device-sessions.mjs';
+import { SonuviLogin, registerLoginRoutes } from './src/lib/sonuvi-login.mjs';
 import { buildAnimatedArtContext } from './src/lib/animated-art-context.mjs';
 import { UpnpControlPoint } from './src/lib/upnp-control-point.mjs';
 import { createUpnpPlaybackSessionManager } from './src/lib/upnp-playback-session.mjs';
 import { createUpnpPlaybackQueueManager } from './src/lib/upnp-playback-queue.mjs';
 import { registerAllConfigRoutes } from './src/routes/config.routes.index.mjs';
+import { getLibraryHealthStatus } from './src/routes/config.library-health-read.routes.mjs';
+import { registerNativeAdministratorConfigurationRoutes } from './src/routes/admin-native-configuration.routes.mjs';
+import { readManagedMusicSource } from './src/lib/managed-music-source.mjs';
 import { registerUpnpRoutes } from './src/routes/upnp.routes.mjs';
+import { createDlnaMediaServer, isPrivateLanAddress } from './src/lib/dlna-media-server.mjs';
+import { createDlnaRuntime } from './src/lib/dlna-runtime.mjs';
+import { startDlnaSsdpResponder } from './src/lib/dlna-ssdp.mjs';
 import { registerPodcastSubscriptionRoutes } from './src/routes/podcasts-subscriptions.routes.mjs';
 import { registerPodcastRefreshRoutes } from './src/routes/podcasts-refresh.routes.mjs';
 import { registerPodcastEpisodeRoutes } from './src/routes/podcasts-episodes.routes.mjs';
@@ -316,7 +350,8 @@ import {
   withJukeboxMutation,
 } from './src/routes/seeburg.routes.mjs';
 import { registerMultiphoneRoutes } from './src/routes/multiphone.routes.mjs';
-import { getMillsIntegrationState, registerMillsRoutes } from './src/routes/mills.routes.mjs';
+import { getMillsIntegrationState, registerMillsRoutes, isMillsPlaybackHeld } from './src/routes/mills.routes.mjs';
+setMpdPlaybackHoldProvider(isMillsPlaybackHeld);
 import { HarmonyHubClient, sendHarmonyIrCommand } from './src/services/harmony.service.mjs';
 import { createAppleAboutService } from './src/services/apple-about.service.mjs';
 import { createAppleCatalogSearchService } from './src/services/apple-catalog-search.service.mjs';
@@ -401,6 +436,7 @@ const qobuzConnect = {
 if (!RUNTIME_CAPABILITIES.rehearsal) pibuzQobuz.startEvents();
 
 let pibuzShutdownPromise = null;
+let stopRuntimeForShutdown = async () => {};
 async function stopPibuzEventsForShutdown(signal) {
   if (pibuzShutdownPromise) return pibuzShutdownPromise;
   pibuzShutdownPromise = (async () => {
@@ -416,14 +452,7 @@ async function stopPibuzEventsForShutdown(signal) {
   return pibuzShutdownPromise;
 }
 
-for (const signal of ['SIGTERM', 'SIGINT']) {
-  process.once(signal, () => {
-    stopPibuzEventsForShutdown(signal).then(
-      () => process.exit(0),
-      () => process.exit(1),
-    );
-  });
-}
+installRuntimeShutdown({ cleanup: signal => Promise.all([stopPibuzEventsForShutdown(signal), stopRuntimeForShutdown(signal)]) });
 
 const qobuzConnectController = createQobuzConnectController({
   sshUser: MOODE_SSH_USER,
@@ -487,6 +516,13 @@ const millsHarmonyClient = new HarmonyHubClient({
 });
 
 const nonMpdScrobbler = createLastfmScrobbler({
+  getCredentials: () => {
+    const cfg = readEffectiveRuntimeConfig(RUNTIME_STATE_PATHS.configPath);
+    const master = cfg[Symbol.for('sonuvi.master.document')];
+    if(master && (!master.plugins.lastfm.enabled || !master.plugins.lastfm.scrobblingEnabled)) return {};
+    const c = loadProtectedLastfmEnvironment({statePaths:RUNTIME_STATE_PATHS});
+    return {apiKey:c.LASTFM_API_KEY || (!master ? LASTFM_API_KEY : ''),apiSecret:c.LASTFM_API_SECRET,sessionKey:c.LASTFM_SESSION_KEY};
+  },
   apiKey: LASTFM_API_KEY,
   apiSecret: LASTFM_API_SECRET,
   sessionKey: LASTFM_SESSION_KEY,
@@ -521,6 +557,7 @@ const mobileVideoCatalog = createMobileVideoCatalog({
   registryPath: MOBILE_VIDEO_CATALOG_PATH,
 });
 const apnsProvider = createApnsProvider({
+  enabled: APNS_ENABLED,
   keyId: APNS_KEY_ID,
   teamId: APNS_TEAM_ID,
   privateKeyPath: APNS_PRIVATE_KEY_PATH,
@@ -768,6 +805,12 @@ app.use(rehearsalReadOnlyMiddleware({ capabilities: RUNTIME_CAPABILITIES }));
 // Immutable releases set SONUVI_PUBLIC_WEB_ROOT to the generated H2 public
 // root. Legacy checkouts retain their historical root until they opt in.
 app.use(express.static(PUBLIC_WEB_ROOT, { dotfiles: 'deny', index: false }));
+// Bounded read-only health projection for authenticated app indicators.
+app.get('/status/services', async (_req,res) => {
+  let reachable=false;
+  try {const raw=await Promise.race([mpdQueryRaw('status'),new Promise((_,reject)=>{const timer=setTimeout(()=>reject(Error('timeout')),3000);timer.unref?.();})]);reachable=!!raw&&!mpdHasACK(raw)&&/^state: (play|pause|stop)$/m.test(raw);}catch{}
+  res.set('Cache-Control','no-store').json({ok:true,moode:{reachable}});
+});
 app.get('/health', (_req, res) => {
   res.json({ contract: 'sonuvi.health.v1', ok: true, release: publicRuntimeReleaseIdentity(RELEASE_IDENTITY) });
 });
@@ -2525,7 +2568,12 @@ function extractYear(str) {
   return m ? m[1] : '';
 }
 
+const deviceSessions = RUNTIME_STATE_PATHS.sharedStateEnabled
+  ? new DeviceSessionRegistry({ directory: path.join(RUNTIME_STATE_PATHS.stateRoot, 'data', 'device-sessions') })
+  : null;
+const authorizeControllerDispatch = createControllerDispatchAuthorizer({ secret: process.env.SONUVI_CONTROLLER_WEB_SECRET, apiSecret: MOBILE_API_SECRET, sessionRegistry: deviceSessions });
 function requireTrackKey(req, res) {
+  if (authorizeControllerDispatch(req)) return true;
   if (!hasConfiguredTrackKey(TRACK_KEY)) {
     // Do not silently run an immutable release with its privileged endpoints
     // unauthenticated. Legacy checkouts retain their historical open behavior
@@ -4681,7 +4729,7 @@ async function resolveArtistAlias(artistRaw) {
   const artist = String(artistRaw || '').trim();
   if (!artist) return '';
   try {
-    const cfg = JSON.parse(await fsp.readFile(RUNTIME_CONFIG_PATH, 'utf8'));
+    const cfg = readEffectiveRuntimeConfig(RUNTIME_CONFIG_PATH);
     const aliases = cfg?.alexa?.artistAliases || {};
     const want = normalizeAliasKey(artist);
     for (const [k, v] of Object.entries(aliases)) {
@@ -4697,7 +4745,7 @@ async function resolveAlbumAlias(albumRaw) {
   const album = String(albumRaw || '').trim();
   if (!album) return '';
   try {
-    const cfg = JSON.parse(await fsp.readFile(RUNTIME_CONFIG_PATH, 'utf8'));
+    const cfg = readEffectiveRuntimeConfig(RUNTIME_CONFIG_PATH);
     const aliases = cfg?.alexa?.albumAliases || {};
     const want = normalizeAliasKey(album);
     for (const [k, v] of Object.entries(aliases)) {
@@ -4713,7 +4761,7 @@ async function resolvePlaylistAlias(playlistRaw) {
   const playlist = String(playlistRaw || '').trim();
   if (!playlist) return '';
   try {
-    const cfg = JSON.parse(await fsp.readFile(RUNTIME_CONFIG_PATH, 'utf8'));
+    const cfg = readEffectiveRuntimeConfig(RUNTIME_CONFIG_PATH);
     const aliases = cfg?.alexa?.playlistAliases || {};
     const want = normalizeAliasKey(playlist);
     for (const [k, v] of Object.entries(aliases)) {
@@ -6064,32 +6112,8 @@ app.post('/mpd/local-output', async (req, res) => {
   }
 });
 
-app.post('/mpd/start-queue', async (req, res) => {
-  try {
-    if (!requireTrackKey(req, res)) return;
-    await mpdQueryRaw('play 0');
-    return res.json({ ok: true, playbackStarted: true });
-  } catch (e) {
-    return res.status(500).json({ ok: false, error: e?.message || String(e) });
-  }
-});
-
-// Start a previously added MPD song by its stable song ID. This is used by
-// Mabel when the record has been reserved while her retrieval sound plays;
-// using playid avoids queue-position races during that short handoff.
-app.post('/mpd/start-song', async (req, res) => {
-  try {
-    if (!requireTrackKey(req, res)) return;
-    const songId = Number(req.body?.songId);
-    if (!Number.isSafeInteger(songId) || songId < 0) {
-      return res.status(400).json({ ok: false, error: 'songId must be a non-negative integer' });
-    }
-    const raw = await mpdQueryRaw(`playid ${songId}`);
-    if (mpdHasACK(raw)) return res.status(409).json({ ok: false, error: 'MPD rejected starting the song' });
-    return res.json({ ok: true, playbackStarted: true, songId });
-  } catch (e) {
-    return res.status(500).json({ ok: false, error: e?.message || String(e) });
-  }
+registerDeferredPlaybackRoutes(app, {
+  requireTrackKey, mpdQueryRaw, mpdHasACK, parseMpdFirstBlock, getMillsIntegrationState,
 });
 
 app.post('/mpd/play-artist', async (req, res) => {
@@ -9181,18 +9205,105 @@ registerArtRoutes(app, {
 });
 
 let mobileVibeStarter = null;
+let sonuviLogin = null;
+const firstAdministratorAuthority = new AdministratorAuthority({
+  stateRoot: RUNTIME_STATE_PATHS.stateRoot,
+  verifyLoginSession: token => sonuviLogin?.verifyAdministratorSession(token),
+});
+const pairingLocalTrust = async () => {
+  if (process.env.SONUVI_LOCAL_HTTPS_ENABLED !== '1') return null;
+  const bundle = await readLocalTLSBundle({stateRoot:process.env.SONUVI_STATE_ROOT || '/var/lib/sonuvi'});
+  if (!bundle) throw new Error('local_tls_unavailable');
+  return localTrustRecord(bundle);
+};
+if (deviceSessions && MOBILE_API_SECRET) {
+  sonuviLogin = new SonuviLogin({
+    directory: path.join(RUNTIME_STATE_PATHS.stateRoot, 'data', 'owner-login'),
+    authority: firstAdministratorAuthority, sessionRegistry: deviceSessions, apiSecret: MOBILE_API_SECRET,
+  });
+  registerLoginRoutes(app, { login: sonuviLogin, canonicalOrigin: process.env.SONUVI_CONTROLLER_WEB_ORIGIN || '',
+    localTrust: async () => {
+      if (process.env.SONUVI_LOCAL_HTTPS_ENABLED !== '1') return null;
+      const bundle = await readLocalTLSBundle({stateRoot:process.env.SONUVI_STATE_ROOT || '/var/lib/sonuvi'});
+      if (!bundle) throw new Error('local_tls_unavailable');
+      return localTrustRecord(bundle);
+    }
+  });
+}
+registerRemoteAccessRoute(app, {stateRoot: RUNTIME_STATE_PATHS.stateRoot});
+const runtimeBrowseIndex = createRuntimeBrowseIndexProvider({
+  freshInstall: FRESH_INSTALL_MODE && process.env.SONUVI_MUSIC_CONFIGURED !== '1',
+  getMpdBrowseIndex,
+  getMpdBrowseIndexStatus,
+});
+const getBrowseIndex = runtimeBrowseIndex.getBrowseIndex;
+configureBrowseIndexQuality({ getAudioQualityRecord: sourceAudioProbe.getRecord });
+const dlnaConfigured = ENABLE_DLNA_MEDIA_SERVER && !RUNTIME_CAPABILITIES.rehearsal && isPrivateLanAddress(DLNA_LAN_ADDRESS) && Number.isInteger(DLNA_PORT) && DLNA_PORT > 0 && DLNA_PORT <= 65535;
+const dlnaArtworkDependencies = { MOODE_BASE_URL, normalizeCoverUrl, dispatcherForUrl, agentForUrl, normalizeArtKey, updateArtCacheIfNeeded, artPath640ForKey, safeIsFile };
+async function readDlnaArtworkForTrack(file) {
+  let statusCode = 500;
+  let body = null;
+  const headers = new Map();
+  const response = {
+    status(code) { statusCode = Number(code) || 500; return this; },
+    set(name, value) { headers.set(String(name).toLowerCase(), String(value)); return this; },
+    send(value) { body = Buffer.isBuffer(value) ? value : Buffer.from(value || ''); return this; },
+    end(value) { if (value !== undefined) this.send(value); return this; },
+  };
+  await serveTrackArtwork(response, file, dlnaArtworkDependencies);
+  const contentType = headers.get('content-type') || '';
+  return statusCode === 200 && body?.length && contentType.startsWith('image/') ? { body, contentType } : null;
+}
+const dlnaMediaServer = createDlnaMediaServer({ enabled: dlnaConfigured, getBrowseIndex: () => getBrowseIndex(MPD_HOST), resolveFile: async (file) => mpdFileToLocalPath(file), readArtworkForTrack: readDlnaArtworkForTrack, mountRoot: PI4_MOUNT_BASE, identityPath: RUNTIME_STATE_PATHS.dlnaMediaServerIdentityPath, localAddress: DLNA_LAN_ADDRESS, port: DLNA_PORT, log });
+const dlnaApp = express();
+dlnaApp.get('/icons/app-192.png', (_req, res) => res.sendFile(path.join(resolveRuntimePublicWebRoot(), 'icons', 'app-192.png')));
+dlnaMediaServer.register(dlnaApp, express);
+const radioFeatures = createRadioFeatureService({ readRadioCatalog: () => readMoodeRadioCatalog() });
+const dlnaRuntime = createDlnaRuntime({
+  enabled: dlnaMediaServer.enabled,
+  listen: () => new Promise((resolve, reject) => {
+    const listener = dlnaApp.listen(DLNA_PORT, DLNA_LAN_ADDRESS);
+    const failed = (error) => { listener.removeListener('listening', ready); reject(error); };
+    const ready = () => { listener.removeListener('error', failed); resolve(listener); };
+    listener.once('error', failed);
+    listener.once('listening', ready);
+  }),
+  initialize: () => dlnaMediaServer.initialize(),
+  startSsdp: async (udn) => {
+    const socket = await startDlnaSsdpResponder({ udn, baseUrl: dlnaMediaServer.baseUrl, localAddress: DLNA_LAN_ADDRESS, log });
+    log.info?.('[dlna] MediaServer isolated at ' + dlnaMediaServer.baseUrl);
+    return socket;
+  },
+  log,
+});
+stopRuntimeForShutdown = () => Promise.all([dlnaRuntime.stop(), hardwareCompatibilityRuntime?.close(), localAdvertisement?.stop(),
+  remoteNativeListener ? new Promise(resolve => { remoteNativeListener.close(resolve); remoteNativeListener.closeAllConnections(); }) : null,
+  localTLSRuntime ? new Promise(resolve => { localTLSRuntime.server.close(resolve); localTLSRuntime.server.closeAllConnections(); }) : null]);
+const startDlnaRuntime = () => dlnaRuntime.start();
+
 
 registerMobileRoutes(app, {
+  localTrust: pairingLocalTrust,
+  sessionRegistry: deviceSessions,
   enabled: MOBILE_API_ENABLED,
   apiSecret: MOBILE_API_SECRET,
   trackIdSecret: MOBILE_TRACK_ID_SECRET,
   enrollmentCode: MOBILE_API_ENROLLMENT_CODE,
   mobileBaseUrl: MOBILE_PUBLIC_BASE_URL,
+  // Keep the optional Mills projection dormant on generic installations. The
+  // private hardware overlay supplies these Harmony values only on Brian's VM.
+  millsIntegrationConfigured: Boolean(HARMONY_HOST && HARMONY_HUB_ID && HARMONY_DENON_DEVICE_ID),
+  getMillsIntegrationState,
   mobileTrackCacheDir: MOBILE_TRACK_CACHE_DIR,
   transcodeTracks: MOBILE_TRANSCODE_TRACKS,
+  animatedArt: { lookup: lookupAnimatedArt, resolveMedia: resolveAnimatedMediaFile },
+  administratorAuthority: firstAdministratorAuthority,
+  dlnaMediaServer,
+  administratorStateRoot: RUNTIME_STATE_PATHS.stateRoot,
   musicLibraryRoot: PI4_MOUNT_BASE,
   videoCatalog: mobileVideoCatalog,
   listeningHistory,
+  radioFeatures,
   pushTokenStore: mobilePushTokenStore,
   apnsConfigured: apnsProvider.isConfigured(),
   apnsTopic: APNS_TOPIC,
@@ -9220,6 +9331,7 @@ registerMobileRoutes(app, {
   fetchPibuzQobuzArtwork: (artworkRef) => pibuzQobuz.fetchArtwork(artworkRef),
   savedQobuzQueueService,
   savedQobuzQueuePlayService,
+  fetchControllerRequest: createMobileControllerBridge({ port: Number(PORT || 3101) }),
   fetchInternalRequest: async (pathname, options = {}) => {
     const routePath = String(pathname || '').startsWith('/') ? String(pathname) : `/${String(pathname || '')}`;
     const method = String(options?.method || 'GET').toUpperCase();
@@ -9266,7 +9378,7 @@ registerMobileRoutes(app, {
   getFavoriteForFile: async (file) => isFavoriteInPlaylist(file),
   ratingsEnabled: async () => {
     try {
-      const cfg = JSON.parse(await fsp.readFile(RUNTIME_CONFIG_PATH, 'utf8'));
+      const cfg = readEffectiveRuntimeConfig(RUNTIME_CONFIG_PATH);
       return Boolean(cfg?.features?.ratings ?? true);
     } catch {
       return true;
@@ -9358,6 +9470,41 @@ registerMobileRoutes(app, {
   },
 });
 
+registerNativeAdministratorConfigurationRoutes(app, {
+  qobuz:{controlPoint:upnpControlPoint,getQobuzNowPlaying:()=>qobuzConnect.get(),releaseQobuzConnect:()=>qobuzConnectController.release()},
+  administratorAuthority: firstAdministratorAuthority,
+  readConfig: async () => readEffectiveRuntimeConfig(RUNTIME_CONFIG_PATH),
+  writeConfig: async (value) => writeNativeRuntimeConfig(value),
+  runtimeProjectionOptions: {
+    environment: process.env,
+    readMusicSource: () => readManagedMusicSource({ stateRoot: process.env.SONUVI_STATE_ROOT || '/var/lib/sonuvi' }),
+    apnsCredentials: {
+      keyId: APNS_KEY_ID,
+      teamId: APNS_TEAM_ID,
+      privateKey: APNS_PRIVATE_KEY,
+      privateKeyPath: APNS_PRIVATE_KEY_PATH,
+      topic: APNS_TOPIC,
+      environment: APNS_ENVIRONMENT,
+    },
+    defaults: { moodeHost: MOODE_SSH_HOST || MPD_HOST || 'moode.local' },
+  },
+  getServerIdentity: () => publicRuntimeReleaseIdentity(RELEASE_IDENTITY),
+  getBrowseIndexStatus: () => runtimeBrowseIndex.getBrowseIndexStatus(MPD_HOST),
+  refreshIndex: () => runtimeBrowseIndex.getBrowseIndex(MPD_HOST, { force: true }),
+  scanLibrary: async () => {
+    startLibraryHealthScan({ getRatingForFile, mpdStickerGetSong });
+    await waitForLibraryHealthScan();
+  },
+  checkEnvironment: async () => nativeRuntimeDiagnostics(readEffectiveRuntimeConfig(RUNTIME_CONFIG_PATH), { execFileP }),
+  getWebAccess: () => ({
+    address: process.env.SONUVI_CONTROLLER_WEB_ORIGIN || null,
+    discovery: 'not-configured-by-native-api',
+    explanation: 'The web service owns its HTTPS origin. This API does not infer an address or change listeners. See the installation web-access record.',
+  }),
+  getLibraryHealthStatus,
+  getDlnaStatus: async () => ({ installed: true, ...dlnaRuntime.status(), ...(dlnaRuntime.status().status === 'running' ? { deviceDescriptionUrl: dlnaMediaServer.baseUrl + '/dlna/device.xml' } : {}) }),
+});
+
 registerRatingRoutes(app, {
   clampRating,
   isStreamPath,
@@ -9390,6 +9537,7 @@ registerQueueRoutes(app, {
 });
 
 registerSeeburgRoutes(app, {
+  getMillsIntegrationState,
   requireTrackKey,
   mpdQueryRaw,
   mpdEscapeValue,
@@ -9399,6 +9547,7 @@ registerSeeburgRoutes(app, {
 });
 
 registerMultiphoneRoutes(app, {
+  getMillsIntegrationState,
   requireTrackKey,
   mpdQueryRaw,
   mpdEscapeValue,
@@ -9632,8 +9781,11 @@ if (!RUNTIME_CAPABILITIES.rehearsal) {
 }
 
 const configRouteHandles = registerAllConfigRoutes(app, {
+  authorizeControllerDispatch,
+  getBrowseIndex: (...args) => getBrowseIndex(...args),
   requireTrackKey,
   log,
+  radioFeatures,
   trackKey: TRACK_KEY,
   getLocalHistoryItems: ({ kind, limit, period, windowDays, baseUrl, trackKey } = {}) => listeningHistory.getItems(kind, {
     limit,
@@ -9955,10 +10107,40 @@ app.post('/youtube/queue', async (req, res) => {
   }
 });
 
-app.listen(PORT, '0.0.0.0', () => {
+if (hardwareCompatibilityConfig.enabled) {
+  hardwareCompatibilityRuntime = createHardwareCompatibilityServer({ config: hardwareCompatibilityConfig, trackKey: TRACK_KEY });
+  hardwareCompatibilityRuntime.server.on('error', () => {
+    log.error('Hardware compatibility listener failed; refusing partial startup');
+    stopRuntimeForShutdown().finally(() => process.exit(1));
+  });
+}
+
+if (process.env.SONUVI_LOCAL_HTTPS_ENABLED === '1') {
+  remoteNativeListener = createRemoteNativeListener(app);
+  await new Promise((resolve, reject) => {
+    remoteNativeListener.once('error', reject);
+    remoteNativeListener.listen(REMOTE_PROXY_PORT, '127.0.0.1', resolve);
+  });
+  localTLSRuntime = await loadLocalTLSListener({stateRoot:process.env.SONUVI_STATE_ROOT || '/var/lib/sonuvi',handler:app,
+    onReloadError:()=>log.error('Local HTTPS renewal unavailable; existing trust is unchanged')});
+  if (!localTLSRuntime) throw new Error('local_tls_required');
+  await new Promise((resolve,reject) => {
+    localTLSRuntime.server.once('error',reject);
+    localTLSRuntime.server.listen(LOCAL_TLS_PORT,'0.0.0.0',resolve);
+  });
+  const bundle = await readLocalTLSBundle({stateRoot:process.env.SONUVI_STATE_ROOT || '/var/lib/sonuvi'});
+  localAdvertisement = startLocalAdvertisement({serverId:bundle.serverId,
+    onUnavailable:()=>log.warn('Local Server discovery unavailable; use the verified setup/recovery connection')});
+}
+
+app.listen(PORT, API_LISTEN_HOST, () => {
+  if (hardwareCompatibilityRuntime) {
+    hardwareCompatibilityRuntime.server.listen(hardwareCompatibilityConfig.port, hardwareCompatibilityConfig.host);
+  }
   log.debug(`moOde now-playing server running on port ${PORT}`);
   log.debug(`Endpoint: http://${LOCAL_ADDRESS}:${PORT}/now-playing`);
   log.debug(`Endpoint: http://${LOCAL_ADDRESS}:${PORT}/next-up`);
+  startDlnaRuntime();
   log.debug(`Public: ${PUBLIC_BASE_URL}`);
   log.debug(`Alexa routes enabled? ${ENABLE_ALEXA ? 'YES' : 'NO'}`);
 });

@@ -70,6 +70,32 @@ let libraryHealthCache = null;
 let libraryHealthJob = null;
 let libraryGenresCache = null;
 
+/**
+ * Read-only state for native administration. This never starts an MPD scan or
+ * refresh; it reports only an existing Library Health result and its job.
+ */
+export function getLibraryHealthStatus({ now = () => Date.now() } = {}) {
+  const cachedAt = Number(libraryHealthCache?.cachedAt || 0);
+  const payload = libraryHealthCache?.payload || null;
+  const summary = payload?.summary || {};
+  const timestamp = Number(now());
+  return Object.freeze({
+    available: Boolean(payload),
+    lastSuccessfulAt: payload?.generatedAt || null,
+    cache: payload && Number.isFinite(cachedAt)
+      ? { ageMs: Math.max(0, timestamp - cachedAt), ttlMs: LIB_HEALTH_CACHE_TTL_MS }
+      : null,
+    counts: {
+      albums: Number.isFinite(Number(summary.totalAlbums)) ? Math.max(0, Number(summary.totalAlbums)) : null,
+      tracks: Number.isFinite(Number(summary.totalTracks)) ? Math.max(0, Number(summary.totalTracks)) : null,
+    },
+    refresh: {
+      running: Boolean(libraryHealthJob?.promise),
+      startedAt: libraryHealthJob?.startedAt || null,
+    },
+  });
+}
+
 async function computeLibraryHealthSnapshot({ sampleLimit, scanLimit, getRatingForFile, mpdStickerGetSong }) {
   const started = Date.now();
   const isAudio = (f) => /\.(flac|mp3|m4a|aac|ogg|opus|wav|aiff|alac|dsf|wv|ape)$/i.test(String(f || ''));
@@ -196,6 +222,24 @@ async function computeLibraryHealthSnapshot({ sampleLimit, scanLimit, getRatingF
   };
 }
 
+export function waitForLibraryHealthScan() { return libraryHealthJob?.promise ?? Promise.resolve(); }
+
+export function startLibraryHealthScan({ sampleLimit = 100, scanLimit = Number.MAX_SAFE_INTEGER, getRatingForFile, mpdStickerGetSong }) {
+  if (libraryHealthJob?.promise) return { ok:true, started:false, running:true, startedAt:libraryHealthJob.startedAt };
+      const startedAt = new Date().toISOString();
+      const promise = computeLibraryHealthSnapshot({ sampleLimit, scanLimit, getRatingForFile, mpdStickerGetSong })
+        .then((payload) => {
+          libraryHealthCache = { payload, cachedAt: Date.now() };
+          return payload;
+        })
+        .finally(() => {
+          libraryHealthJob = null;
+        });
+
+      libraryHealthJob = { startedAt, promise };
+      return { ok: true, started: true, running: true, startedAt };
+}
+
 export function registerConfigLibraryHealthReadRoutes(app, deps) {
   const { requireTrackKey, mpdQueryRaw, getRatingForFile, mpdStickerGetSong } = deps;
 
@@ -278,27 +322,10 @@ export function registerConfigLibraryHealthReadRoutes(app, deps) {
   app.post('/config/library-health/refresh', async (req, res) => {
     try {
       if (!requireTrackKey(req, res)) return;
-      if (libraryHealthJob?.promise) {
-        return res.json({ ok: true, started: false, running: true, startedAt: libraryHealthJob.startedAt });
-      }
       const sampleLimit = Math.max(10, Math.min(500, Number(req.body?.sampleLimit || req.query?.sampleLimit || 100)));
-      const scanLimit =
-        req.body?.scanLimit != null || req.query?.scanLimit != null
-          ? Math.max(100, Math.min(200000, Number(req.body?.scanLimit || req.query?.scanLimit || 100)))
-          : Number.MAX_SAFE_INTEGER;
-
-      const startedAt = new Date().toISOString();
-      const promise = computeLibraryHealthSnapshot({ sampleLimit, scanLimit, getRatingForFile, mpdStickerGetSong })
-        .then((payload) => {
-          libraryHealthCache = { payload, cachedAt: Date.now() };
-          return payload;
-        })
-        .finally(() => {
-          libraryHealthJob = null;
-        });
-
-      libraryHealthJob = { startedAt, promise };
-      return res.json({ ok: true, started: true, running: true, startedAt });
+      const scanLimit = req.body?.scanLimit != null || req.query?.scanLimit != null
+        ? Math.max(100, Math.min(200000, Number(req.body?.scanLimit || req.query?.scanLimit || 100))) : Number.MAX_SAFE_INTEGER;
+      return res.json(startLibraryHealthScan({ sampleLimit, scanLimit, getRatingForFile, mpdStickerGetSong }));
     } catch (e) {
       return res.status(500).json({ ok: false, error: e?.message || String(e) });
     }
