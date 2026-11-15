@@ -9,8 +9,9 @@ https://sonuvi.local {
     header Origin *
     not header Origin https://sonuvi.local
   }
-  respond @foreign 403
   @sameOrigin header Origin https://sonuvi.local
+  route {
+  respond @foreign 403
   handle @sameOrigin {
     reverse_proxy https://127.0.0.1:8444 {
       header_up Host sonuvi-generated.local:8444
@@ -29,5 +30,6 @@ https://sonuvi.local {
         tls_trusted_ca_certs /etc/caddy/sonuvi-upstream-root.pem
       }
     }
+  }
   }
 }
