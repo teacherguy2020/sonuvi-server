@@ -925,8 +925,8 @@ async function loadEpisodes() {
       setStatus('Refreshing subscription state…');
       logEl.textContent = '';
 
-      log('→ GET /podcasts/refresh');
-      const j = await apiGet('/podcasts/refresh');
+      log('→ GET /podcasts');
+      const j = await apiGet('/podcasts');
 
       renderSubscriptions(j.items || []);
       log('✓ Loaded subscriptions', { count: (j.items || []).length });
