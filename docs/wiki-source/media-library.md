@@ -147,3 +147,26 @@ At the moment, this page establishes Media Library as a real top-level branch in
 That matters because the underlying content already existed, but the branch identity was still weaker than the DeepWiki model.
 
 *Last reviewed: 2026-10-28 America/Chicago*
+
+## Music-only album browsing
+
+Album listings and Recently Added Albums contain music only. Podcasts and videos
+remain available through their dedicated Podcasts and Videos navigation, not as
+albums. The server applies this distinction to recent shelves, browser album
+lists/details, and native album/artist projections.
+
+Classification uses explicit podcast/video flags, dedicated path segments, and
+video file formats, never words in album titles or artist names. A music album
+with bonus videos keeps its audio tracks, music artwork and music-only counts.
+The full source index and opaque track identities remain intact for existing
+queues and dedicated media playback; no rescan, deletion or playlist rewrite is
+needed.
+
+Implementation: `src/lib/music-library-counts.mjs`,
+`src/lib/mobile-track-identity.mjs`, `src/lib/mobile-home-rows.mjs`, and
+`src/routes/config.browse.routes.mjs`. Regression coverage includes persisted
+browse indexes, the library-health recent cache, pagination, mixed albums, and
+unchanged playback identities. This is the current branch implementation; live
+rollout is tracked separately.
+
+Updated: 2026-11-16
