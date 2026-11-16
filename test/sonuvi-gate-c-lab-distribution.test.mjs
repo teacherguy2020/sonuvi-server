@@ -20,7 +20,7 @@ async function sha256(file) {
   return crypto.createHash('sha256').update(await fs.readFile(file)).digest('hex');
 }
 
-async function fixture(t, { expiresAt = new Date(Date.now() + 60_000).toISOString(), bootstrapVersion = 1 } = {}) {
+async function fixture(t, { expiresAt = null, bootstrapVersion = 1 } = {}) {
   const parent = await fs.mkdtemp(path.join(os.tmpdir(), 'sonuvi-gate-c-lab-distribution-'));
   const root = path.join(parent, releaseId);
   await fs.mkdir(root);

@@ -29,7 +29,7 @@ function envelope() {
     artifact: { format: GATE_C_RELEASE_TRANSFER_FORMAT, sha256: 'a'.repeat(64), bytes: 1024 },
     bootstrap: { version: 1, sha256: 'b'.repeat(64) },
     issuedAt: '2026-11-05T00:00:00.000Z',
-    expiresAt: '2026-12-05T00:00:00.000Z',
+    expiresAt: null,
   };
   return Object.freeze({
     manifest,

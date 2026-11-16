@@ -27,7 +27,7 @@ async function fixture(t) {
   return root;
 }
 
-function signedRequest({ artifactSha256 = crypto.createHash('sha256').update(artifact).digest('hex'), issuedAt = new Date(), expiresAt = new Date(issuedAt.getTime() + (7 * 24 * 60 * 60 * 1000)) } = {}) {
+function signedRequest({ artifactSha256 = crypto.createHash('sha256').update(artifact).digest('hex'), issuedAt = new Date(), expiresAt = null } = {}) {
   const pair = crypto.generateKeyPairSync('ed25519');
   const payload = {
     contract: GATE_C_RELEASE_METADATA_CONTRACT,
@@ -37,7 +37,7 @@ function signedRequest({ artifactSha256 = crypto.createHash('sha256').update(art
     artifact: { format: GATE_C_RELEASE_TRANSFER_FORMAT, sha256: artifactSha256, bytes: artifact.length },
     bootstrap: { version: 1, sha256: 'b'.repeat(64) },
     issuedAt: issuedAt.toISOString(),
-    expiresAt: expiresAt.toISOString(),
+    expiresAt: expiresAt === null ? null : expiresAt.toISOString(),
   };
   return {
     request: {
