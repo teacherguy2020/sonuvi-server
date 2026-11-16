@@ -92,6 +92,15 @@ The Sonuvi API host handles state normalization, web routes, metadata, queue too
 
 The native iOS app also supports selected device-local workflows without an active Sonuvi Server. Supported sources and playback destinations vary by configuration.
 
+## Public guided installer preview
+
+Signed Linux ARM64 installation packages are available in [GitHub Releases](https://github.com/teacherguy2020/sonuvi-server/releases/tag/server-installer-2026.11.15-d43214c4).
+The updated Sonuvi iOS guided installer downloads them directly from GitHub;
+no maintainer LAN access or GitHub login is required. A compatible iOS development
+build and a clean supported Debian 13 ARM64 SSH host are required. The app is
+not yet publicly distributed, and this is not a standalone terminal or Docker
+installer. See [installation steps, verification and limitations](./docs/runbooks/public-ios-installer.md).
+
 ## Quick start: Sonuvi Server with moOde
 
 1. Have a working moOde/MPD player reachable on your LAN.
