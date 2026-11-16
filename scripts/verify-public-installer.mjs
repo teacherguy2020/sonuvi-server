@@ -4,17 +4,18 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { verifySignedGateCReleaseMetadata } from '../src/lib/sonuvi-gate-c-release.mjs';
 import { loadGateCLabDistribution } from '../src/lib/sonuvi-gate-c-lab-distribution.mjs';
 
-const releaseId = 'sonuvi-d43214c4bab3000d469b39fcb2d55cff4a2832c95a538a0f7c13d8288e6fde53';
-const tag = 'server-installer-2026.11.15-d43214c4';
+const releaseId = 'sonuvi-2f5fe4d12b5d6a28145ec7c037b07d5f87b9dfd1df7ae09f67308053bfb2374c';
+const tag = 'server-installer-2026.11.15-no-deadline-2f5fe4d1';
 const base = `https://github.com/teacherguy2020/sonuvi-server/releases/download/${tag}/`;
 const expected = {
-  archive: 'b166f72982363ba43053c4d337b21244f282ce761b08ff89fa943b6efad996d1',
+  archive: 'a11707593c4b515bc0832a0483ee8bb31de34444d34092c2a43a61fb277da946',
   archiveBytes: 54042112,
-  bootstrap: '09dbd046a4a0d698b41f87fe7aca9ccbd103c5b3d9311fae7892fc6d81095c95',
-  envelope: '5b0f32c043fdff1243ca7c9adbfcdd25f882b3f7ff5f1f7d84b8e71826d4bfdc',
-  manifest: '44774849f3f0ff788ed0e1401a610a572d58e141df85561c1c6e1142a94640c4',
+  bootstrap: '25f19c773ef12330a7435094bf2514e3e03ee82363b130e0e10cf90cd6ddd9ab',
+  envelope: 'fb27dca9b8289cbd7be952acaee653bf2f3ec728b9d9bc4b8dcf38f524c182e8',
+  manifest: 'de8e58e5b75ecaba65cfd78559391dd951420b7bfd0c326cabe080a7b014158a',
   signer: 'w7kQBpYG5LGnoJvbAdiN1O7pde8QZkdEoJU0sIFjYkg',
 };
 const archive = `${releaseId}-linux-arm64.tar`;
@@ -58,7 +59,13 @@ try {
     .export({ type: 'spki', format: 'der' })).digest('base64url');
   if (signer !== expected.signer) throw new Error('Untrusted signer');
   const verified = await loadGateCLabDistribution({ releaseRoot });
-  const metadata = JSON.parse(await fs.readFile(path.join(releaseRoot, 'release-envelope.json'))).payload;
+  const envelope = JSON.parse(await fs.readFile(path.join(releaseRoot, 'release-envelope.json')));
+  const metadata = envelope.payload;
+  if (metadata.expiresAt !== null) throw new Error('Public installer must have no deadline');
+  const trustedAnchors = { [envelope.keyId]: publicKey.toString('utf8') };
+  for (const date of ['2026-12-16', '2100-01-01', '2500-01-01']) {
+    verifySignedGateCReleaseMetadata({ envelope, trustedAnchors, now: Date.parse(date) });
+  }
   if (verified.releaseId !== releaseId || metadata.manifestSha256 !== expected.manifest
     || verified.assets.get(archive).sha256 !== expected.archive
     || verified.assets.get(archive).bytes !== expected.archiveBytes
