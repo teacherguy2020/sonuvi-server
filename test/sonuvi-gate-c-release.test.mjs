@@ -65,3 +65,21 @@ test('release transfer cannot continue if its exact signed byte length or digest
   assert.throws(() => verifyGateCReleaseTransfer({ metadata, bytes: 1023, sha256: artifactSha256 }), /byte count/);
   assert.throws(() => verifyGateCReleaseTransfer({ metadata, bytes: 1024, sha256: 'd'.repeat(64) }), /digest/);
 });
+
+
+test('explicit signed null expiry remains valid decades later without weakening authenticity', () => {
+  const { envelope, anchors } = signedEnvelope({ mutate: value => ({ ...value, expiresAt: null }) });
+  for (const date of ['2026-12-16', '2100-01-01', '2500-01-01']) {
+    const verified = verifySignedGateCReleaseMetadata({ envelope, trustedAnchors: anchors, now: Date.parse(date) });
+    assert.equal(verified.metadata.expiresAt, null);
+    verifyGateCReleaseTransfer({ metadata: verified.metadata, bytes: 1024, sha256: artifactSha256 });
+  }
+  const dated = signedEnvelope();
+  assert.throws(() => verifySignedGateCReleaseMetadata({ envelope: { ...dated.envelope, payload: { ...dated.envelope.payload, expiresAt: null } }, trustedAnchors: dated.anchors }), /signature/);
+  for (const expiresAt of ['', 0, false, {}, 'not-a-date']) {
+    const invalid = signedEnvelope({ mutate: value => ({ ...value, expiresAt }) });
+    assert.throws(() => verifySignedGateCReleaseMetadata({ envelope: invalid.envelope, trustedAnchors: invalid.anchors }), /invalid/);
+  }
+  const missing = signedEnvelope({ mutate: value => { delete value.expiresAt; return value; } });
+  assert.throws(() => verifySignedGateCReleaseMetadata({ envelope: missing.envelope, trustedAnchors: missing.anchors }), /unsupported fields/);
+});

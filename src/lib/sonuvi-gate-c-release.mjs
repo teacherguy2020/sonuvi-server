@@ -59,8 +59,9 @@ export function normalizeGateCReleaseMetadata(input = {}) {
   sameKeys(input.artifact, ['bytes', 'format', 'sha256'], 'release metadata artifact');
   sameKeys(input.bootstrap, ['sha256', 'version'], 'release metadata bootstrap');
   const issuedAt = timestamp(input.issuedAt, 'release metadata issuedAt');
-  const expiresAt = timestamp(input.expiresAt, 'release metadata expiresAt');
-  if (Date.parse(expiresAt) <= Date.parse(issuedAt)) throw new Error('release metadata expiry is invalid');
+  // Explicit signed null means no installation deadline; missing/malformed fields still fail.
+  const expiresAt = input.expiresAt === null ? null : timestamp(input.expiresAt, 'release metadata expiresAt');
+  if (expiresAt !== null && Date.parse(expiresAt) <= Date.parse(issuedAt)) throw new Error('release metadata expiry is invalid');
   if (input.target.os !== 'linux' || input.target.architecture !== 'arm64') {
     throw new Error('release metadata target is unsupported');
   }
@@ -114,7 +115,7 @@ export function verifySignedGateCReleaseMetadata({ envelope, trustedAnchors, now
     throw new Error('release trust anchor is invalid');
   }
   if (!verified) throw new Error('release metadata signature is invalid');
-  if (!Number.isFinite(now) || Date.parse(metadata.expiresAt) <= now) throw new Error('release metadata has expired');
+  if (!Number.isFinite(now) || (metadata.expiresAt !== null && Date.parse(metadata.expiresAt) <= now)) throw new Error('release metadata has expired');
   return Object.freeze({ keyId, metadata });
 }
 
