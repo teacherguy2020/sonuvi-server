@@ -31,7 +31,7 @@ test('actual configuration page synchronizes forms and JSON through real validat
       }
       if(url.pathname==='/__controller/config.js' || url.pathname==='/scripts/controller-browser-auth.js') return route.fulfill({contentType:'text/javascript',body:''});
       const file=url.pathname==='/config.html'?'config.html':url.pathname.slice(1);
-      if(!['config.html','scripts/config-theme.js','scripts/master-configuration-editor.mjs','scripts/master-configuration-draft.mjs'].includes(file)) return route.abort();
+      if(!['config.html','scripts/master-configuration-editor.mjs','scripts/master-configuration-draft.mjs'].includes(file)) return route.abort();
       return route.fulfill({contentType:file.endsWith('.html')?'text/html':'text/javascript',body:await fs.readFile(new URL('../'+file,import.meta.url),'utf8')});
     });
     await page.goto('http://configuration.test/config.html');
