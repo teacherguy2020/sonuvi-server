@@ -7,15 +7,15 @@ import path from 'node:path';
 import { verifySignedGateCReleaseMetadata } from '../src/lib/sonuvi-gate-c-release.mjs';
 import { loadGateCLabDistribution } from '../src/lib/sonuvi-gate-c-lab-distribution.mjs';
 
-const releaseId = 'sonuvi-2f5fe4d12b5d6a28145ec7c037b07d5f87b9dfd1df7ae09f67308053bfb2374c';
-const tag = 'server-installer-2026.11.15-no-deadline-2f5fe4d1';
+const releaseId = 'sonuvi-8f9324e7adb529e6c7c31bef03e687e7f35754cdc7608be29414dbb60f79229b';
+const tag = 'server-installer-2026.11.17-no-deadline-8f9324e7';
 const base = `https://github.com/teacherguy2020/sonuvi-server/releases/download/${tag}/`;
 const expected = {
-  archive: 'a11707593c4b515bc0832a0483ee8bb31de34444d34092c2a43a61fb277da946',
-  archiveBytes: 54042112,
-  bootstrap: '25f19c773ef12330a7435094bf2514e3e03ee82363b130e0e10cf90cd6ddd9ab',
-  envelope: 'fb27dca9b8289cbd7be952acaee653bf2f3ec728b9d9bc4b8dcf38f524c182e8',
-  manifest: 'de8e58e5b75ecaba65cfd78559391dd951420b7bfd0c326cabe080a7b014158a',
+  archive: '7321b2bf97f1056f00a7af83fbc76e800b7fda3ba4e46baedebbdeef8df0687a',
+  archiveBytes: 54049280,
+  bootstrap: 'bbd774b4ba3cb64cbcf3c12cf2035d895a2bdbcfc89979c1d68f2040b4e65b27',
+  envelope: '5ecfe42cef50f6aa87f7069c1f0ee13f3dd075dc19968a82c97e1df84471bdad',
+  manifest: 'f727357f239884689eacc10dfae0c0770bebef09ba1e6ed441f53a15de8e7648',
   signer: 'w7kQBpYG5LGnoJvbAdiN1O7pde8QZkdEoJU0sIFjYkg',
 };
 const archive = `${releaseId}-linux-arm64.tar`;

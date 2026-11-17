@@ -1,8 +1,8 @@
 # Public iOS-guided server installation
 
-## Current — 2026-11-15
+## Current — 2026-11-17
 
-The signed first-install package is available from the public [GitHub prerelease](https://github.com/teacherguy2020/sonuvi-server/releases/tag/server-installer-2026.11.15-no-deadline-2f5fe4d1). The updated iOS production installer retrieves it over normal public HTTPS, without GitHub credentials or access to the maintainer's LAN. Older LAN-bound app binaries must be updated; this is not an App Store or TestFlight release.
+The signed first-install package is available from the public [GitHub prerelease](https://github.com/teacherguy2020/sonuvi-server/releases/tag/server-installer-2026.11.17-no-deadline-8f9324e7). The updated iOS production installer retrieves it over normal public HTTPS, without GitHub credentials or access to the maintainer's LAN. Older LAN-bound app binaries must be updated; this is not an App Store or TestFlight release.
 
 ### Installation
 
@@ -15,7 +15,7 @@ This preview is not an AMD64, Docker, standalone terminal, or existing-server up
 
 ### Trust and lifecycle
 
-Release ID: `sonuvi-2f5fe4d12b5d6a28145ec7c037b07d5f87b9dfd1df7ae09f67308053bfb2374c`, source `c86ac078f1d2019d37c91d5bce513fd1328f6867`. The eight assets are newly built/signed for the explicit non-expiring policy; the prior publication is not overwritten. Historical `lab` names and handoff markers are retained provenance, not a requirement to reach a laboratory download server.
+Release ID: `sonuvi-8f9324e7adb529e6c7c31bef03e687e7f35754cdc7608be29414dbb60f79229b`, source `925d7f4855045d87432f74361553c2e7621ba8d7`. The eight assets reuse the exact verified signed Server release already deployed to the Pi5, with a refreshed public guide/checksum inventory. The prior publications are not overwritten. The package includes music-only album listings, configured idle-display branding, Safari configuration layout and theme-token corrections. Historical `lab` names and handoff markers are retained provenance, not a requirement to reach a laboratory download server.
 
 The app accepts only the fixed GitHub release path and HTTPS release-CDN redirects. GitHub transport uses system certificate trust; the independently compiled Ed25519 signer and release/manifest/archive/bootstrap/envelope pins still authenticate the installer. The target's SSH host-key and server pairing protections are unchanged. Existing-upgrade v2 distribution remains separate and LAN-bound; it is not represented as public-ready.
 
@@ -43,3 +43,15 @@ closed. Signature, signer pin, package/manifest/bootstrap hashes, byte counts,
 SSH host verification and ownership checks remain mandatory. Pairing/login
 expiry is unrelated and unchanged. Old installed apps require an app update.
 The separate existing-install v2 LAN distribution is not republished here.
+
+## Current Server snapshot — 2026-11-17
+
+The immutable November 15 no-deadline release remains valid but is superseded
+for new installs by the November 17 package above. The new app must update its
+release URL, artifact/manifest/bootstrap/envelope pins and independent ownership
+compatibility binding together. Old app binaries continue to retrieve only
+their own reviewed historical release; no verifier bypass or silent substitution.
+
+The package contains Server code, not the maintainer’s installed settings. Fresh
+installations configure their own player, library, DLNA interface and optional
+remote access. The running Pi5 is not reinstalled or restarted by publication.
