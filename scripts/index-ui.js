@@ -29,8 +29,8 @@ let idleClockMoveTimer = 0;
 let idleClockMoveIndex = 0;
 let idleBrandingLastFetch = 0;
 let idleBrandingFetchPromise = null;
-let idleBrandLine = 'Clem’s Place';
-let idleMessageLine = 'The record room is quiet';
+let idleBrandLine = 'Sonuvi';
+let idleMessageLine = 'Ready to play';
 let fgReqToken = 0;     // monotonically increasing request id
 let motionReqToken = 0;
 const PODCAST_GENRES = new Set([
@@ -130,6 +130,19 @@ function ensureIdleOverlay() {
   return el;
 }
 
+// Display completion follows transport state, not the presence of stale tags.
+// A paused track and the physical Mills source retain their normal artwork.
+function syncIdleScreen(data) {
+  const page = String(location.pathname || '').toLowerCase();
+  const surface = page === '/' || page === '' || /(?:^|\/)(?:index|player-render|player)\.html$/.test(page);
+  const state = String(data?.state || data?.status || '').trim().toLowerCase();
+  const hasPlayable = ['file', 'title', 'artist', 'displayTitle', 'displayArtist'].some(key => String(data?.[key] || '').trim()) || data?.isStream === true;
+  const mills = data?.millsMode === true || data?.displayMode === 'mills';
+  const idle = surface && !mills && (['stop', 'stopped', 'idle'].includes(state) || (['pause', 'paused'].includes(state) && !hasPlayable));
+  setIdleOverlayVisible(idle);
+  return idle;
+}
+
 async function refreshIdleBranding(force = false) {
   const now = Date.now();
   if (!force && (now - idleBrandingLastFetch) < 5000) return;
@@ -139,8 +152,8 @@ async function refreshIdleBranding(force = false) {
       const r = await fetch(`${API_BASE}/config/runtime`, { cache: 'no-store' });
       const j = await r.json().catch(() => ({}));
       if (r.ok && j?.ok) {
-        idleBrandLine = String(j?.config?.display?.idleBrandLine || idleBrandLine).trim() || 'Clem’s Place';
-        idleMessageLine = String(j?.config?.display?.idleMessageLine || idleMessageLine).trim() || 'The record room is quiet';
+        idleBrandLine = String(j?.config?.display?.idleBrandLine || idleBrandLine).trim() || 'Sonuvi';
+        idleMessageLine = String(j?.config?.display?.idleMessageLine || idleMessageLine).trim() || 'Ready to play';
         const brand = document.querySelector('#np-idle-overlay .np-idle-brand');
         const message = document.querySelector('#np-idle-overlay .np-idle-status');
         if (brand) brand.textContent = idleBrandLine;
@@ -304,8 +317,8 @@ async function loadRatingsFeatureFlag() {
     if (r.ok && j?.ok) {
       RATINGS_ENABLED = Boolean(j?.config?.features?.ratings ?? true);
       PERSONNEL_ENABLED = Boolean(j?.config?.features?.albumPersonnel ?? true);
-      idleBrandLine = String(j?.config?.display?.idleBrandLine || idleBrandLine).trim() || 'Clem’s Place';
-      idleMessageLine = String(j?.config?.display?.idleMessageLine || idleMessageLine).trim() || 'The record room is quiet';
+      idleBrandLine = String(j?.config?.display?.idleBrandLine || idleBrandLine).trim() || 'Sonuvi';
+      idleMessageLine = String(j?.config?.display?.idleMessageLine || idleMessageLine).trim() || 'Ready to play';
       if (!RATINGS_ENABLED) {
         ratingDisabled = true;
         renderStars(0);
@@ -1709,7 +1722,9 @@ function fetchNowPlaying() {
       }
 
       const pauseOrStop = isPauseOrStopState(data);
-      const screensaverEligible = !isAirplay && !isMobileEnv();
+      // Update even when the song identity has not changed at queue end.
+      const idleScreen = syncIdleScreen(data);
+      const screensaverEligible = !idleScreen && !isAirplay && !isMobileEnv();
 
       if (pauseOrStop && screensaverEligible && !isMillsMode) {
         if (!pauseOrStopSinceTs) pauseOrStopSinceTs = Date.now();
@@ -3110,29 +3125,7 @@ function updateUI(data) {
   if (favHeartEl) favHeartEl.style.display = isYoutubeNow ? 'none' : '';
   if (infoHotspotEl) infoHotspotEl.style.display = isYoutubeNow ? 'none' : '';
 
-  try {
-    const page = String(location.pathname || '').toLowerCase();
-    const playerLike = page.endsWith('/player-render.html') || page.endsWith('player-render.html') || page.endsWith('/player.html') || page.endsWith('player.html');
-    const hasPlayable = !!String(data?.file || '').trim() || !!String(data?.title || '').trim() || !!String(data?.artist || '').trim() || !!data?.isStream;
-    // The physical moOde display is blanked by X11/DPMS and woken by the
-    // moOde watchdog. While awake, show a deliberate idle screen instead of
-    // exposing empty artwork, rating, and transport placeholders.
-    const stopped = isPauseOrStopState(data);
-    // Empty queue should enter the deliberate idle view immediately only on
-    // the static Player/index surfaces. Controller pages retain their own
-    // mobile/tablet idle behavior and must not show the clock overlay.
-    const pagePath = String(location.pathname || '').toLowerCase();
-    const idleClockSurface =
-      pagePath === '/' ||
-      pagePath === '' ||
-      pagePath.endsWith('/index.html') ||
-      pagePath.endsWith('index.html') ||
-      pagePath.endsWith('/player-render.html') ||
-      pagePath.endsWith('player-render.html') ||
-      pagePath.endsWith('/player.html') ||
-      pagePath.endsWith('player.html');
-    setIdleOverlayVisible(idleClockSurface && stopped && !hasPlayable);
-  } catch {}
+  syncIdleScreen(data);
 
   // Alexa mode: brute-force art refresh by file, independent of art cache/crossfade logic.
   if (currentAlexaMode && artEl) {
