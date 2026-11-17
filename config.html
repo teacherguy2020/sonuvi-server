@@ -7,13 +7,14 @@
   <script src="/__controller/config.js"></script>
   <script src="scripts/controller-browser-auth.js"></script>
   <style>
-    :root{color-scheme:dark;font:14px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--bg:#101b1c;--card:#192526;--line:#304142;--soft:#263c39;--accent:#b4d3b6;--text:#f0f1e9;--muted:#a3b4b3}
+    :root{color-scheme:dark;font:14px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--bg:var(--theme-bg,#0c1526);--card:var(--theme-hero-card-bg,rgba(10,18,34,.45));--line:var(--theme-rail-border,#2a3a58);--soft:var(--theme-card-secondary-fill,#0f1a31);--text:var(--theme-text,#e7eefc);--muted:var(--theme-text-secondary,#9fb1d9);--control-bg:var(--theme-tab-bg,#0f1a31);--control-text:var(--theme-tab-text,#e7eefc);--active-bg:var(--theme-tab-active-bg,#3357d6);--active-text:var(--theme-tab-active-text,#fff);--hover-bg:var(--theme-tab-hover-bg,#2f4f93);--accent:var(--control-text)}
     *{box-sizing:border-box}body{margin:0 auto;max-width:1220px;padding:36px 34px;background:var(--bg);color:var(--text)}
     h1{font-size:34px;letter-spacing:-1px;font-weight:620;margin:10px 0}h2{font-size:18px;letter-spacing:-.3px}p{line-height:1.6;color:var(--muted)}
     .eyebrow{font-size:10px;letter-spacing:1.8px;text-transform:uppercase;color:var(--accent);font-weight:650}.intro{margin-bottom:26px}.intro p{margin:0}
-    button,input,select,textarea{font:inherit;color:var(--text)}button,input:not([type=checkbox]),select,textarea{background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:10px 13px;max-width:100%}
-    button{cursor:pointer}button:hover{border-color:var(--accent);background:var(--soft)}button:disabled{opacity:.5;cursor:default}button:focus-visible,input:focus-visible,summary:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:3px}input[type=checkbox]{accent-color:var(--accent);width:18px;height:18px}a{color:var(--accent)}
-    .collection-toolbar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin:22px 0}.collection-filters{display:flex;flex-wrap:wrap;gap:6px}.collection-filters button{background:transparent;border-color:transparent;color:var(--muted)}.collection-filters button[aria-pressed=true]{color:var(--text);background:var(--soft);border-color:var(--line)}.collection-search{margin-left:auto;width:240px;min-width:0;flex:1 1 220px}.collection-add{margin-left:auto}
+    button,input,select,textarea{font:inherit;color:var(--control-text)}button,input:not([type=checkbox]),select,textarea{background:var(--control-bg);border:1px solid var(--line);border-radius:7px;padding:10px 13px;max-width:100%}
+    button{cursor:pointer}button:hover{border-color:var(--line);background:var(--hover-bg);color:var(--control-text)}button:disabled{opacity:.5;cursor:default}button:focus-visible,input:focus-visible,summary:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid var(--active-bg);outline-offset:3px}input[type=checkbox]{accent-color:var(--active-bg);width:18px;height:18px}a{color:var(--accent)}
+    input::placeholder,textarea::placeholder{color:var(--muted);opacity:1}
+    .collection-toolbar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin:22px 0}.collection-filters{display:flex;flex-wrap:wrap;gap:6px}.collection-filters button{background:transparent;border-color:transparent;color:var(--muted)}.collection-filters button[aria-pressed=true]{color:var(--active-text);background:var(--active-bg);border-color:var(--line)}.collection-search{margin-left:auto;width:240px;min-width:0;flex:1 1 220px}.collection-add{margin-left:auto}
     .plugin-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;align-items:stretch}
     .plugin-card{min-width:0;margin:0;padding:24px;border:1px solid var(--line);border-radius:13px;background:var(--card);display:flex;flex-direction:column}
     .card-header{display:flex;align-items:center;justify-content:space-between;gap:14px;min-height:39px}
@@ -37,16 +38,17 @@
     .card-body button{margin:6px 10px 6px 0;white-space:normal;overflow-wrap:anywhere}
     .card-body fieldset{min-width:0;border:1px solid var(--line);border-radius:8px;margin:12px 0;padding:14px}
     .card-body fieldset legend{max-width:100%;padding:0 5px;font-size:14px;line-height:1.4;margin:0;overflow-wrap:anywhere}
-    [hidden]{display:none!important}.configuration-status{white-space:pre-wrap;font-size:12px;overflow-wrap:anywhere}.collection-empty{padding:30px;text-align:center;border:1px dashed var(--line);border-radius:12px}.optional-integrations,.advanced-settings{margin-top:24px;border:1px solid var(--line);border-radius:12px;padding:18px 22px;background:var(--card)}summary{cursor:pointer}.optional-integrations button{margin:12px 10px 0 0}.advanced-settings textarea{width:100%;margin-top:14px;font:13px ui-monospace,monospace}.configuration-actions{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-top:24px;padding:18px 0;border-top:1px solid var(--line)}.configuration-actions .primary{background:var(--accent);color:#1c322b;font-weight:600;border-color:var(--accent)}.configuration-actions button:last-child{margin-left:auto}
+    [hidden]{display:none!important}.configuration-status{white-space:pre-wrap;font-size:12px;overflow-wrap:anywhere}.collection-empty{padding:30px;text-align:center;border:1px dashed var(--line);border-radius:12px}.optional-integrations,.advanced-settings{margin-top:24px;border:1px solid var(--line);border-radius:12px;padding:18px 22px;background:var(--card)}summary{cursor:pointer}.optional-integrations button{margin:12px 10px 0 0}.advanced-settings textarea{width:100%;margin-top:14px;font:13px ui-monospace,monospace}.configuration-actions{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-top:24px;padding:18px 0;border-top:1px solid var(--line)}.configuration-actions .primary{background:var(--active-bg);color:var(--active-text);font-weight:600;border-color:var(--line)}.configuration-actions button:last-child{margin-left:auto}
     @media(max-width:1050px){.plugin-grid{grid-template-columns:repeat(2,minmax(0,1fr))}body{padding:26px 22px}.collection-search{margin-left:0;flex:1}}
     @media(max-width:560px){body{padding:22px 16px}.plugin-grid{grid-template-columns:1fr}h1{font-size:28px}.collection-search{width:100%}.collection-filters{gap:2px}.collection-filters button{padding:10px}.card-body label{grid-template-columns:minmax(0,1fr);align-items:start;gap:7px}.card-body label>span{grid-column:1}.card-body label input:not([type=checkbox]),.card-body label select,.card-body label textarea{width:100%}.configuration-actions button:last-child{margin-left:0}}
   </style>
+  <script src="scripts/config-theme.js?v=20261117-tokens" defer></script>
 </head>
 <body>
   <header class="intro"><div class="eyebrow">Your listening ecosystem</div><h1>Everything, in harmony.</h1><p>Your music services, devices, and finishing touches. All in one place.</p></header>
   <main id="configuration"><p role="status">Loading authoritative Server configuration…</p></main>
   <script type="module">
-    import { mountMasterConfigurationEditor } from './scripts/master-configuration-editor.mjs?v=20261117-layout';
+    import { mountMasterConfigurationEditor } from './scripts/master-configuration-editor.mjs?v=20261117-tokens';
     const root = document.getElementById('configuration');
     try {
       await globalThis.SonuviControllerAuth?.ready;

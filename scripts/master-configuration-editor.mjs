@@ -61,8 +61,8 @@ export async function mountMasterConfigurationEditor(root, {request, refreshMs =
   const restartNow=element('button','Restart now');restartNow.type='button';
   const restartLater=element('button','Later');restartLater.type='button';
   restartDialog.append(restartTitle,restartStatus,restartNow,restartLater);
-  restartDialog.style.cssText='max-width:480px;width:calc(100% - 48px);box-sizing:border-box;border-radius:14px;padding:24px;font:16px system-ui;color-scheme:dark light';
-  for(const button of [restartNow,restartLater])button.style.cssText='font:inherit;padding:10px 16px;margin:8px 12px 0 0;cursor:pointer';
+  restartDialog.style.cssText='max-width:480px;width:calc(100% - 48px);box-sizing:border-box;border-radius:14px;padding:24px;font:16px system-ui;background:var(--theme-hero-card-bg,rgba(10,18,34,.95));color:var(--theme-text,#e7eefc);border:1px solid var(--theme-rail-border,#2a3a58)';
+  for(const button of [restartNow,restartLater])button.style.cssText='font:inherit;padding:10px 16px;margin:8px 12px 0 0;cursor:pointer;background:var(--theme-tab-bg,#0f1a31);color:var(--theme-tab-text,#e7eefc);border:1px solid var(--theme-rail-border,#2a3a58);border-radius:7px';
   // The app shell grows its iframe to the entire document height. A dialog in
   // that iframe would be centered far outside the visible screen.
   let dialogDocument=document;try{if(window.parent.location.origin===location.origin)dialogDocument=window.parent.document;}catch{}
