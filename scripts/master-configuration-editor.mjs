@@ -106,7 +106,7 @@ export async function mountMasterConfigurationEditor(root, {request, refreshMs =
   });
 
   const render = () => {
-    const openPanels = new Set([...panels.querySelectorAll('details[open]')].map(node=>node.closest('fieldset').dataset.plugin+':'+node.querySelector('summary').textContent));
+    const openPanels = new Set([...panels.querySelectorAll('details[open]')].map(node=>node.closest('.plugin-card').dataset.plugin+':'+node.querySelector('summary').textContent));
     panels.replaceChildren();optionalChoices.replaceChildren();
     const featured=['moode','lastfm','alexa','library','artwork','ratings'];
     const order=id=>featured.includes(id)?featured.indexOf(id):featured.length;
@@ -117,10 +117,11 @@ export async function mountMasterConfigurationEditor(root, {request, refreshMs =
         const add=element('button','Configure '+module.title);add.type='button';
         add.addEventListener('click',()=>{shownOptional.add(module.id);expanded.add(module.id);category='All integrations';search.value='';for(const item of filters.children)item.setAttribute('aria-pressed',String(item.textContent===category));render();});optionalChoices.append(add);continue;
       }
-      let section = element('fieldset');const legend = element('legend',module.title);
+      let section = element('section');const title = element('h2',module.title);
+      title.className='card-title';title.id='config-title-'+module.id;
+      section.setAttribute('aria-labelledby',title.id);
       section.className = 'plugin-card';
       section.dataset.plugin = module.id;
-      section.append(legend);
       const [group,icon,description]=descriptions[module.id]||['System','⌘','Manage this part of your Sonuvi setup.'];
       section.dataset.category=group;section.dataset.search=(module.title+' '+description+' '+group).toLowerCase();
       const symbol=element('span',icon);symbol.className='card-icon';symbol.setAttribute('aria-hidden','true');
@@ -129,7 +130,8 @@ export async function mountMasterConfigurationEditor(root, {request, refreshMs =
       const footer=element('div');footer.className='card-footer';
       const configure=element('button',expanded.has(module.id)?'Close settings ↑':'Configure ↗');configure.type='button';configure.setAttribute('aria-label','Configure '+module.title);configure.setAttribute('aria-expanded',String(expanded.has(module.id)));configure.setAttribute('aria-controls','config-body-'+module.id);
       footer.append(element('span',group==='Custom'?'Custom integration':group),configure);
-      section.append(symbol,badge,blurb,footer);
+      const header=element('div');header.className='card-header';header.append(symbol,badge);
+      section.append(header,title,blurb,footer);
       const card=section;
       const body=element('div');body.className='card-body';body.id='config-body-'+module.id;body.hidden=!expanded.has(module.id);card.classList.toggle('expanded',!body.hidden);card.append(body);
       configure.addEventListener('click',()=>{body.hidden=!body.hidden;body.hidden?expanded.delete(module.id):expanded.add(module.id);card.classList.toggle('expanded',!body.hidden);configure.setAttribute('aria-expanded',String(!body.hidden));configure.textContent=body.hidden?'Configure ↗':'Close settings ↑';});
