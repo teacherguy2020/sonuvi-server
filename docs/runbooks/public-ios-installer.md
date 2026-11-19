@@ -1,8 +1,8 @@
 # Public iOS-guided server installation
 
-## Current — 2026-11-15
+## Current — 2026-11-18
 
-The signed first-install package is available from the public [GitHub prerelease](https://github.com/teacherguy2020/sonuvi-server/releases/tag/server-installer-2026.11.15-no-deadline-2f5fe4d1). The updated iOS production installer retrieves it over normal public HTTPS, without GitHub credentials or access to the maintainer's LAN. Older LAN-bound app binaries must be updated; this is not an App Store or TestFlight release.
+The signed first-install package is available from the public [GitHub prerelease](https://github.com/teacherguy2020/sonuvi-server/releases/tag/server-installer-2026.11.18-no-deadline-a5f51a60). The updated iOS production installer retrieves it over normal public HTTPS, without GitHub credentials or access to the maintainer's LAN. Older LAN-bound app binaries must be updated; this is not an App Store or TestFlight release.
 
 ### Installation
 
@@ -15,11 +15,15 @@ This preview is not an AMD64, Docker, standalone terminal, or existing-server up
 
 ### Trust and lifecycle
 
-Release ID: `sonuvi-2f5fe4d12b5d6a28145ec7c037b07d5f87b9dfd1df7ae09f67308053bfb2374c`, source `c86ac078f1d2019d37c91d5bce513fd1328f6867`. The eight assets are newly built/signed for the explicit non-expiring policy; the prior publication is not overwritten. Historical `lab` names and handoff markers are retained provenance, not a requirement to reach a laboratory download server.
+Release ID: `sonuvi-a5f51a60a8e097b88bd067c6ea5a806d47489e4bf0efc55d49bc631ceef80885`, source `456b5c69620bf42abdfecc65974c81b526952e5c`. Its server archive is `3743e8607277e006b7090237358484fee514c2bd66a788631b7e3fb20e86cab8` (54,071,296 bytes), with manifest `a998809934827e395b6e9cb05e069e8215f0919ed3defeebfcfc4c90313a451f`. The eight assets are newly built/signed for the explicit non-expiring policy; prior publications are not overwritten. Historical `lab` names and handoff markers are retained provenance, not a requirement to reach a laboratory download server.
 
-The app accepts only the fixed GitHub release path and HTTPS release-CDN redirects. GitHub transport uses system certificate trust; the independently compiled Ed25519 signer and release/manifest/archive/bootstrap/envelope pins still authenticate the installer. The target's SSH host-key and server pairing protections are unchanged. Existing-upgrade v2 distribution remains separate and LAN-bound; it is not represented as public-ready.
+The package includes the recent server configuration/library work and Viber reliability improvements, including queue-range handling, bounded work budgets, and partial-result behavior. It contains no host-private configuration and is not a fresh-machine installation acceptance result.
 
-**The current public installer has no expiration deadline.** Its signed metadata uses `expiresAt: null`; monthly renewal is not required. The original `server-installer-2026.11.15-d43214c4` publication is historical, immutable, and retains its December 15 expiry. Older app binaries must be updated to use the new package.
+The app accepts only the fixed GitHub release path and HTTPS release-CDN redirects. GitHub transport uses system certificate trust; the independently compiled Ed25519 signer (`w7kQBpYG5LGnoJvbAdiN1O7pde8QZkdEoJU0sIFjYkg`) and release/manifest/archive/bootstrap/envelope pins still authenticate the installer. The target's SSH host-key and server pairing protections are unchanged.
+
+The current public package is the fresh-install **v1** flavor: bootstrap kit `b50e99d4601a20b1b71d200724bde3a9f14287f9226c5dd6aafd990a74b2b1e1` (199,680 bytes) and envelope `c8d49320c507488825697fab0c5fc0a10329a197a1b9f794a937728e3269d9cf`. The separate existing-install **v2** flavor remains LAN-bound and is not public-ready: bootstrap kit `407642a0a079f894636cd1eba3db8f79c08751e8a3d4d2d5856b9a4c571dc82d` (293,376 bytes) and envelope `55b80db8df50a4cf138a35841d6bf63e7e8e1500c5d9c4ccfecfa05b0df40c94`. Both latest flavors bind the same server archive and release ID, but use different independently signed bootstrap versions, digests, and envelopes; they must not be interchanged.
+
+**The current public installer has no expiration deadline.** Its signed metadata uses `expiresAt: null`; monthly renewal is not required. The earlier `server-installer-2026.11.15-no-deadline-2f5fe4d1` and original `server-installer-2026.11.15-d43214c4` publications are historical and immutable; the original retains its December 15 expiry. Older app binaries must be updated to use the new package.
 
 ### Verification
 
@@ -33,7 +37,7 @@ This downloads all eight files anonymously, checks the independently pinned sign
 
 The Apple repository has an opt-in production-path network test (`SONUVI_PUBLIC_INSTALLER_NETWORK_TEST=1`) and deterministic URL/redirect/factory regressions. Download verification is not a complete clean-machine installation. Exact-package clean-target installation, reboot and optional companion acceptance remain tracked in [server #9](https://github.com/teacherguy2020/sonuvi-server/issues/9) and [iOS #9](https://github.com/teacherguy2020/sonuvi-ios/issues/9).
 
-## Non-expiring release policy — 2026-11-15
+## Non-expiring release policy — 2026-11-18
 
 Brian explicitly requested “no deadline.” New public first-install envelopes use
 `expiresAt: null`, signed as part of the descriptor. This is no deadline, not a

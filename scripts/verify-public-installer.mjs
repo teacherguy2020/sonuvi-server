@@ -7,15 +7,16 @@ import path from 'node:path';
 import { verifySignedGateCReleaseMetadata } from '../src/lib/sonuvi-gate-c-release.mjs';
 import { loadGateCLabDistribution } from '../src/lib/sonuvi-gate-c-lab-distribution.mjs';
 
-const releaseId = 'sonuvi-2f5fe4d12b5d6a28145ec7c037b07d5f87b9dfd1df7ae09f67308053bfb2374c';
-const tag = 'server-installer-2026.11.15-no-deadline-2f5fe4d1';
+const releaseId = 'sonuvi-a5f51a60a8e097b88bd067c6ea5a806d47489e4bf0efc55d49bc631ceef80885';
+const tag = 'server-installer-2026.11.18-no-deadline-a5f51a60';
 const base = `https://github.com/teacherguy2020/sonuvi-server/releases/download/${tag}/`;
 const expected = {
-  archive: 'a11707593c4b515bc0832a0483ee8bb31de34444d34092c2a43a61fb277da946',
-  archiveBytes: 54042112,
-  bootstrap: '25f19c773ef12330a7435094bf2514e3e03ee82363b130e0e10cf90cd6ddd9ab',
-  envelope: 'fb27dca9b8289cbd7be952acaee653bf2f3ec728b9d9bc4b8dcf38f524c182e8',
-  manifest: 'de8e58e5b75ecaba65cfd78559391dd951420b7bfd0c326cabe080a7b014158a',
+  archive: '3743e8607277e006b7090237358484fee514c2bd66a788631b7e3fb20e86cab8',
+  archiveBytes: 54071296,
+  bootstrap: 'b50e99d4601a20b1b71d200724bde3a9f14287f9226c5dd6aafd990a74b2b1e1',
+  bootstrapBytes: 199680,
+  envelope: 'c8d49320c507488825697fab0c5fc0a10329a197a1b9f794a937728e3269d9cf',
+  manifest: 'a998809934827e395b6e9cb05e069e8215f0919ed3defeebfcfc4c90313a451f',
   signer: 'w7kQBpYG5LGnoJvbAdiN1O7pde8QZkdEoJU0sIFjYkg',
 };
 const archive = `${releaseId}-linux-arm64.tar`;
@@ -70,6 +71,7 @@ try {
     || verified.assets.get(archive).sha256 !== expected.archive
     || verified.assets.get(archive).bytes !== expected.archiveBytes
     || verified.assets.get('sonuvi-bootstrap-kit-v1.tar').sha256 !== expected.bootstrap
+    || verified.assets.get('sonuvi-bootstrap-kit-v1.tar').bytes !== expected.bootstrapBytes
     || verified.assets.get('release-envelope.json').sha256 !== expected.envelope) throw new Error('Compiled package identity mismatch');
   console.log(JSON.stringify({ verified: true, authenticated: false, tag, releaseId,
     expiresAt: verified.expiresAt, assets: [...verified.assets.values()].map(({ name, bytes, sha256 }) => ({ name, bytes, sha256 })) }, null, 2));
