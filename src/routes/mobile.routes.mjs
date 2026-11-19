@@ -1906,15 +1906,26 @@ export function registerMobileRoutes(app, deps = {}) {
 
   const safeMobileVibeWarning = (payload = {}) => {
     if (payload.partial !== true) return '';
-    const code = text(payload.warning);
+    const code = text(payload.warningCode) || text(payload.warning);
     const messages = {
       LASTFM_UNAVAILABLE: 'Vibe recommendations are temporarily unavailable',
       LASTFM_MALFORMED_RESPONSE: 'Vibe recommendations are temporarily unavailable',
       LASTFM_UPSTREAM_REJECTED: 'Vibe recommendations are unavailable for this seed',
       VIBE_DEADLINE_EXCEEDED: 'Vibe planning timed out',
       VIBE_NO_LOCAL_MATCHES: 'No Vibe recommendations match the local library',
+      VIBE_NO_RECOMMENDATIONS: 'No Vibe recommendations are available for this seed',
     };
-    return messages[code] || '';
+    return messages[code] || 'Vibe recommendations are unavailable';
+  };
+
+  const safeMobileVibeWarningCode = (payload = {}) => {
+    if (payload.partial !== true) return '';
+    const code = text(payload.warningCode) || text(payload.warning);
+    return [
+      'LASTFM_UNAVAILABLE', 'LASTFM_MALFORMED_RESPONSE',
+      'LASTFM_UPSTREAM_REJECTED', 'VIBE_DEADLINE_EXCEEDED',
+      'VIBE_NO_LOCAL_MATCHES', 'VIBE_NO_RECOMMENDATIONS',
+    ].includes(code) ? code : '';
   };
 
   const safeMobileEndlessVibeJob = (payload = {}) => {
@@ -1972,6 +1983,7 @@ export function registerMobileRoutes(app, deps = {}) {
       ...(Number.isFinite(builtCount) ? { builtCount: Math.max(0, Math.floor(builtCount)) } : {}),
       ...(latest ? { latest } : {}),
       ...(payload.partial === true ? { partial: true } : {}),
+      ...(safeMobileVibeWarningCode(payload) ? { warningCode: safeMobileVibeWarningCode(payload) } : {}),
       ...(safeMobileVibeWarning(payload) ? { warning: safeMobileVibeWarning(payload) } : {}),
       ...(status === 'error' ? { error: 'Vibe build failed' } : {}),
       ...(status === 'cancelled' ? { error: 'Vibe build cancelled' } : {}),
@@ -3813,7 +3825,7 @@ export function registerMobileRoutes(app, deps = {}) {
       const safeCodes = new Set([
         'LASTFM_UNAVAILABLE', 'LASTFM_MALFORMED_RESPONSE',
         'LASTFM_UPSTREAM_REJECTED', 'VIBE_DEADLINE_EXCEEDED',
-        'VIBE_NO_LOCAL_MATCHES',
+        'VIBE_NO_LOCAL_MATCHES', 'VIBE_NO_RECOMMENDATIONS',
       ]);
       const code = safeCodes.has(upstreamCode) ? `MOBILE_VIBE_PREVIEW_${upstreamCode}` : 'MOBILE_VIBE_PREVIEW_FAILED';
       const messages = {
@@ -3822,6 +3834,7 @@ export function registerMobileRoutes(app, deps = {}) {
         LASTFM_UPSTREAM_REJECTED: 'Vibe recommendations are unavailable for this seed',
         VIBE_DEADLINE_EXCEEDED: 'Vibe preview timed out',
         VIBE_NO_LOCAL_MATCHES: 'No Vibe recommendations match the local library',
+        VIBE_NO_RECOMMENDATIONS: 'No Vibe recommendations are available for this seed',
       };
       return errorResponse(res, Number(result?.status) === 504 ? 504 : 502, messages[upstreamCode] || 'Vibe preview unavailable', code);
     }
@@ -3862,6 +3875,7 @@ export function registerMobileRoutes(app, deps = {}) {
       })),
       catalogBuiltAt: text(catalog.builtAt) || null,
       partial: result?.json?.summary?.partial === true,
+      ...(safeMobileVibeWarningCode(result?.json?.summary || {}) ? { warningCode: safeMobileVibeWarningCode(result.json.summary) } : {}),
       warning: safeMobileVibeWarning(result?.json?.summary || {}) || null,
     });
   }));

@@ -464,7 +464,7 @@ def resolve_local_candidate(recommendation, *, mbid_map, text_map, used_files, f
     }
 
 
-def build_v2_plan(mpd, args, *, mbid_map, text_map, file_meta, seed_artist, seed_title, seed_genre, deadline=None):
+def build_v2_plan(mpd, args, *, mbid_map, text_map, file_meta, seed_artist, seed_title, seed_genre, deadline=None, stats=None):
     """Build a small, diverse local queue before making any MPD mutation."""
     used_files = set()
     try:
@@ -491,6 +491,9 @@ def build_v2_plan(mpd, args, *, mbid_map, text_map, file_meta, seed_artist, seed
     pass_number = 0
     plan = []
     warning = ""
+    recommendation_count = 0
+    local_match_count = 0
+    successful_discovery_passes = 0
 
     def same_artist_family(left, right):
         """Avoid recursively querying a cosmetic variant of the same artist."""
@@ -534,6 +537,8 @@ def build_v2_plan(mpd, args, *, mbid_map, text_map, file_meta, seed_artist, seed
             warning = failure.code
             plan = select_plan()
             break
+        successful_discovery_passes += 1
+        recommendation_count += len(similar)
         pass_candidates = []
         for rank, recommendation in enumerate(similar, start=1):
             candidate = resolve_local_candidate(
@@ -547,6 +552,7 @@ def build_v2_plan(mpd, args, *, mbid_map, text_map, file_meta, seed_artist, seed
             if candidate:
                 all_candidates.append(candidate)
                 pass_candidates.append(candidate)
+                local_match_count += 1
         print(
             f"[v2] pass {pass_number}: {len(similar)} Last.fm candidates, "
             f"{len(pass_candidates)} new local matches, {len(all_candidates)} total local matches",
@@ -578,6 +584,17 @@ def build_v2_plan(mpd, args, *, mbid_map, text_map, file_meta, seed_artist, seed
         f"[v2] selected {len(plan)}/{target} tracks from {len(all_candidates)} local matches across {pass_number} pass(es)",
         flush=True,
     )
+    if not warning and not plan:
+        if successful_discovery_passes and recommendation_count == 0:
+            warning = "VIBE_NO_RECOMMENDATIONS"
+        elif recommendation_count:
+            warning = "VIBE_NO_LOCAL_MATCHES"
+    if stats is not None:
+        stats.update({
+            "recommendation_count": recommendation_count,
+            "local_match_count": local_match_count,
+            "successful_discovery_passes": successful_discovery_passes,
+        })
     return plan, pass_number, warning
 
 
@@ -785,6 +802,7 @@ def main():
     original_seed = (seed_artist, seed_title)
 
     if args.planner_v2:
+        discovery_stats = {}
         plan, discovery_passes, warning_code = build_v2_plan(
             mpd,
             args,
@@ -795,6 +813,7 @@ def main():
             seed_title=seed_title,
             seed_genre=seed_genre,
             deadline=deadline,
+            stats=discovery_stats,
         )
         applied_tracks = apply_v2_plan(mpd, args, plan, was_playing=was_playing)
         final_state = "unknown"
@@ -821,9 +840,12 @@ def main():
             "discovery_passes": discovery_passes,
             "tracks": plan if args.dry_run else applied_tracks,
             "warning": warning_code or None,
+            "warning_code": warning_code or None,
             "partial": bool(warning_code and plan),
             "failure_code": warning_code if warning_code and not plan else None,
             "outcome": "partial" if warning_code and plan else ("error" if warning_code else "ok"),
+            "recommendation_count": discovery_stats.get("recommendation_count", 0),
+            "local_match_count": discovery_stats.get("local_match_count", 0),
         }
         if args.json_out:
             try:
@@ -905,6 +927,9 @@ def main():
         return queue_len() >= args.target_queue
 
     discovery_failure = ""
+    recommendation_count = 0
+    local_match_count = 0
+    successful_discovery_passes = 0
     if args.simple_seed_pass:
         print(f"[{datetime.now().strftime('%H:%M:%S')}] SIMPLE mode: batched seed queries (10 per pass)", flush=True)
         simple_batch = 10
@@ -927,6 +952,8 @@ def main():
                 discovery_failure = failure.code
                 print(f"[lastfm] pass={simple_pass} category={failure.category}", flush=True)
                 break
+            successful_discovery_passes += 1
+            recommendation_count += len(sim)
             if args.shuffle_top and args.shuffle_top > 0 and sim:
                 n = min(args.shuffle_top, len(sim))
                 head = sim[:n]
@@ -969,6 +996,7 @@ def main():
                             method = "fuzzy"
                 if not cand:
                     continue
+                local_match_count += 1
                 if cand in bad_files or cand in used_files:
                     continue
 
@@ -1020,6 +1048,8 @@ def main():
             discovery_failure = failure.code
             print(f"[lastfm] pass={hops} category={failure.category}", flush=True)
             break
+        successful_discovery_passes += 1
+        recommendation_count += len(sim)
 
         if args.shuffle_top and args.shuffle_top > 0 and sim:
             n = min(args.shuffle_top, len(sim))
@@ -1117,6 +1147,7 @@ def main():
             if not cand:
                 reject["no_local_match"] += 1
                 continue
+            local_match_count += 1
 
             if cand in bad_files:
                 reject["bad_file"] += 1
@@ -1361,6 +1392,12 @@ def main():
         if args.sleep > 0:
             time.sleep(args.sleep)
 
+    if not discovery_failure and not out_tracks:
+        if successful_discovery_passes and recommendation_count == 0:
+            discovery_failure = "VIBE_NO_RECOMMENDATIONS"
+        elif recommendation_count:
+            discovery_failure = "VIBE_NO_LOCAL_MATCHES"
+
     # Final state (do not stop/play in dry-run)
     final_state = "unknown"
     try:
@@ -1402,9 +1439,12 @@ def main():
         "crop": bool(args.crop),
         "tracks": out_tracks,
         "warning": discovery_failure or None,
+        "warning_code": discovery_failure or None,
         "partial": bool(discovery_failure and out_tracks),
         "failure_code": discovery_failure if discovery_failure and not out_tracks else None,
         "outcome": "partial" if discovery_failure and out_tracks else ("error" if discovery_failure else "ok"),
+        "recommendation_count": recommendation_count,
+        "local_match_count": local_match_count,
     }
 
     if args.json_out:

@@ -332,11 +332,24 @@ This page now gives the wiki a sharper internal model of Queue Wizard:
 ### Vibe reliability behavior
 
 Vibe discovery uses one bounded monotonic deadline across Last.fm retries and
-planner passes. Temporary network, rate-limit, and Last.fm 8/16/29 failures
-are retried within that budget; malformed and permanent upstream responses are
-reported using allowlisted failure categories. A valid empty recommendation
-list is distinct from local-library no-match and discovery unavailability.
-When a later recoverable failure follows usable local matches, Vibe returns the
-  the native client does not receive raw MPD paths or Track Keys
+planner passes. Preview requests use a 16-second planner budget with a 21-second
+process cap. A timed-out preview returns the controlled
+`VIBE_DEADLINE_EXCEEDED` failure rather than subprocess output.
+
+Retryable categories are network failures, HTTP 429/5xx responses, and Last.fm
+errors 8, 16, and 29. Malformed responses may be retried within the same budget;
+permanent upstream rejections are not retried. `Retry-After` is bounded, so it
+cannot extend the deadline.
+
+The result distinguishes a valid empty Last.fm list (`VIBE_NO_RECOMMENDATIONS`),
+recommendations with no usable local-library match (`VIBE_NO_LOCAL_MATCHES`),
+and upstream discovery failures. When a later recoverable failure follows usable
+local matches, Vibe preserves the partial tracks and returns an allowlisted
+`warningCode` plus its matching human-safe `warning`. Unknown codes and raw
+subprocess output are never forwarded to config or native clients.
+
+The Vibe result cache/deferred job state is owned by the server. Native clients
+receive canonical track IDs for preview and sanitized job metadata only; they do
+not receive raw MPD paths or Track Keys.
 
 _Last updated: 2026-11-18 America/Chicago_
