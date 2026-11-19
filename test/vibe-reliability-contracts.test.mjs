@@ -23,7 +23,7 @@ function response() {
 
 function registerPreview({ data, execError } = {}) {
   const app = appFixture();
-  const calls = { exec: [], unlink: [] };
+  const calls = { exec: [], unlink: [], log: [] };
   registerConfigQueueWizardVibeRoutes(app, {
     requireTrackKey: () => true,
     getRatingForFile: async () => 0,
@@ -31,7 +31,7 @@ function registerPreview({ data, execError } = {}) {
     mpdHasACK: () => false,
     parseMpdKeyVals: () => ({}),
     parseMpdFirstBlock: () => ({}),
-    log: {},
+    log: { info: (...args) => calls.log.push(args) },
     resolveLastfmApiKey: async () => 'test-key-not-forwarded',
     resolveVibeIndexPath: async () => '/tmp/index.json',
     createVibeTemporaryJson: async () => '/tmp/vibe-preview.json',
@@ -65,6 +65,7 @@ test('seed preview forwards an allowlisted partial warning without subprocess fi
   assert.equal(res.body.summary.warningCode, 'LASTFM_UNAVAILABLE');
   assert.equal(res.body.summary.warning, 'Vibe recommendations are temporarily unavailable');
   assert.doesNotMatch(JSON.stringify(res.body.summary), /secret|api_key|do-not-forward/i);
+  assert.equal(calls.exec[0][1].at(-1), '16');
   assert.equal(calls.exec[0][2].timeout, 21000);
   assert.deepEqual(calls.unlink, ['/tmp/vibe-preview.json']);
 });
@@ -78,7 +79,8 @@ test('seed preview rejects unknown warning text and maps process timeout to 504 
     body: { seedArtist: 'Artist', seedTitle: 'Song' }, headers: {},
   }, unknownRes);
   assert.equal(unknownRes.statusCode, 200);
-  assert.equal(unknownRes.body.summary.partial, false);
+  assert.equal(unknownRes.body.summary.partial, true);
+  assert.equal(unknownRes.body.summary.warningCode, 'VIBE_TARGET_NOT_REACHED');
   assert.doesNotMatch(JSON.stringify(unknownRes.body), /UPSTREAM|secret/);
 
   const timedOut = registerPreview({ execError: Object.assign(new Error('timed out'), { code: 'ETIMEDOUT', killed: true }) });
@@ -99,4 +101,43 @@ test('seed preview returns controlled no-local-match failure', async () => {
   }, res);
   assert.equal(res.statusCode, 502);
   assert.equal(res.body.code, 'VIBE_NO_LOCAL_MATCHES');
+});
+
+test('seed preview accepts only the bounded opt-in planning budget before process dispatch', async () => {
+  const extended = registerPreview({ data: { tracks: [{ file: 'USB/private.flac' }] } });
+  const extendedRes = response();
+  await extended.app.routes.get('POST /config/queue-wizard/vibe-seed')({
+    body: { seedArtist: 'Artist', seedTitle: 'Song', targetQueue: 1, planningBudgetSeconds: 35 }, headers: {},
+  }, extendedRes);
+  assert.equal(extendedRes.statusCode, 200);
+  assert.equal(extended.calls.exec[0][1].at(-1), '35');
+  assert.equal(extended.calls.exec[0][2].timeout, 40000);
+  assert.equal(extendedRes.body.summary.planningBudgetSeconds, 35);
+
+  for (const planningBudgetSeconds of [15, 36, '35']) {
+    const invalid = registerPreview({ data: { tracks: [{ file: 'USB/private.flac' }] } });
+    const invalidRes = response();
+    await invalid.app.routes.get('POST /config/queue-wizard/vibe-seed')({
+      body: { seedArtist: 'Artist', seedTitle: 'Song', planningBudgetSeconds }, headers: {},
+    }, invalidRes);
+    assert.equal(invalidRes.statusCode, 400);
+    assert.equal(invalid.calls.exec.length, 0);
+  }
+});
+
+test('seed preview marks usable short results partial with the safe target warning', async () => {
+  const { app, calls } = registerPreview({ data: { tracks: [{ file: 'USB/private.flac' }] } });
+  const res = response();
+  await app.routes.get('POST /config/queue-wizard/vibe-seed')({
+    body: { seedArtist: 'Artist', seedTitle: 'Song', targetQueue: 2 }, headers: {},
+  }, res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.summary.count, 1);
+  assert.equal(res.body.summary.partial, true);
+  assert.equal(res.body.summary.warningCode, 'VIBE_TARGET_NOT_REACHED');
+  assert.equal(res.body.summary.warning, 'Vibe found fewer tracks than requested');
+  assert.equal(calls.log.length, 1);
+  assert.equal(calls.log[0][0], '[vibe-preview] completed');
+  assert.deepEqual(Object.keys(calls.log[0][1]).sort(), ['budget', 'elapsed', 'requestedCount', 'returnedCount', 'warningCode']);
+  assert.equal(calls.log[0][1].warningCode, 'VIBE_TARGET_NOT_REACHED');
 });

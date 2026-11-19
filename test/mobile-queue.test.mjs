@@ -717,16 +717,19 @@ test('mobile Live Queue is bearer-authorized and mutates by opaque queue ID', as
 
 test('mobile delete-below keeps the selected current item and emits the exact MPD range delete', async () => {
   const commands = [];
-  let rows = [0, 1, 2, 3].map((position) => ({
+  let rows = ['seed', ...Array.from({ length: 17 }, (_, index) => `new-${index + 1}`), ...Array.from({ length: 8 }, (_, index) => `old-tail-${index + 1}`)].map((title, position) => ({
     file: `USB/Test/${position}.mp3`, artist: 'Test Artist', album: 'Test Album',
-    title: `Track ${position}`, pos: String(position), id: String(100 + position),
+    title, pos: String(position), id: String(100 + position),
   }));
   const mpdQueryRaw = async (command) => {
     commands.push(command);
     if (command === 'playlistinfo') return `${rows.map((row) => Object.entries(row)
       .map(([key, value]) => `${key}: ${value}`).join('\n')).join('\n')}\nOK\n`;
     if (command === 'status') return `state: play\nsong: 0\nsongid: 100\nplaylistlength: ${rows.length}\nOK\n`;
-    if (command === 'delete 1') { rows = rows.slice(0, 1); return 'OK\n'; }
+    const rangeDelete = command.match(/^delete (\d+):$/);
+    if (rangeDelete) { rows = rows.slice(0, Number(rangeDelete[1])); return 'OK\n'; }
+    const singleDelete = command.match(/^delete (\d+)$/);
+    if (singleDelete) { rows.splice(Number(singleDelete[1]), 1); return 'OK\n'; }
     return 'OK\n';
   };
   const app = registerFixture(mpdQueryRaw);
@@ -740,7 +743,7 @@ test('mobile delete-below keeps the selected current item and emits the exact MP
   }), response);
   assert.equal(response.statusCode, 200);
   assert.equal(response.body.action, 'delete-below');
-  assert.deepEqual(commands.filter((command) => command.startsWith('delete ')), ['delete 1']);
+  assert.deepEqual(commands.filter((command) => command.startsWith('delete ')), ['delete 1:']);
   assert.deepEqual(rows.map((row) => row.id), ['100']);
   assert.equal(response.body.queue.items.some((item) => item.isCurrent === true), true);
 
@@ -750,7 +753,7 @@ test('mobile delete-below keeps the selected current item and emits the exact MP
     headers: sessionHeaders(), params: { queueItemId: last.id },
   }), noOp);
   assert.equal(noOp.statusCode, 200);
-  assert.deepEqual(commands.filter((command) => command.startsWith('delete ')), ['delete 1']);
+  assert.deepEqual(commands.filter((command) => command.startsWith('delete ')), ['delete 1:']);
 });
 
 test('mobile delete-below rejects unauthorized, stale, current-removing, Alexa, and empty-queue requests', async () => {

@@ -332,8 +332,13 @@ This page now gives the wiki a sharper internal model of Queue Wizard:
 ### Vibe reliability behavior
 
 Vibe discovery uses one bounded monotonic deadline across Last.fm retries and
-planner passes. Preview requests use a 16-second planner budget with a 21-second
-process cap. A timed-out preview returns the controlled
+planner passes. The legacy preview handshake omits a budget and therefore uses
+the 16-second planner budget with a 21-second process cap. A native caller may
+opt in with integer `planningBudgetSeconds` from 16 through 35; the process cap
+is then budget plus five seconds (at most 40 seconds). The mobile outer request
+cap remains 45 seconds. A client using the longer preview must extend both its
+request and resource timeouts; this server change does not make the existing
+16-second request wait longer. A timed-out preview returns the controlled
 `VIBE_DEADLINE_EXCEEDED` failure rather than subprocess output.
 
 Retryable categories are network failures, HTTP 429/5xx responses, and Last.fm
@@ -348,8 +353,16 @@ local matches, Vibe preserves the partial tracks and returns an allowlisted
 `warningCode` plus its matching human-safe `warning`. Unknown codes and raw
 subprocess output are never forwarded to config or native clients.
 
-The Vibe result cache/deferred job state is owned by the server. Native clients
+Vibe preview is not cached. The Vibe result/deferred job state is owned by the server. Native clients
 receive canonical track IDs for preview and sanitized job metadata only; they do
 not receive raw MPD paths or Track Keys.
+
+Mobile Home queue **delete below** resolves a fresh signed queue handle and
+uses MPD ranged deletion (`delete N:`), retaining the selected item and every
+item above it while removing all later items. It refuses a stale handle or a
+range that would remove the current item. A preview with usable tracks but fewer
+than its requested target is explicitly partial; a typed upstream warning keeps
+precedence, otherwise the safe `VIBE_TARGET_NOT_REACHED` code and “Vibe found
+fewer tracks than requested” message are returned.
 
 _Last updated: 2026-11-18 America/Chicago_

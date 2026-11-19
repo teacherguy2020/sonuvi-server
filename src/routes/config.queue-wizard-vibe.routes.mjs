@@ -30,6 +30,7 @@ const VIBE_FAILURE_MESSAGES = Object.freeze({
   VIBE_DEADLINE_EXCEEDED: 'Vibe planning timed out',
   VIBE_NO_LOCAL_MATCHES: 'No Vibe recommendations match the local library',
   VIBE_NO_RECOMMENDATIONS: 'No Vibe recommendations are available for this seed',
+  VIBE_TARGET_NOT_REACHED: 'Vibe found fewer tracks than requested',
 });
 
 function safeVibeFailure(code) {
@@ -53,23 +54,34 @@ function plannerPartial(data) {
   return safeVibeFailure(code);
 }
 
-function safePlannerSummary(data) {
-  const partial = plannerPartial(data);
+function safePlannerSummary(data, { targetQueue, planningBudgetSeconds = 16 } = {}) {
+  const usableTrackCount = Array.isArray(data?.tracks)
+    ? data.tracks.filter((track) => String(track?.file || '').trim()).length
+    : 0;
+  const requestedTarget = Number.isInteger(targetQueue) ? targetQueue : Number(data?.target_queue);
+  const partial = plannerPartial(data)
+    || (usableTrackCount > 0 && Number.isInteger(requestedTarget) && usableTrackCount < requestedTarget
+      ? safeVibeFailure('VIBE_TARGET_NOT_REACHED')
+      : null);
   const number = (value) => Number.isFinite(Number(value)) ? Math.max(0, Math.floor(Number(value))) : 0;
-  const outcome = ['ok', 'partial', 'error'].includes(String(data?.outcome || ''))
-    ? String(data.outcome)
-    : (partial ? 'partial' : 'ok');
+  const outcome = partial
+    ? 'partial'
+    : (['ok', 'partial', 'error'].includes(String(data?.outcome || ''))
+      ? String(data.outcome)
+      : 'ok');
   // This is a subprocess boundary. Keep the public summary deliberately small
   // so arbitrary planner fields (including an accidental future secret) cannot
   // reach config or the native adapter.
   return {
     planner: String(data?.planner || '') === 'v2' ? 'v2' : 'legacy',
-    targetQueue: number(data?.target_queue),
+    targetQueue: number(Number.isInteger(requestedTarget) ? requestedTarget : data?.target_queue),
+    count: usableTrackCount,
     finalQueue: number(data?.final_queue),
     recommendationCount: number(data?.recommendation_count),
     localMatchCount: number(data?.local_match_count),
     partial: !!partial,
     outcome,
+    planningBudgetSeconds: Math.max(16, Math.min(35, Number(planningBudgetSeconds) || 16)),
     ...(partial ? { warningCode: partial.code, warning: partial.message } : {}),
   };
 }
@@ -126,7 +138,10 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
       || error?.signal === 'SIGTERM';
   }
 
-  async function runVibePreview({ prefix, lastfmApiKey, vibeIndexPath, seedArtist, seedTitle, targetQueue, mpdHost }) {
+  async function runVibePreview({ prefix, lastfmApiKey, vibeIndexPath, seedArtist, seedTitle, targetQueue, mpdHost, planningBudgetSeconds = 16 }) {
+    const budget = Number.isInteger(planningBudgetSeconds) && planningBudgetSeconds >= 16 && planningBudgetSeconds <= 35
+      ? planningBudgetSeconds
+      : 16;
     const jsonTmp = await createPreviewJson(prefix);
     const pyPath = releaseScript('lastfm_vibe_radio.py');
     const pyArgs = [
@@ -134,11 +149,11 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
       '--seed-artist', seedArtist, '--seed-title', seedTitle,
       '--target-queue', String(targetQueue), '--json-out', jsonTmp,
       '--mode', 'load', '--host', mpdHost, '--port', '6600', '--dry-run',
-      '--debug-trace', '--max-seconds', '16',
+      '--debug-trace', '--max-seconds', String(budget),
     ];
     try {
       await previewExecFile('python3', pyArgs, {
-        env: vibeProcessEnvironment(), timeout: 21000, killSignal: 'SIGTERM',
+        env: vibeProcessEnvironment(), timeout: (budget + 5) * 1000, killSignal: 'SIGTERM',
       });
       return JSON.parse(await previewFs.readFile(jsonTmp, 'utf8'));
     } catch (error) {
@@ -178,6 +193,26 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
   const createPreviewJson = deps.createVibeTemporaryJson || createVibeTemporaryJson;
   const resolveLastfmKey = deps.resolveLastfmApiKey || resolveLastfmApiKey;
   const resolveVibeIndex = deps.resolveVibeIndexPath || resolveVibeIndexPath;
+
+  function previewPlanningBudget(value) {
+    if (value === undefined) return { value: 16 };
+    if (!Number.isInteger(value) || value < 16 || value > 35) {
+      return { error: 'planningBudgetSeconds must be an integer from 16 to 35' };
+    }
+    return { value };
+  }
+
+  function logPreviewCompletion({ targetQueue, data, planningBudgetSeconds, startedAt }) {
+    const summary = safePlannerSummary(data, { targetQueue, planningBudgetSeconds });
+    log?.info?.('[vibe-preview] completed', {
+      requestedCount: targetQueue,
+      returnedCount: summary.count,
+      budget: summary.planningBudgetSeconds,
+      elapsed: Math.max(0, Date.now() - startedAt),
+      warningCode: summary.warningCode || '',
+    });
+    return summary;
+  }
 
   const vibeLogDir = statePaths.vibeLogDir;
   async function appendVibeJobLog(job, event, detail = {}) {
@@ -891,7 +926,7 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
       const data = await runVibePreview({ prefix: 'vibe-np', lastfmApiKey, vibeIndexPath, seedArtist: artist, seedTitle: title, targetQueue, mpdHost });
       const failure = plannerFailure(data);
       if (failure) return res.status(502).json({ ok: false, error: failure.message, code: failure.code });
-      return res.json({ ok: true, tracks: data?.tracks || [], summary: safePlannerSummary(data), targetQueue, seedArtist: artist, seedTitle: title });
+      return res.json({ ok: true, tracks: data?.tracks || [], summary: safePlannerSummary(data, { targetQueue }), targetQueue, seedArtist: artist, seedTitle: title });
     } catch (e) {
       if (e?.code === 'VIBE_DEADLINE_EXCEEDED') return res.status(504).json({ ok: false, error: safeVibeFailure(e.code).message, code: e.code });
       return res.status(500).json({ ok: false, error: 'Vibe request failed', code: 'VIBE_UNAVAILABLE' });
@@ -913,7 +948,7 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
       const data = await runVibePreview({ prefix: 'vibe-np', lastfmApiKey, vibeIndexPath, seedArtist: artist, seedTitle: title, targetQueue, mpdHost });
       const failure = plannerFailure(data);
       if (failure) return res.status(502).json({ ok: false, error: failure.message, code: failure.code });
-      return res.json({ ok: true, tracks: data?.tracks || [], summary: safePlannerSummary(data), targetQueue, seedArtist: artist, seedTitle: title });
+      return res.json({ ok: true, tracks: data?.tracks || [], summary: safePlannerSummary(data, { targetQueue }), targetQueue, seedArtist: artist, seedTitle: title });
     } catch (e) {
       if (e?.code === 'VIBE_DEADLINE_EXCEEDED') return res.status(504).json({ ok: false, error: safeVibeFailure(e.code).message, code: e.code });
       return res.status(500).json({ ok: false, error: 'Vibe request failed', code: 'VIBE_UNAVAILABLE' });
@@ -1353,6 +1388,8 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
     try {
       if (!requireTrackKey(req, res)) return;
       const targetQueue = Math.max(1, Math.min(200, Number(req.body?.targetQueue) || 12));
+      const budget = previewPlanningBudget(req.body?.planningBudgetSeconds);
+      if (budget.error) return res.status(400).json({ ok: false, error: budget.error, code: 'VIBE_INVALID_PLANNING_BUDGET' });
       const seedArtist = String(req.body?.seedArtist || '').trim();
       const seedTitle = String(req.body?.seedTitle || '').trim();
       if (!seedArtist || !seedTitle) return res.status(400).json({ ok: false, error: 'Missing seedArtist/seedTitle' });
@@ -1362,10 +1399,15 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
 
       const mpdHost = String(MPD_HOST || 'moode.local');
       const vibeIndexPath = await resolveVibeIndex();
-      const data = await runVibePreview({ prefix: 'vibe-seed', lastfmApiKey, vibeIndexPath, seedArtist, seedTitle, targetQueue, mpdHost });
+      const startedAt = Date.now();
+      const data = await runVibePreview({
+        prefix: 'vibe-seed', lastfmApiKey, vibeIndexPath, seedArtist, seedTitle, targetQueue, mpdHost,
+        planningBudgetSeconds: budget.value,
+      });
       const failure = plannerFailure(data);
       if (failure) return res.status(502).json({ ok: false, error: failure.message, code: failure.code });
-      return res.json({ ok: true, tracks: data?.tracks || [], summary: safePlannerSummary(data), targetQueue, seedArtist, seedTitle });
+      const summary = logPreviewCompletion({ targetQueue, data, planningBudgetSeconds: budget.value, startedAt });
+      return res.json({ ok: true, tracks: data?.tracks || [], summary, targetQueue, seedArtist, seedTitle });
     } catch (e) {
       if (e?.code === 'VIBE_DEADLINE_EXCEEDED') return res.status(504).json({ ok: false, error: safeVibeFailure(e.code).message, code: e.code });
       return res.status(500).json({ ok: false, error: 'Vibe request failed', code: 'VIBE_UNAVAILABLE' });

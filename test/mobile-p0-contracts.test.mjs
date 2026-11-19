@@ -636,6 +636,47 @@ test('native Vibe preview fails safely for unresolved candidates and timeouts', 
   assert.equal(timeout.body.code, 'MOBILE_VIBE_PREVIEW_TIMEOUT');
 });
 
+test('native Vibe preview forwards only a valid opt-in planning budget', async (t) => {
+  const calls = [];
+  const catalog = buildMobileCatalog(fixtureIndex(), { trackIdSecret: 'track-secret-for-test' });
+  const app = registerFixture(async () => 'OK\n', {
+    fetchInternalRequest: async (pathname, options) => {
+      calls.push({ pathname, options });
+      return { ok: true, status: 200, json: { tracks: [{ file: fixtureIndex().tracks[1].file }] } };
+    },
+  });
+  const route = app.routes.get('POST /v1/mobile/vibe/preview');
+  const originalSetTimeout = globalThis.setTimeout;
+  const deadlines = [];
+  globalThis.setTimeout = (callback, timeout, ...args) => {
+    deadlines.push(timeout);
+    return originalSetTimeout(callback, timeout, ...args);
+  };
+  t.after(() => { globalThis.setTimeout = originalSetTimeout; });
+  const extended = createResponse();
+  await route(request({
+    headers: sessionHeaders(),
+    body: { trackId: catalog.tracks[0].id, planningBudgetSeconds: 35 },
+  }), extended);
+  assert.equal(extended.statusCode, 200);
+  assert.deepEqual(calls[0].options.body, {
+    targetQueue: 25,
+    seedArtist: 'Test Artist',
+    seedTitle: 'First',
+    planningBudgetSeconds: 35,
+  });
+  assert.ok(deadlines.includes(45_000));
+
+  const invalid = createResponse();
+  await route(request({
+    headers: sessionHeaders(),
+    body: { trackId: catalog.tracks[0].id, planningBudgetSeconds: 36 },
+  }), invalid);
+  assert.equal(invalid.statusCode, 400);
+  assert.equal(invalid.body.code, 'MOBILE_VIBE_PREVIEW_INVALID_REQUEST');
+  assert.equal(calls.length, 1);
+});
+
 test('native Vibe preview and job preserve only allowlisted partial warning codes', async () => {
   const catalog = buildMobileCatalog(fixtureIndex(), { trackIdSecret: 'track-secret-for-test' });
   const seedTrackId = catalog.tracks[0].id;
