@@ -1904,6 +1904,32 @@ export function registerMobileRoutes(app, deps = {}) {
     return { action: normalized, diagnosticsAction, result };
   };
 
+  const safeMobileVibeWarning = (payload = {}) => {
+    if (payload.partial !== true) return '';
+    const code = text(payload.warningCode) || text(payload.warning);
+    const messages = {
+      LASTFM_UNAVAILABLE: 'Vibe recommendations are temporarily unavailable',
+      LASTFM_MALFORMED_RESPONSE: 'Vibe recommendations are temporarily unavailable',
+      LASTFM_UPSTREAM_REJECTED: 'Vibe recommendations are unavailable for this seed',
+      VIBE_DEADLINE_EXCEEDED: 'Vibe planning timed out',
+      VIBE_NO_LOCAL_MATCHES: 'No Vibe recommendations match the local library',
+      VIBE_NO_RECOMMENDATIONS: 'No Vibe recommendations are available for this seed',
+      VIBE_TARGET_NOT_REACHED: 'Vibe found fewer tracks than requested',
+    };
+    return messages[code] || 'Vibe recommendations are unavailable';
+  };
+
+  const safeMobileVibeWarningCode = (payload = {}) => {
+    if (payload.partial !== true) return '';
+    const code = text(payload.warningCode) || text(payload.warning);
+    return [
+      'LASTFM_UNAVAILABLE', 'LASTFM_MALFORMED_RESPONSE',
+      'LASTFM_UPSTREAM_REJECTED', 'VIBE_DEADLINE_EXCEEDED',
+      'VIBE_NO_LOCAL_MATCHES', 'VIBE_NO_RECOMMENDATIONS',
+      'VIBE_TARGET_NOT_REACHED',
+    ].includes(code) ? code : '';
+  };
+
   const safeMobileEndlessVibeJob = (payload = {}) => {
     const jobId = text(payload.jobId);
     const active = payload.active === true;
@@ -1958,6 +1984,9 @@ export function registerMobileRoutes(app, deps = {}) {
       ...(Number.isFinite(targetQueue) ? { targetQueue: Math.max(0, Math.floor(targetQueue)) } : {}),
       ...(Number.isFinite(builtCount) ? { builtCount: Math.max(0, Math.floor(builtCount)) } : {}),
       ...(latest ? { latest } : {}),
+      ...(payload.partial === true ? { partial: true } : {}),
+      ...(safeMobileVibeWarningCode(payload) ? { warningCode: safeMobileVibeWarningCode(payload) } : {}),
+      ...(safeMobileVibeWarning(payload) ? { warning: safeMobileVibeWarning(payload) } : {}),
       ...(status === 'error' ? { error: 'Vibe build failed' } : {}),
       ...(status === 'cancelled' ? { error: 'Vibe build cancelled' } : {}),
     };
@@ -2330,7 +2359,7 @@ export function registerMobileRoutes(app, deps = {}) {
 
   const mobileVibePreviewOptions = (body) => {
     if (!isPlainObject(body)) return { error: 'request body must be an object' };
-    const allowed = new Set(['trackId', 'targetQueue']);
+    const allowed = new Set(['trackId', 'targetQueue', 'planningBudgetSeconds']);
     if (Object.keys(body).some((key) => !allowed.has(key))) {
       return { error: 'unsupported Vibe preview request field' };
     }
@@ -2343,7 +2372,18 @@ export function registerMobileRoutes(app, deps = {}) {
       return { error: 'targetQueue must be an integer from 1 to 200' };
     }
 
-    return { trackId, targetQueue };
+    const hasPlanningBudgetSeconds = Object.prototype.hasOwnProperty.call(body, 'planningBudgetSeconds');
+    if (hasPlanningBudgetSeconds
+      && (!Number.isInteger(body.planningBudgetSeconds)
+        || body.planningBudgetSeconds < 16 || body.planningBudgetSeconds > 35)) {
+      return { error: 'planningBudgetSeconds must be an integer from 16 to 35' };
+    }
+
+    return {
+      trackId,
+      targetQueue,
+      ...(hasPlanningBudgetSeconds ? { planningBudgetSeconds: body.planningBudgetSeconds } : {}),
+    };
   };
 
   const withTimeout = async (promise, timeoutMs, code) => {
@@ -3779,6 +3819,9 @@ export function registerMobileRoutes(app, deps = {}) {
             targetQueue: options.targetQueue,
             seedArtist: seed.artist,
             seedTitle: seed.title,
+            ...(options.planningBudgetSeconds !== undefined
+              ? { planningBudgetSeconds: options.planningBudgetSeconds }
+              : {}),
           },
         })),
         vibePreviewTimeoutMs,
@@ -3792,7 +3835,25 @@ export function registerMobileRoutes(app, deps = {}) {
     }
 
     if (!result?.ok) {
-      return errorResponse(res, 502, 'Vibe preview unavailable', 'MOBILE_VIBE_PREVIEW_FAILED');
+      // Config returns only an allowlisted Vibe code. Preserve that safe cause
+      // for native recovery without forwarding subprocess stderr or arguments.
+      const upstreamCode = text(result?.json?.code);
+      const safeCodes = new Set([
+        'LASTFM_UNAVAILABLE', 'LASTFM_MALFORMED_RESPONSE',
+        'LASTFM_UPSTREAM_REJECTED', 'VIBE_DEADLINE_EXCEEDED',
+        'VIBE_NO_LOCAL_MATCHES', 'VIBE_NO_RECOMMENDATIONS', 'VIBE_TARGET_NOT_REACHED',
+      ]);
+      const code = safeCodes.has(upstreamCode) ? `MOBILE_VIBE_PREVIEW_${upstreamCode}` : 'MOBILE_VIBE_PREVIEW_FAILED';
+      const messages = {
+        LASTFM_UNAVAILABLE: 'Vibe recommendations are temporarily unavailable',
+        LASTFM_MALFORMED_RESPONSE: 'Vibe recommendations are temporarily unavailable',
+        LASTFM_UPSTREAM_REJECTED: 'Vibe recommendations are unavailable for this seed',
+        VIBE_DEADLINE_EXCEEDED: 'Vibe preview timed out',
+        VIBE_NO_LOCAL_MATCHES: 'No Vibe recommendations match the local library',
+        VIBE_NO_RECOMMENDATIONS: 'No Vibe recommendations are available for this seed',
+        VIBE_TARGET_NOT_REACHED: 'Vibe found fewer tracks than requested',
+      };
+      return errorResponse(res, Number(result?.status) === 504 ? 504 : 502, messages[upstreamCode] || 'Vibe preview unavailable', code);
     }
 
     const resolvedTracks = [];
@@ -3819,6 +3880,14 @@ export function registerMobileRoutes(app, deps = {}) {
       );
     }
 
+    const upstreamWarningCode = safeMobileVibeWarningCode(result?.json?.summary || {});
+    const partial = result?.json?.summary?.partial === true || resolvedTracks.length < options.targetQueue;
+    const warningPayload = {
+      ...(result?.json?.summary || {}),
+      partial,
+      ...(!upstreamWarningCode && partial ? { warningCode: 'VIBE_TARGET_NOT_REACHED' } : {}),
+    };
+
     return res.json({
       ok: true,
       kind: 'native-device-vibe-preview',
@@ -3830,6 +3899,9 @@ export function registerMobileRoutes(app, deps = {}) {
         baseUrl: requestBaseUrl(req, mobileBaseUrl),
       })),
       catalogBuiltAt: text(catalog.builtAt) || null,
+      partial,
+      ...(safeMobileVibeWarningCode(warningPayload) ? { warningCode: safeMobileVibeWarningCode(warningPayload) } : {}),
+      warning: safeMobileVibeWarning(warningPayload) || null,
     });
   }));
 
@@ -4070,7 +4142,7 @@ export function registerMobileRoutes(app, deps = {}) {
     // MPD positions are zero-based for ranged delete. The mobile DTO exposes
     // one-based positions, so the selected position is the first item removed.
     if (item.serverPosition < queue.items.length) {
-      const result = await mpdQueryRaw(`delete ${item.serverPosition}`);
+      const result = await mpdQueryRaw(`delete ${item.serverPosition}:`);
       if (!result || mpdHasACK(result)) return errorResponse(res, 502, 'MPD rejected queue truncation');
     }
     return queueResponse(res, 'delete-below', await loadMobileQueue(req));

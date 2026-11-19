@@ -1,3 +1,4 @@
+import { isMusicLibraryTrack } from './music-library-counts.mjs';
 import {
   publicMobileAlbum,
   publicMobileArtist,
@@ -251,6 +252,7 @@ function trackItem({ source, provider, raw, catalog, baseUrl, makeItemId, artwor
 function albumItem({ source, provider, raw, catalog, baseUrl, makeItemId, artworkUrlFor, index }) {
   const file = text(raw?.file);
   const catalogTrack = file ? catalog?.byFile?.get(file) : null;
+  if (file && !isMusicLibraryTrack(catalogTrack || raw)) return null;
   const albumName = text(raw?.album || raw?.title);
   const artistName = text(raw?.artist || raw?.albumArtist);
   const albumRecord = catalogAlbumFor(catalog, {
@@ -258,6 +260,13 @@ function albumItem({ source, provider, raw, catalog, baseUrl, makeItemId, artwor
     album: text(catalogTrack?.album || albumName),
     artist: text(catalogTrack?.albumArtist || artistName),
   });
+  // History providers can return title/artist only. Omit a known nonmusic
+  // collection, but preserve unmatched remote music and same-title music albums.
+  if (!albumRecord && (catalog?.tracks || []).some((track) => (
+    !isMusicLibraryTrack(track)
+    && normalized(track.album) === normalized(albumName)
+    && normalized(track.albumArtist || track.artist) === normalized(artistName)
+  ))) return null;
   const album = albumRecord ? publicMobileAlbum(albumRecord, catalog, { baseUrl }) : null;
   const title = text(album?.album || albumName) || '(album)';
   const artist = text(album?.artist || artistName);

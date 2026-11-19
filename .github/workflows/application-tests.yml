@@ -38,8 +38,8 @@ jobs:
 
       - name: Install browser test prerequisites
         run: |
-          npx playwright install-deps chromium
-          runuser -u node -g root -- npx playwright install chromium
+          npx playwright install-deps chromium webkit
+          runuser -u node -g root -- npx playwright install chromium webkit
 
       - name: Run Node application tests
         run: runuser -u node -g root -- npm test

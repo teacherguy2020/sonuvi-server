@@ -1,3 +1,5 @@
+import { isMusicLibraryTrack } from '../lib/music-library-counts.mjs';
+import { audioQualitySummaryForTracks } from '../lib/browse-index-quality.mjs';
 import { RadioCatalogUnavailableError } from '../lib/moode-radio-catalog.mjs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -29,10 +31,7 @@ async function refreshRecentAlbumsFastCache() {
       const resp = await localApi('/config/library-health/albums', { timeoutMs: 16000 });
       const albums = (resp.ok && resp?.json?.ok && Array.isArray(resp.json.albums)) ? resp.json.albums : [];
       const items = albums
-        .filter((a) => {
-          const f = String(a?.folder || '').trim().toLowerCase();
-          return !(f.startsWith('usb/samsungmoode/podcasts/') || f.includes('/podcasts/'));
-        })
+        .filter((a) => isMusicLibraryTrack({ ...a, file: a?.sampleFile || a?.folder }))
         .sort((a, b) => Number(b?.addedTs || 0) - Number(a?.addedTs || 0))
         .map((a) => ({
           kind: 'album',
@@ -136,6 +135,27 @@ async function refreshRecentPlaylistsCache() {
   return recentPlaylistsCache.inflight;
 }
 
+// Project persisted indexes as well as fresh ones: no rescan or data rewrite.
+// A mixed audio/video album keeps its music tracks and a music thumbnail.
+function musicBrowseAlbums(index) {
+  const keyFor = (artist, album) => `${String(artist || '').trim().toLowerCase()}|${String(album || '').trim().toLowerCase()}`;
+  const tracksByAlbum = new Map();
+  for (const track of Array.isArray(index?.tracks) ? index.tracks : []) {
+    if (!isMusicLibraryTrack(track)) continue;
+    const key = keyFor(track.albumArtist || track.artist, track.album);
+    if (!tracksByAlbum.has(key)) tracksByAlbum.set(key, []);
+    tracksByAlbum.get(key).push(track);
+  }
+  return (Array.isArray(index?.albums) ? index.albums : []).flatMap((album) => {
+    const tracks = tracksByAlbum.get(keyFor(album.artist, album.album));
+    if (!tracks?.length) return [];
+    return [{ ...album, sampleFile: tracks[0].file, trackCount: tracks.length,
+      durationSec: tracks.reduce((total, track) => total + (Number(track.durationSec) || 0), 0),
+      audioQuality: audioQualitySummaryForTracks(tracks),
+    }];
+  });
+}
+
 export function registerConfigBrowseRoutes(app, deps) {
   const { requireTrackKey, radioFeatures, getBrowseIndex = defaultGetBrowseIndex } = deps;
 
@@ -183,6 +203,7 @@ export function registerConfigBrowseRoutes(app, deps) {
       const tracks = Array.isArray(idx?.tracks) ? idx.tracks : [];
       const byAlbum = new Map();
       for (const t of tracks) {
+        if (!isMusicLibraryTrack(t)) continue;
         const album = String(t?.album || '').trim();
         const artist = String(t?.albumArtist || t?.artist || '').trim();
         const file = String(t?.file || '').trim();
@@ -284,7 +305,7 @@ export function registerConfigBrowseRoutes(app, deps) {
       const limit = Math.max(1, Math.min(10000, Number(req.query?.limit || 3000) || 3000));
       const mpdHost = String(MPD_HOST || 'moode.local');
       const idx = await getBrowseIndex(mpdHost);
-      let albums = Array.isArray(idx?.albums) ? idx.albums : [];
+      let albums = musicBrowseAlbums(idx);
       if (artist) albums = albums.filter((a) => String(a?.artist || '').trim().toLowerCase() === artist);
       if (q) albums = albums.filter((a) => (`${String(a?.artist || '')} ${String(a?.album || '')}`).toLowerCase().includes(q));
       albums = albums.slice(0, limit).map(album => ({ ...album,
@@ -306,6 +327,7 @@ export function registerConfigBrowseRoutes(app, deps) {
       const idx = await getBrowseIndex(mpdHost);
       const byAlbum = new Map();
       for (const t of (Array.isArray(idx?.tracks) ? idx.tracks : [])) {
+        if (!isMusicLibraryTrack(t)) continue;
         const rowArtist = String(t?.artist || t?.albumArtist || '').trim();
         if (rowArtist.toLowerCase() !== artLc) continue;
         const albumName = String(t?.album || '').trim();
@@ -345,6 +367,7 @@ export function registerConfigBrowseRoutes(app, deps) {
       const mpdHost = String(MPD_HOST || 'moode.local');
       const idx = await getBrowseIndex(mpdHost);
       const tracks = (Array.isArray(idx?.tracks) ? idx.tracks : [])
+        .filter(isMusicLibraryTrack)
         .filter((t) => String(t?.album || '').trim().toLowerCase() === albLc)
         .filter((t) => !artLc || [t?.albumArtist, t?.artist].some(value => String(value || '').trim().toLowerCase() === artLc))
         .map((t) => ({

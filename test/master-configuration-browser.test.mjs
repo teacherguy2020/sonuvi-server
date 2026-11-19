@@ -46,7 +46,7 @@ test('actual configuration page synchronizes forms and JSON through real validat
     await page.getByRole('button',{name:'Devices',exact:true}).click();
     assert.equal(await page.locator('[data-plugin=radio]').isVisible(),false);
     await page.getByRole('button',{name:'All integrations',exact:true}).click();
-    const radio=page.locator('fieldset').filter({has:page.locator('legend',{hasText:/^Radio$/})});
+    const radio=page.locator('[data-plugin=radio]');
     await radio.getByRole('button',{name:'Configure Radio',exact:true}).click();
     await radio.locator('summary',{hasText:'Plugin Config'}).click();
     await radio.locator('input[type=checkbox]').check();

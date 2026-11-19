@@ -328,6 +328,41 @@ This page now gives the wiki a sharper internal model of Queue Wizard:
   selected target: Home moOde/ Alexa use the server queue, while This
   iPhone/This iPad receives the previewed tracks in the native device queue
 - Add to Playlist, collage, and Vibe remain explicit server-side operations;
-  the native client does not receive raw MPD paths or Track Keys
 
-_Last updated: 2026-10-30 America/Chicago_
+### Vibe reliability behavior
+
+Vibe discovery uses one bounded monotonic deadline across Last.fm retries and
+planner passes. The legacy preview handshake omits a budget and therefore uses
+the 16-second planner budget with a 21-second process cap. A native caller may
+opt in with integer `planningBudgetSeconds` from 16 through 35; the process cap
+is then budget plus five seconds (at most 40 seconds). The mobile outer request
+cap remains 45 seconds. A client using the longer preview must extend both its
+request and resource timeouts; this server change does not make the existing
+16-second request wait longer. A timed-out preview returns the controlled
+`VIBE_DEADLINE_EXCEEDED` failure rather than subprocess output.
+
+Retryable categories are network failures, HTTP 429/5xx responses, and Last.fm
+errors 8, 16, and 29. Malformed responses may be retried within the same budget;
+permanent upstream rejections are not retried. `Retry-After` is bounded, so it
+cannot extend the deadline.
+
+The result distinguishes a valid empty Last.fm list (`VIBE_NO_RECOMMENDATIONS`),
+recommendations with no usable local-library match (`VIBE_NO_LOCAL_MATCHES`),
+and upstream discovery failures. When a later recoverable failure follows usable
+local matches, Vibe preserves the partial tracks and returns an allowlisted
+`warningCode` plus its matching human-safe `warning`. Unknown codes and raw
+subprocess output are never forwarded to config or native clients.
+
+Vibe preview is not cached. The Vibe result/deferred job state is owned by the server. Native clients
+receive canonical track IDs for preview and sanitized job metadata only; they do
+not receive raw MPD paths or Track Keys.
+
+Mobile Home queue **delete below** resolves a fresh signed queue handle and
+uses MPD ranged deletion (`delete N:`), retaining the selected item and every
+item above it while removing all later items. It refuses a stale handle or a
+range that would remove the current item. A preview with usable tracks but fewer
+than its requested target is explicitly partial; a typed upstream warning keeps
+precedence, otherwise the safe `VIBE_TARGET_NOT_REACHED` code and “Vibe found
+fewer tracks than requested” message are returned.
+
+_Last updated: 2026-11-18 America/Chicago_

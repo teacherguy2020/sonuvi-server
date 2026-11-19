@@ -636,6 +636,85 @@ test('native Vibe preview fails safely for unresolved candidates and timeouts', 
   assert.equal(timeout.body.code, 'MOBILE_VIBE_PREVIEW_TIMEOUT');
 });
 
+test('native Vibe preview forwards only a valid opt-in planning budget', async (t) => {
+  const calls = [];
+  const catalog = buildMobileCatalog(fixtureIndex(), { trackIdSecret: 'track-secret-for-test' });
+  const app = registerFixture(async () => 'OK\n', {
+    fetchInternalRequest: async (pathname, options) => {
+      calls.push({ pathname, options });
+      return { ok: true, status: 200, json: { tracks: [{ file: fixtureIndex().tracks[1].file }] } };
+    },
+  });
+  const route = app.routes.get('POST /v1/mobile/vibe/preview');
+  const originalSetTimeout = globalThis.setTimeout;
+  const deadlines = [];
+  globalThis.setTimeout = (callback, timeout, ...args) => {
+    deadlines.push(timeout);
+    return originalSetTimeout(callback, timeout, ...args);
+  };
+  t.after(() => { globalThis.setTimeout = originalSetTimeout; });
+  const extended = createResponse();
+  await route(request({
+    headers: sessionHeaders(),
+    body: { trackId: catalog.tracks[0].id, planningBudgetSeconds: 35 },
+  }), extended);
+  assert.equal(extended.statusCode, 200);
+  assert.deepEqual(calls[0].options.body, {
+    targetQueue: 25,
+    seedArtist: 'Test Artist',
+    seedTitle: 'First',
+    planningBudgetSeconds: 35,
+  });
+  assert.ok(deadlines.includes(45_000));
+
+  const invalid = createResponse();
+  await route(request({
+    headers: sessionHeaders(),
+    body: { trackId: catalog.tracks[0].id, planningBudgetSeconds: 36 },
+  }), invalid);
+  assert.equal(invalid.statusCode, 400);
+  assert.equal(invalid.body.code, 'MOBILE_VIBE_PREVIEW_INVALID_REQUEST');
+  assert.equal(calls.length, 1);
+});
+
+test('native Vibe preview and job preserve only allowlisted partial warning codes', async () => {
+  const catalog = buildMobileCatalog(fixtureIndex(), { trackIdSecret: 'track-secret-for-test' });
+  const seedTrackId = catalog.tracks[0].id;
+  const partialApp = registerFixture(async () => 'OK\n', {
+    fetchInternalRequest: async (pathname) => {
+      if (pathname === '/config/queue-wizard/vibe-seed') {
+        return {
+          ok: true, status: 200,
+          json: {
+            tracks: [{ file: fixtureIndex().tracks[1].file }],
+            summary: { partial: true, warningCode: 'LASTFM_UNAVAILABLE', warning: 'safe server message' },
+          },
+        };
+      }
+      return {
+        ok: true, status: 200,
+        json: { jobId: 'job-1', status: 'done', done: true, partial: true, warningCode: 'SECRET=raw', warning: 'SECRET=raw' },
+      };
+    },
+  });
+  const preview = createResponse();
+  await partialApp.routes.get('POST /v1/mobile/vibe/preview')?.(request({
+    headers: sessionHeaders(), body: { trackId: seedTrackId },
+  }), preview);
+  assert.equal(preview.statusCode, 200);
+  assert.equal(preview.body.warningCode, 'LASTFM_UNAVAILABLE');
+  assert.equal(preview.body.warning, 'Vibe recommendations are temporarily unavailable');
+
+  const job = createResponse();
+  await partialApp.routes.get('GET /v1/mobile/vibe/jobs/:jobId')?.(request({
+    headers: sessionHeaders(), params: { jobId: 'job-1' },
+  }), job);
+  assert.equal(job.statusCode, 200);
+  assert.equal(Object.hasOwn(job.body, 'warningCode'), false);
+  assert.equal(job.body.warning, 'Vibe recommendations are unavailable');
+  assert.doesNotMatch(JSON.stringify(job.body), /SECRET=raw/);
+});
+
 test('the pre-existing current-track mobile Vibe adapter remains compatible', async () => {
   const calls = [];
   const app = registerFixture(async () => 'OK\n', {

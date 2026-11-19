@@ -178,12 +178,17 @@ export function buildMobileCatalog(index, { trackIdSecret } = {}) {
         artistId: clean(source?.mbArtistId),
       },
       file,
+      // Internal classification only; not added to the public track DTO.
+      isMusic: isMusicLibraryTrack(source),
     };
 
     tracks.push(record);
-    if (isMusicLibraryTrack(source)) musicTrackIDs.add(record.id);
+    if (record.isMusic) musicTrackIDs.add(record.id);
     byTrackId.set(trackId, record);
     byFile.set(file, record);
+
+    // Retain every playable identity, but never group episodes/videos as albums.
+    if (!record.isMusic) continue;
 
     if (!albumsById.has(albumId)) {
       albumsById.set(albumId, {

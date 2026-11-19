@@ -8,6 +8,7 @@ import subprocess
 import time
 import traceback
 from datetime import datetime
+from email.utils import parsedate_to_datetime
 
 import requests
 from mpd import MPDClient, CommandError
@@ -170,59 +171,137 @@ def mpd_connect(host: str, port: int) -> MPDClient:
     return c
 
 
-def lastfm_get_similar(api_key: str, artist: str, title: str, limit: int):
-    params = {
-        "method": "track.getSimilar",
-        "artist": artist,
-        "track": title,
-        "api_key": api_key,
-        "format": "json",
-        "limit": str(limit),
-        "autocorrect": "1",
-    }
+class VibeFailure(RuntimeError):
+    """A public, allowlisted discovery failure; never carries upstream text."""
+    def __init__(self, code, category="unavailable"):
+        self.code = code
+        self.category = category
+        super().__init__(code)
 
-    last_err = None
-    for attempt in range(6):  # 6 tries total
+
+def _remaining_seconds(deadline, clock=time.monotonic):
+    return None if deadline is None else max(0.0, deadline - clock())
+
+
+def _retry_after_seconds(value, now=None):
+    """Accept only a small, bounded Retry-After value (seconds or date)."""
+    try:
+        seconds = float(str(value).strip())
+    except (TypeError, ValueError):
         try:
-            r = requests.get(
-                LASTFM_ROOT,
-                params=params,
-                timeout=(5, 20),  # (connect timeout, read timeout)
-                headers={"User-Agent": "moode-vibe/chain-2.0"}
-            )
-            data = r.json()
+            seconds = parsedate_to_datetime(str(value)).timestamp() - (now if now is not None else time.time())
+        except (TypeError, ValueError, OverflowError):
+            return None
+    return max(0.0, min(8.0, seconds))
 
-            if "error" not in data:
-                tracks = data.get("similartracks", {}).get("track", [])
-                if isinstance(tracks, dict):
-                    tracks = [tracks]
-                return tracks or []
 
-            err = int(data.get("error") or 0)
-            msg = data.get("message") or "Unknown error"
+def _safe_lastfm_log(*, attempt, category, pass_number=0):
+    # Never include response data, request URL, API key, or seed text.
+    print(f"[lastfm] pass={max(0, int(pass_number))} attempt={attempt} category={category}", flush=True)
 
-            # Last.fm transient
-            if err == 8:
-                wait = 1.5 * (attempt + 1)
-                print(f"[lastfm] transient error 8 ('{msg}'), retrying in {wait:.1f}s...", flush=True)
-                time.sleep(wait)
-                continue
 
-            raise RuntimeError(f"Last.fm error {err}: {msg}")
-
-        except (
-            requests.exceptions.ReadTimeout,
-            requests.exceptions.ConnectTimeout,
-            requests.exceptions.Timeout,
-            requests.exceptions.ConnectionError,
-        ) as e:
-            last_err = e
-            wait = 1.5 * (attempt + 1)
-            print(f"[lastfm] network timeout/conn issue ({e.__class__.__name__}), retrying in {wait:.1f}s...", flush=True)
-            time.sleep(wait)
+def _valid_recommendations(data):
+    if not isinstance(data, dict):
+        raise VibeFailure("LASTFM_MALFORMED_RESPONSE", "malformed")
+    if "error" in data:
+        return None
+    similar = data.get("similartracks")
+    if not isinstance(similar, dict):
+        raise VibeFailure("LASTFM_MALFORMED_RESPONSE", "malformed")
+    # Missing track is malformed; an explicit empty list is valid.
+    if "track" not in similar:
+        raise VibeFailure("LASTFM_MALFORMED_RESPONSE", "malformed")
+    tracks = similar["track"]
+    if isinstance(tracks, dict):
+        tracks = [tracks]
+    if not isinstance(tracks, list):
+        raise VibeFailure("LASTFM_MALFORMED_RESPONSE", "malformed")
+    valid, malformed = [], False
+    for row in tracks:
+        if not isinstance(row, dict):
+            malformed = True
             continue
+        artist = row.get("artist")
+        artist_name = artist.get("name") if isinstance(artist, dict) else artist
+        if not isinstance(row.get("name"), str) or not row["name"].strip() or not isinstance(artist_name, str) or not artist_name.strip():
+            malformed = True
+            continue
+        # Only expose the normalized schema consumed by local matching.
+        mbid = row.get("mbid")
+        valid.append({"name": row["name"].strip(),
+                      "artist": {"name": artist_name.strip()},
+                      "mbid": mbid.strip() if isinstance(mbid, str) else ""})
+    if tracks and malformed and not valid:
+        raise VibeFailure("LASTFM_MALFORMED_RESPONSE", "malformed")
+    return valid
 
-    raise RuntimeError(f"Last.fm network kept failing after retries: {last_err}")
+
+def lastfm_get_similar(api_key: str, artist: str, title: str, limit: int, *, deadline=None,
+                       pass_number=0, request_get=requests.get, clock=time.monotonic, sleeper=time.sleep):
+    params = {"method": "track.getSimilar", "artist": artist, "track": title, "api_key": api_key,
+              "format": "json", "limit": str(limit), "autocorrect": "1"}
+    last_category = "unavailable"
+    for attempt in range(1, 5):
+        remaining = _remaining_seconds(deadline, clock)
+        if remaining is not None and remaining <= 0:
+            raise VibeFailure("VIBE_DEADLINE_EXCEEDED", "deadline")
+        retry_after = None
+        try:
+            # requests applies connect/read independently; split one deadline.
+            total_timeout = min(12.0, remaining) if remaining is not None else 12.0
+            connect_timeout = min(4.0, total_timeout / 2.0)
+            read_timeout = max(0.001, total_timeout - connect_timeout)
+            response = request_get(LASTFM_ROOT, params=params, timeout=(connect_timeout, read_timeout),
+                                   headers={"User-Agent": "moode-vibe/chain-2.0"})
+            if _remaining_seconds(deadline, clock) is not None and _remaining_seconds(deadline, clock) <= 0:
+                raise VibeFailure("VIBE_DEADLINE_EXCEEDED", "deadline")
+            status = int(getattr(response, "status_code", 0) or 0)
+            if status == 429 or 500 <= status <= 599:
+                last_category = "rate_limited" if status == 429 else "transient_http"
+                retry_after = _retry_after_seconds(getattr(response, "headers", {}).get("Retry-After"))
+            elif status < 200 or status >= 300:
+                raise VibeFailure("LASTFM_UPSTREAM_REJECTED", "permanent")
+            else:
+                try:
+                    data = response.json()
+                except (ValueError, json.JSONDecodeError):
+                    last_category = "malformed"
+                else:
+                    rows = _valid_recommendations(data)
+                    if rows is not None:
+                        return rows  # [] is a genuine successful empty response.
+                    try:
+                        error_code = int(data.get("error") or 0)
+                    except (TypeError, ValueError):
+                        last_category = "malformed"
+                    else:
+                        if error_code in (2, 3, 4, 6, 7, 10, 13, 14, 26):
+                            raise VibeFailure("LASTFM_UPSTREAM_REJECTED", "permanent")
+                        if error_code in (8, 16, 29):
+                            last_category = "lastfm_transient"
+                        else:
+                            raise VibeFailure("LASTFM_UPSTREAM_REJECTED", "permanent")
+        except VibeFailure as failure:
+            if failure.category == "permanent":
+                raise
+            if failure.code != "LASTFM_MALFORMED_RESPONSE":
+                raise
+            last_category = "malformed"
+        except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectTimeout,
+                requests.exceptions.Timeout, requests.exceptions.ConnectionError):
+            last_category = "network"
+        if attempt >= 4:
+            break
+        wait = retry_after if retry_after is not None else min(4.0, 0.5 * (2 ** (attempt - 1)))
+        remaining = _remaining_seconds(deadline, clock)
+        if remaining is not None:
+            wait = min(wait, max(0.0, remaining))
+        _safe_lastfm_log(attempt=attempt, category=last_category, pass_number=pass_number)
+        # Retry-After: 0 means immediate bounded retry, not deadline expiry.
+        if wait > 0:
+            sleeper(wait)
+    _safe_lastfm_log(attempt=4, category=last_category, pass_number=pass_number)
+    raise VibeFailure("LASTFM_UNAVAILABLE", last_category)
 
 
 def pick_best(paths, used_files):
@@ -385,7 +464,7 @@ def resolve_local_candidate(recommendation, *, mbid_map, text_map, used_files, f
     }
 
 
-def build_v2_plan(mpd, args, *, mbid_map, text_map, file_meta, seed_artist, seed_title, seed_genre):
+def build_v2_plan(mpd, args, *, mbid_map, text_map, file_meta, seed_artist, seed_title, seed_genre, deadline=None, stats=None):
     """Build a small, diverse local queue before making any MPD mutation."""
     used_files = set()
     try:
@@ -406,12 +485,15 @@ def build_v2_plan(mpd, args, *, mbid_map, text_map, file_meta, seed_artist, seed
     retained_current = 1 if args.crop and not args.append else 0
     target = max(1, configured_target - retained_current)
     max_expansions = max(0, min(3, int(args.planner_max_expansions or 0)))
-    started = time.time()
     all_candidates = []
     visited_seeds = set()
     pending_seeds = [(seed_artist, seed_title)]
     pass_number = 0
     plan = []
+    warning = ""
+    recommendation_count = 0
+    local_match_count = 0
+    successful_discovery_passes = 0
 
     def same_artist_family(left, right):
         """Avoid recursively querying a cosmetic variant of the same artist."""
@@ -434,8 +516,9 @@ def build_v2_plan(mpd, args, *, mbid_map, text_map, file_meta, seed_artist, seed
         )
 
     while pending_seeds and pass_number <= max_expansions:
-        if args.max_seconds > 0 and (time.time() - started) >= args.max_seconds:
+        if _remaining_seconds(deadline) is not None and _remaining_seconds(deadline) <= 0:
             print(f"[v2] Time budget reached ({args.max_seconds}s), finishing available plan.", flush=True)
+            warning = "VIBE_DEADLINE_EXCEEDED"
             break
 
         query_artist, query_title = pending_seeds.pop(0)
@@ -445,12 +528,17 @@ def build_v2_plan(mpd, args, *, mbid_map, text_map, file_meta, seed_artist, seed
         visited_seeds.add(query_key)
         pass_number += 1
 
-        print(
-            f"[{datetime.now().strftime('%H:%M:%S')}] Last.fm get similar "
-            f"{query_artist} - {query_title} limit {args.similar_limit} (v2 pass {pass_number})",
-            flush=True,
-        )
-        similar = lastfm_get_similar(args.api_key, query_artist, query_title, args.similar_limit)
+        print(f"[lastfm] pass={pass_number} category=query", flush=True)
+        try:
+            similar = lastfm_get_similar(args.api_key, query_artist, query_title, args.similar_limit,
+                                         deadline=deadline, pass_number=pass_number)
+        except VibeFailure as failure:
+            # Keep a safe plan collected by earlier passes; discovery has no MPD side effect.
+            warning = failure.code
+            plan = select_plan()
+            break
+        successful_discovery_passes += 1
+        recommendation_count += len(similar)
         pass_candidates = []
         for rank, recommendation in enumerate(similar, start=1):
             candidate = resolve_local_candidate(
@@ -464,6 +552,7 @@ def build_v2_plan(mpd, args, *, mbid_map, text_map, file_meta, seed_artist, seed
             if candidate:
                 all_candidates.append(candidate)
                 pass_candidates.append(candidate)
+                local_match_count += 1
         print(
             f"[v2] pass {pass_number}: {len(similar)} Last.fm candidates, "
             f"{len(pass_candidates)} new local matches, {len(all_candidates)} total local matches",
@@ -495,7 +584,18 @@ def build_v2_plan(mpd, args, *, mbid_map, text_map, file_meta, seed_artist, seed
         f"[v2] selected {len(plan)}/{target} tracks from {len(all_candidates)} local matches across {pass_number} pass(es)",
         flush=True,
     )
-    return plan, pass_number
+    if not warning and not plan:
+        if successful_discovery_passes and recommendation_count == 0:
+            warning = "VIBE_NO_RECOMMENDATIONS"
+        elif recommendation_count:
+            warning = "VIBE_NO_LOCAL_MATCHES"
+    if stats is not None:
+        stats.update({
+            "recommendation_count": recommendation_count,
+            "local_match_count": local_match_count,
+            "successful_discovery_passes": successful_discovery_passes,
+        })
+    return plan, pass_number, warning
 
 
 def apply_v2_plan(mpd, args, tracks, *, was_playing):
@@ -599,6 +699,8 @@ def main():
                     help="Keep the current seed queued and allow resilient fallback matching")
 
     args = ap.parse_args()
+    # This one monotonic deadline is shared by every external discovery call.
+    deadline = time.monotonic() + args.max_seconds if args.max_seconds > 0 else None
 
     if not args.api_key:
         raise SystemExit("ERROR: Provide Last.fm API key via --api-key or env LASTFM_API_KEY")
@@ -700,7 +802,8 @@ def main():
     original_seed = (seed_artist, seed_title)
 
     if args.planner_v2:
-        plan, discovery_passes = build_v2_plan(
+        discovery_stats = {}
+        plan, discovery_passes, warning_code = build_v2_plan(
             mpd,
             args,
             mbid_map=mbid_map,
@@ -709,6 +812,8 @@ def main():
             seed_artist=seed_artist,
             seed_title=seed_title,
             seed_genre=seed_genre,
+            deadline=deadline,
+            stats=discovery_stats,
         )
         applied_tracks = apply_v2_plan(mpd, args, plan, was_playing=was_playing)
         final_state = "unknown"
@@ -734,6 +839,13 @@ def main():
             "planner": "v2",
             "discovery_passes": discovery_passes,
             "tracks": plan if args.dry_run else applied_tracks,
+            "warning": warning_code or None,
+            "warning_code": warning_code or None,
+            "partial": bool(warning_code and plan),
+            "failure_code": warning_code if warning_code and not plan else None,
+            "outcome": "partial" if warning_code and plan else ("error" if warning_code else "ok"),
+            "recommendation_count": discovery_stats.get("recommendation_count", 0),
+            "local_match_count": discovery_stats.get("local_match_count", 0),
         }
         if args.json_out:
             try:
@@ -806,7 +918,6 @@ def main():
 
     hops = 0
     misses = 0
-    started = time.time()
 
     # IMPORTANT: in dry-run, we do NOT rely on live MPD queue_len() because we are not modifying it.
     # We instead build up out_tracks to args.target_queue.
@@ -815,19 +926,34 @@ def main():
             return len(out_tracks) >= args.target_queue
         return queue_len() >= args.target_queue
 
+    discovery_failure = ""
+    recommendation_count = 0
+    local_match_count = 0
+    successful_discovery_passes = 0
     if args.simple_seed_pass:
         print(f"[{datetime.now().strftime('%H:%M:%S')}] SIMPLE mode: batched seed queries (10 per pass)", flush=True)
         simple_batch = 10
         simple_pass = 0
 
         while not have_enough():
+            if _remaining_seconds(deadline) is not None and _remaining_seconds(deadline) <= 0:
+                print(f"Time budget reached ({args.max_seconds}s), stopping.")
+                discovery_failure = "VIBE_DEADLINE_EXCEEDED"
+                break
             simple_pass += 1
             batch_added = 0
             pass_seed_artist, pass_seed_title = seed_artist, seed_title
 
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] SIMPLE pass {simple_pass}: seed {pass_seed_title} — {pass_seed_artist}", flush=True)
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] Last.fm get similar {pass_seed_artist} - {pass_seed_title} limit {args.similar_limit}", flush=True)
-            sim = lastfm_get_similar(args.api_key, pass_seed_artist, pass_seed_title, args.similar_limit)
+            print(f"[lastfm] pass={simple_pass} category=simple-query", flush=True)
+            print(f"[lastfm] pass={simple_pass} category=query", flush=True)
+            try:
+                sim = lastfm_get_similar(args.api_key, pass_seed_artist, pass_seed_title, args.similar_limit, deadline=deadline, pass_number=simple_pass)
+            except VibeFailure as failure:
+                discovery_failure = failure.code
+                print(f"[lastfm] pass={simple_pass} category={failure.category}", flush=True)
+                break
+            successful_discovery_passes += 1
+            recommendation_count += len(sim)
             if args.shuffle_top and args.shuffle_top > 0 and sim:
                 n = min(args.shuffle_top, len(sim))
                 head = sim[:n]
@@ -870,6 +996,7 @@ def main():
                             method = "fuzzy"
                 if not cand:
                     continue
+                local_match_count += 1
                 if cand in bad_files or cand in used_files:
                     continue
 
@@ -907,14 +1034,22 @@ def main():
                 break
 
     while not args.simple_seed_pass and not have_enough():
-        if args.max_seconds > 0 and (time.time() - started) >= args.max_seconds:
+        if _remaining_seconds(deadline) is not None and _remaining_seconds(deadline) <= 0:
             print(f"Time budget reached ({args.max_seconds}s), stopping.")
-            break
 
+            discovery_failure = "VIBE_DEADLINE_EXCEEDED"
+            break
         hops += 1
 
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] Last.fm get similar {seed_artist} - {seed_title} limit {args.similar_limit}", flush=True)
-        sim = lastfm_get_similar(args.api_key, seed_artist, seed_title, args.similar_limit)
+        print(f"[lastfm] pass={hops} category=query", flush=True)
+        try:
+            sim = lastfm_get_similar(args.api_key, seed_artist, seed_title, args.similar_limit, deadline=deadline, pass_number=hops)
+        except VibeFailure as failure:
+            discovery_failure = failure.code
+            print(f"[lastfm] pass={hops} category={failure.category}", flush=True)
+            break
+        successful_discovery_passes += 1
+        recommendation_count += len(sim)
 
         if args.shuffle_top and args.shuffle_top > 0 and sim:
             n = min(args.shuffle_top, len(sim))
@@ -938,14 +1073,8 @@ def main():
 
         print(f"[{datetime.now().strftime('%H:%M:%S')}] pick from {len(sim)} similar", flush=True)
         if args.debug_trace:
-            sample = []
-            for tt in sim[:12]:
-                s_title = str((tt.get("name") or "")).strip()
-                s_artist_raw = tt.get("artist", {})
-                s_artist = str((s_artist_raw.get("name") if isinstance(s_artist_raw, dict) else s_artist_raw) or "").strip()
-                s_mbid = str(tt.get("mbid") or "").strip()
-                sample.append({"artist": s_artist, "title": s_title, "mbid": s_mbid})
-            print(f"[hop {hops}] similar sample: {json.dumps(sample, ensure_ascii=False)}", flush=True)
+            # Recommendation rows are upstream data; log only an allowlisted count.
+            print(f"[hop {hops}] similar_count={len(sim)}", flush=True)
 
         reject = {
             "blank": 0,
@@ -1018,6 +1147,7 @@ def main():
             if not cand:
                 reject["no_local_match"] += 1
                 continue
+            local_match_count += 1
 
             if cand in bad_files:
                 reject["bad_file"] += 1
@@ -1262,6 +1392,12 @@ def main():
         if args.sleep > 0:
             time.sleep(args.sleep)
 
+    if not discovery_failure and not out_tracks:
+        if successful_discovery_passes and recommendation_count == 0:
+            discovery_failure = "VIBE_NO_RECOMMENDATIONS"
+        elif recommendation_count:
+            discovery_failure = "VIBE_NO_LOCAL_MATCHES"
+
     # Final state (do not stop/play in dry-run)
     final_state = "unknown"
     try:
@@ -1302,6 +1438,13 @@ def main():
         "dry_run": bool(args.dry_run),
         "crop": bool(args.crop),
         "tracks": out_tracks,
+        "warning": discovery_failure or None,
+        "warning_code": discovery_failure or None,
+        "partial": bool(discovery_failure and out_tracks),
+        "failure_code": discovery_failure if discovery_failure and not out_tracks else None,
+        "outcome": "partial" if discovery_failure and out_tracks else ("error" if discovery_failure else "ok"),
+        "recommendation_count": recommendation_count,
+        "local_match_count": local_match_count,
     }
 
     if args.json_out:
