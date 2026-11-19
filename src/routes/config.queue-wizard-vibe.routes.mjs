@@ -23,6 +23,27 @@ function makeVibeJobId() {
   return `vibe-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+const VIBE_FAILURE_MESSAGES = Object.freeze({
+  LASTFM_UNAVAILABLE: 'Vibe recommendations are temporarily unavailable',
+  LASTFM_MALFORMED_RESPONSE: 'Vibe recommendations are temporarily unavailable',
+  LASTFM_UPSTREAM_REJECTED: 'Vibe recommendations are unavailable for this seed',
+  VIBE_DEADLINE_EXCEEDED: 'Vibe planning timed out',
+  VIBE_NO_LOCAL_MATCHES: 'No Vibe recommendations match the local library',
+});
+
+function safeVibeFailure(code) {
+  const failureCode = String(code || '').trim();
+  return {
+    code: Object.prototype.hasOwnProperty.call(VIBE_FAILURE_MESSAGES, failureCode) ? failureCode : 'VIBE_UNAVAILABLE',
+    message: VIBE_FAILURE_MESSAGES[failureCode] || 'Vibe recommendations are unavailable',
+  };
+}
+
+function plannerFailure(data) {
+  const code = String(data?.failure_code || '').trim();
+  return code ? safeVibeFailure(code) : null;
+}
+
 export function registerConfigQueueWizardVibeRoutes(app, deps) {
   const {
     requireTrackKey,
@@ -408,6 +429,14 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
         env: vibeProcessEnvironment(),
       });
       job.proc = child;
+      const childDeadlineTimer = setTimeout(() => {
+        if (!job.done) {
+          job.error = 'VIBE_DEADLINE_EXCEEDED';
+          job.warning = safeVibeFailure(job.error).message;
+          child.kill('SIGTERM');
+        }
+      }, (isSmallQueue ? 18 : 45) * 1000 + 5000);
+      childDeadlineTimer.unref?.();
       appendVibeJobLog(job, 'run', {
         seedArtist: artist,
         seedTitle: title,
@@ -475,22 +504,29 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
         errBuf += String(buf || '');
         const lines = errBuf.split(/\r?\n/);
         errBuf = lines.pop() || '';
-        lines.forEach((ln) => onLine(`stderr: ${ln}`));
+        lines.forEach(() => onLine('stderr: subprocess output omitted'));
       });
 
       child.on('close', async (code) => {
+        clearTimeout(childDeadlineTimer);
         if (outBuf.trim()) onLine(outBuf.trim());
-        if (errBuf.trim()) onLine(`stderr: ${errBuf.trim()}`);
+        if (errBuf.trim()) onLine('stderr: subprocess output omitted');
 
         try {
           const jsonOut = await fs.readFile(jsonTmp, 'utf8');
           const data = JSON.parse(jsonOut);
           const baseTracks = Array.isArray(data?.tracks) ? data.tracks : [];
+          const failure = plannerFailure(data);
           job.rawBuiltCount = baseTracks.length;
           job.tracks = baseTracks;
+          if (failure) {
+            job.warning = failure.message;
+            if (baseTracks.length) job.partial = true;
+            else job.error = failure.code;
+          }
 
-          // Fallback: if Last.fm vibe resolves to zero tracks, build a local seed list from current artist.
-          if (!job.tracks.length) {
+          // A local artist fallback is valid only after a successful empty/no-match discovery.
+          if (!job.error && !job.tracks.length) {
             try {
               const body = {
                 genres: [],
@@ -535,8 +571,8 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
                 }).catch(() => {});
               }
             } catch (e2) {
-              job.logs.push(`fallback error: ${e2?.message || String(e2)}`);
-              appendVibeJobLog(job, 'fallback-error', { error: e2?.message || String(e2) }).catch(() => {});
+              job.logs.push('fallback error');
+              appendVibeJobLog(job, 'fallback-error', { error: 'VIBE_UNAVAILABLE' }).catch(() => {});
             }
           }
 
@@ -565,15 +601,16 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
           job.builtCount = job.tracks.length || 0;
           await fs.unlink(jsonTmp).catch(() => {});
         } catch (e) {
-          if (!job.error) job.error = 'JSON parse/out: ' + (e?.message || String(e));
+          if (!job.error) { job.error = 'VIBE_UNAVAILABLE'; job.warning = safeVibeFailure(job.error).message; }
         }
 
-        if (code !== 0 && !job.error) job.error = `vibe builder exited with code ${code}`;
+        if (code !== 0 && !job.error) { job.error = 'VIBE_UNAVAILABLE'; job.warning = safeVibeFailure(job.error).message; }
         if (!job.error && (playNow || keepPlaying) && job.tracks.length) {
           try {
             await applyVibePlanToMpd(job, { mpdHost, playNow, keepPlaying });
           } catch (applyError) {
-            job.error = `Queue apply failed: ${applyError?.message || String(applyError)}`;
+            job.error = 'VIBE_UNAVAILABLE';
+            job.warning = safeVibeFailure(job.error).message;
           }
         }
         job.done = true;
@@ -595,7 +632,7 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
 
       return res.json({ ok: true, jobId, targetQueue, minRating, seedArtist: artist, seedTitle: title });
     } catch (e) {
-      return res.status(500).json({ ok: false, error: e?.message || String(e) });
+      return res.status(500).json({ ok: false, error: 'Vibe request failed', code: 'VIBE_UNAVAILABLE' });
     }
   });
 
@@ -617,6 +654,8 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
         phase: job.phase,
         done: !!job.done,
         error: job.error || '',
+        partial: job.partial === true,
+        warning: job.warning || null,
         targetQueue: job.targetQueue,
         minRating: Number(job.minRating || 0),
         builtCount: Number(job.builtCount || 0),
@@ -632,7 +671,7 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
         tracks: job.done ? (Array.isArray(job.tracks) ? job.tracks : []) : [],
       });
     } catch (e) {
-      return res.status(500).json({ ok: false, error: e?.message || String(e) });
+      return res.status(500).json({ ok: false, error: 'Vibe request failed', code: 'VIBE_UNAVAILABLE' });
     }
   });
 
@@ -646,7 +685,7 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
       const job = getEndlessVibeJob();
       return res.json(job ? summarizeEndlessVibeJob(job) : { ok: true, active: false, done: false });
     } catch (e) {
-      return res.status(500).json({ ok: false, error: e?.message || String(e) });
+      return res.status(500).json({ ok: false, error: 'Vibe request failed', code: 'VIBE_UNAVAILABLE' });
     }
   });
 
@@ -685,7 +724,7 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
         sampleTracks: (Array.isArray(job.tracks) ? job.tracks : []).slice(0, 25),
       });
     } catch (e) {
-      return res.status(500).json({ ok: false, error: e?.message || String(e) });
+      return res.status(500).json({ ok: false, error: 'Vibe request failed', code: 'VIBE_UNAVAILABLE' });
     }
   });
 
@@ -708,7 +747,7 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
 
       return res.json({ ok: true, jobId, cancelled: true });
     } catch (e) {
-      return res.status(500).json({ ok: false, error: e?.message || String(e) });
+      return res.status(500).json({ ok: false, error: 'Vibe request failed', code: 'VIBE_UNAVAILABLE' });
     }
   });
 
@@ -728,12 +767,14 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
       const pyPath = releaseScript('lastfm_vibe_radio.py');
       const jsonTmp = await createVibeTemporaryJson('vibe-np');
       const vibeIndexPath = await resolveVibeIndexPath();
-      await execFileP('python3', [pyPath, '--api-key', lastfmApiKey, '--index', vibeIndexPath, '--seed-artist', artist, '--seed-title', title, '--target-queue', String(targetQueue), '--json-out', jsonTmp, '--mode', 'load', '--host', mpdHost, '--port', '6600', '--dry-run', '--debug-trace'], { env: vibeProcessEnvironment() });
+      await execFileP('python3', [pyPath, '--api-key', lastfmApiKey, '--index', vibeIndexPath, '--seed-artist', artist, '--seed-title', title, '--target-queue', String(targetQueue), '--json-out', jsonTmp, '--mode', 'load', '--host', mpdHost, '--port', '6600', '--dry-run', '--debug-trace', '--planner-v2', '--planner-max-expansions', '3', '--max-seconds', '16'], { env: vibeProcessEnvironment(), timeout: 21000, killSignal: 'SIGTERM' });
       const data = JSON.parse(await fs.readFile(jsonTmp, 'utf8'));
       await fs.unlink(jsonTmp).catch(() => {});
+      const failure = plannerFailure(data);
+      if (failure) return res.status(502).json({ ok: false, error: failure.message, code: failure.code });
       return res.json({ ok: true, tracks: data?.tracks || [], summary: data, targetQueue, seedArtist: artist, seedTitle: title });
     } catch (e) {
-      return res.status(500).json({ ok: false, error: e?.message || String(e) });
+      return res.status(500).json({ ok: false, error: 'Vibe request failed', code: 'VIBE_UNAVAILABLE' });
     }
   });
 
@@ -751,12 +792,14 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
       const pyPath = releaseScript('lastfm_vibe_radio.py');
       const jsonTmp = await createVibeTemporaryJson('vibe-np');
       const vibeIndexPath = await resolveVibeIndexPath();
-      await execFileP('python3', [pyPath, '--api-key', lastfmApiKey, '--index', vibeIndexPath, '--seed-artist', artist, '--seed-title', title, '--target-queue', String(targetQueue), '--json-out', jsonTmp, '--mode', 'load', '--host', mpdHost, '--port', '6600', '--dry-run', '--debug-trace'], { env: vibeProcessEnvironment() });
+      await execFileP('python3', [pyPath, '--api-key', lastfmApiKey, '--index', vibeIndexPath, '--seed-artist', artist, '--seed-title', title, '--target-queue', String(targetQueue), '--json-out', jsonTmp, '--mode', 'load', '--host', mpdHost, '--port', '6600', '--dry-run', '--debug-trace', '--planner-v2', '--planner-max-expansions', '3', '--max-seconds', '16'], { env: vibeProcessEnvironment(), timeout: 21000, killSignal: 'SIGTERM' });
       const data = JSON.parse(await fs.readFile(jsonTmp, 'utf8'));
       await fs.unlink(jsonTmp).catch(() => {});
+      const failure = plannerFailure(data);
+      if (failure) return res.status(502).json({ ok: false, error: failure.message, code: failure.code });
       return res.json({ ok: true, tracks: data?.tracks || [], summary: data, targetQueue, seedArtist: artist, seedTitle: title });
     } catch (e) {
-      return res.status(500).json({ ok: false, error: e?.message || String(e) });
+      return res.status(500).json({ ok: false, error: 'Vibe request failed', code: 'VIBE_UNAVAILABLE' });
     }
   });
 
@@ -862,7 +905,7 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
         '--dry-run',
       );
     } else {
-      pyArgs.push('--shuffle-top', '25', '--reseed-random', '--max-misses', '12');
+      pyArgs.push('--shuffle-top', '25', '--reseed-random', '--max-misses', '12', '--max-seconds', '18');
     }
     if (playNow || keepPlaying || endless) pyArgs.push('--crop');
     if (!usePlannerV2 && endless) pyArgs.push('--endless');
@@ -883,11 +926,19 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
       job.status = 'error';
       job.phase = 'error';
       job.updatedAt = Date.now();
-      job.logs.push(`spawn error: ${message}`);
-      appendVibeJobLog(job, 'spawn-error', { error: message }).catch(() => {});
+      job.logs.push('spawn error');
+      appendVibeJobLog(job, 'spawn-error', { error: 'VIBE_UNAVAILABLE' }).catch(() => {});
       throw error;
     }
     job.proc = child;
+    const childDeadlineTimer = setTimeout(() => {
+      if (!job.done) {
+        job.error = 'VIBE_DEADLINE_EXCEEDED';
+        job.warning = safeVibeFailure(job.error).message;
+        child.kill('SIGTERM');
+      }
+    }, 23000);
+    childDeadlineTimer.unref?.();
     appendVibeJobLog(job, 'run', {
       seedArtist,
       seedTitle,
@@ -955,18 +1006,25 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
       errBuf += String(buf || '');
       const lines = errBuf.split(/\r?\n/);
       errBuf = lines.pop() || '';
-      lines.filter(Boolean).forEach((ln) => onLine(`stderr: ${ln}`));
+      lines.filter(Boolean).forEach(() => onLine('stderr: subprocess output omitted'));
     });
     child.on('close', async (code) => {
+      clearTimeout(childDeadlineTimer);
       if (outBuf.trim()) onLine(outBuf.trim());
-      if (errBuf.trim()) onLine(`stderr: ${errBuf.trim()}`);
-      if (code !== 0 && !job.error) job.error = `vibe builder exited with code ${code}`;
+      if (errBuf.trim()) onLine('stderr: subprocess output omitted');
+      if (code !== 0 && !job.error) { job.error = 'VIBE_UNAVAILABLE'; job.warning = safeVibeFailure(job.error).message; }
 
       if (usePlannerV2) {
         try {
           if (!job.error) {
             const data = JSON.parse(await fs.readFile(jsonTmp, 'utf8'));
+            const failure = plannerFailure(data);
             const plannedTracks = Array.isArray(data?.tracks) ? data.tracks : [];
+            if (failure) {
+              job.warning = failure.message;
+              if (plannedTracks.length) job.partial = true;
+              else job.error = failure.code;
+            }
             job.tracks = plannedTracks;
             job.rawBuiltCount = plannedTracks.length;
             job.builtCount = plannedTracks.length;
@@ -985,9 +1043,9 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
           }
         } catch (error) {
           const message = error?.message || String(error);
-          if (!job.error) job.error = `planner-v2 result could not be applied: ${message}`;
-          job.logs.push(`planner-v2 apply error: ${message}`);
-          appendVibeJobLog(job, 'planner-v2-apply-error', { error: message }).catch(() => {});
+          if (!job.error) { job.error = 'VIBE_UNAVAILABLE'; job.warning = safeVibeFailure(job.error).message; }
+          job.logs.push('planner-v2 apply error');
+          appendVibeJobLog(job, 'planner-v2-apply-error', { error: 'VIBE_UNAVAILABLE' }).catch(() => {});
         } finally {
           await fs.unlink(jsonTmp).catch(() => {});
         }
@@ -1071,7 +1129,7 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
         seedTitle: result.seedTitle,
       });
     } catch (e) {
-      return res.status(500).json({ ok: false, error: e?.message || String(e) });
+      return res.status(500).json({ ok: false, error: 'Vibe request failed', code: 'VIBE_UNAVAILABLE' });
     }
   });
 
@@ -1152,12 +1210,14 @@ export function registerConfigQueueWizardVibeRoutes(app, deps) {
       const pyPath = releaseScript('lastfm_vibe_radio.py');
       const jsonTmp = await createVibeTemporaryJson('vibe-seed');
       const vibeIndexPath = await resolveVibeIndexPath();
-      await execFileP('python3', [pyPath, '--api-key', lastfmApiKey, '--index', vibeIndexPath, '--seed-artist', seedArtist, '--seed-title', seedTitle, '--target-queue', String(targetQueue), '--json-out', jsonTmp, '--mode', 'load', '--host', mpdHost, '--port', '6600', '--dry-run', '--debug-trace'], { env: vibeProcessEnvironment() });
+      await execFileP('python3', [pyPath, '--api-key', lastfmApiKey, '--index', vibeIndexPath, '--seed-artist', seedArtist, '--seed-title', seedTitle, '--target-queue', String(targetQueue), '--json-out', jsonTmp, '--mode', 'load', '--host', mpdHost, '--port', '6600', '--dry-run', '--debug-trace', '--planner-v2', '--planner-max-expansions', '3', '--max-seconds', '16'], { env: vibeProcessEnvironment(), timeout: 21000, killSignal: 'SIGTERM' });
       const data = JSON.parse(await fs.readFile(jsonTmp, 'utf8'));
       await fs.unlink(jsonTmp).catch(() => {});
+      const failure = plannerFailure(data);
+      if (failure) return res.status(502).json({ ok: false, error: failure.message, code: failure.code });
       return res.json({ ok: true, tracks: data?.tracks || [], summary: data, targetQueue, seedArtist, seedTitle });
     } catch (e) {
-      return res.status(500).json({ ok: false, error: e?.message || String(e) });
+      return res.status(500).json({ ok: false, error: 'Vibe request failed', code: 'VIBE_UNAVAILABLE' });
     }
   });
 

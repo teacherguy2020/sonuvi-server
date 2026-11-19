@@ -330,4 +330,4 @@ This page now gives the wiki a sharper internal model of Queue Wizard:
 - Add to Playlist, collage, and Vibe remain explicit server-side operations;
   the native client does not receive raw MPD paths or Track Keys
 
-_Last updated: 2026-10-30 America/Chicago_
+_Last updated: 2026-11-18 America/Chicago_

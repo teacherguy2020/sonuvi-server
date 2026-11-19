@@ -1958,6 +1958,8 @@ export function registerMobileRoutes(app, deps = {}) {
       ...(Number.isFinite(targetQueue) ? { targetQueue: Math.max(0, Math.floor(targetQueue)) } : {}),
       ...(Number.isFinite(builtCount) ? { builtCount: Math.max(0, Math.floor(builtCount)) } : {}),
       ...(latest ? { latest } : {}),
+      ...(payload.partial === true ? { partial: true } : {}),
+      ...(payload.partial === true && text(payload.warning) ? { warning: text(payload.warning).slice(0, 160) } : {}),
       ...(status === 'error' ? { error: 'Vibe build failed' } : {}),
       ...(status === 'cancelled' ? { error: 'Vibe build cancelled' } : {}),
     };
@@ -3792,7 +3794,23 @@ export function registerMobileRoutes(app, deps = {}) {
     }
 
     if (!result?.ok) {
-      return errorResponse(res, 502, 'Vibe preview unavailable', 'MOBILE_VIBE_PREVIEW_FAILED');
+      // Config returns only an allowlisted Vibe code. Preserve that safe cause
+      // for native recovery without forwarding subprocess stderr or arguments.
+      const upstreamCode = text(result?.json?.code);
+      const safeCodes = new Set([
+        'LASTFM_UNAVAILABLE', 'LASTFM_MALFORMED_RESPONSE',
+        'LASTFM_UPSTREAM_REJECTED', 'VIBE_DEADLINE_EXCEEDED',
+        'VIBE_NO_LOCAL_MATCHES',
+      ]);
+      const code = safeCodes.has(upstreamCode) ? `MOBILE_VIBE_PREVIEW_${upstreamCode}` : 'MOBILE_VIBE_PREVIEW_FAILED';
+      const messages = {
+        LASTFM_UNAVAILABLE: 'Vibe recommendations are temporarily unavailable',
+        LASTFM_MALFORMED_RESPONSE: 'Vibe recommendations are temporarily unavailable',
+        LASTFM_UPSTREAM_REJECTED: 'Vibe recommendations are unavailable for this seed',
+        VIBE_DEADLINE_EXCEEDED: 'Vibe preview timed out',
+        VIBE_NO_LOCAL_MATCHES: 'No Vibe recommendations match the local library',
+      };
+      return errorResponse(res, Number(result?.status) === 504 ? 504 : 502, messages[upstreamCode] || 'Vibe preview unavailable', code);
     }
 
     const resolvedTracks = [];
@@ -3830,6 +3848,8 @@ export function registerMobileRoutes(app, deps = {}) {
         baseUrl: requestBaseUrl(req, mobileBaseUrl),
       })),
       catalogBuiltAt: text(catalog.builtAt) || null,
+      partial: result?.json?.summary?.partial === true,
+      warning: text(result?.json?.summary?.warning) || null,
     });
   }));
 
