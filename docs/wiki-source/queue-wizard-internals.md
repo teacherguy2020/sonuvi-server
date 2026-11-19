@@ -328,6 +328,15 @@ This page now gives the wiki a sharper internal model of Queue Wizard:
   selected target: Home moOde/ Alexa use the server queue, while This
   iPhone/This iPad receives the previewed tracks in the native device queue
 - Add to Playlist, collage, and Vibe remain explicit server-side operations;
+
+### Vibe reliability behavior
+
+Vibe discovery uses one bounded monotonic deadline across Last.fm retries and
+planner passes. Temporary network, rate-limit, and Last.fm 8/16/29 failures
+are retried within that budget; malformed and permanent upstream responses are
+reported using allowlisted failure categories. A valid empty recommendation
+list is distinct from local-library no-match and discovery unavailability.
+When a later recoverable failure follows usable local matches, Vibe returns the
   the native client does not receive raw MPD paths or Track Keys
 
 _Last updated: 2026-11-18 America/Chicago_

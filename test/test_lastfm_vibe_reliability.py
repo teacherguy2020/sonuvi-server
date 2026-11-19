@@ -45,7 +45,7 @@ class LastfmReliabilityTests(unittest.TestCase):
     def test_schema_and_bad_rows_retry_then_return_valid_rows(self):
         row = {"name": "ok", "artist": {"name": "artist"}}
         clock, calls, run = self.call([Response(data=[]), Response(data={"similartracks": {"track": [None, row]}})])
-        self.assertEqual(run(), [row]); self.assertEqual(len(calls), 2); self.assertEqual(clock.sleeps, [0.5])
+        self.assertEqual(run(), [{"name": "ok", "artist": {"name": "artist"}, "mbid": ""}]); self.assertEqual(len(calls), 2); self.assertEqual(clock.sleeps, [0.5])
     def test_transient_exhaustion_and_permanent_no_retry(self):
         clock, calls, run = self.call([Response(503) for _ in range(4)])
         with self.assertRaisesRegex(VibeFailure, "LASTFM_UNAVAILABLE"): run()

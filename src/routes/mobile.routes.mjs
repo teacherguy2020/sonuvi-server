@@ -1904,6 +1904,19 @@ export function registerMobileRoutes(app, deps = {}) {
     return { action: normalized, diagnosticsAction, result };
   };
 
+  const safeMobileVibeWarning = (payload = {}) => {
+    if (payload.partial !== true) return '';
+    const code = text(payload.warning);
+    const messages = {
+      LASTFM_UNAVAILABLE: 'Vibe recommendations are temporarily unavailable',
+      LASTFM_MALFORMED_RESPONSE: 'Vibe recommendations are temporarily unavailable',
+      LASTFM_UPSTREAM_REJECTED: 'Vibe recommendations are unavailable for this seed',
+      VIBE_DEADLINE_EXCEEDED: 'Vibe planning timed out',
+      VIBE_NO_LOCAL_MATCHES: 'No Vibe recommendations match the local library',
+    };
+    return messages[code] || '';
+  };
+
   const safeMobileEndlessVibeJob = (payload = {}) => {
     const jobId = text(payload.jobId);
     const active = payload.active === true;
@@ -1959,7 +1972,7 @@ export function registerMobileRoutes(app, deps = {}) {
       ...(Number.isFinite(builtCount) ? { builtCount: Math.max(0, Math.floor(builtCount)) } : {}),
       ...(latest ? { latest } : {}),
       ...(payload.partial === true ? { partial: true } : {}),
-      ...(payload.partial === true && text(payload.warning) ? { warning: text(payload.warning).slice(0, 160) } : {}),
+      ...(safeMobileVibeWarning(payload) ? { warning: safeMobileVibeWarning(payload) } : {}),
       ...(status === 'error' ? { error: 'Vibe build failed' } : {}),
       ...(status === 'cancelled' ? { error: 'Vibe build cancelled' } : {}),
     };
@@ -3849,7 +3862,7 @@ export function registerMobileRoutes(app, deps = {}) {
       })),
       catalogBuiltAt: text(catalog.builtAt) || null,
       partial: result?.json?.summary?.partial === true,
-      warning: text(result?.json?.summary?.warning) || null,
+      warning: safeMobileVibeWarning(result?.json?.summary || {}) || null,
     });
   }));
 

@@ -208,7 +208,10 @@ def _valid_recommendations(data):
     similar = data.get("similartracks")
     if not isinstance(similar, dict):
         raise VibeFailure("LASTFM_MALFORMED_RESPONSE", "malformed")
-    tracks = similar.get("track", [])
+    # Missing track is malformed; an explicit empty list is valid.
+    if "track" not in similar:
+        raise VibeFailure("LASTFM_MALFORMED_RESPONSE", "malformed")
+    tracks = similar["track"]
     if isinstance(tracks, dict):
         tracks = [tracks]
     if not isinstance(tracks, list):
@@ -223,7 +226,11 @@ def _valid_recommendations(data):
         if not isinstance(row.get("name"), str) or not row["name"].strip() or not isinstance(artist_name, str) or not artist_name.strip():
             malformed = True
             continue
-        valid.append(row)
+        # Only expose the normalized schema consumed by local matching.
+        mbid = row.get("mbid")
+        valid.append({"name": row["name"].strip(),
+                      "artist": {"name": artist_name.strip()},
+                      "mbid": mbid.strip() if isinstance(mbid, str) else ""})
     if tracks and malformed and not valid:
         raise VibeFailure("LASTFM_MALFORMED_RESPONSE", "malformed")
     return valid
@@ -240,9 +247,14 @@ def lastfm_get_similar(api_key: str, artist: str, title: str, limit: int, *, dea
             raise VibeFailure("VIBE_DEADLINE_EXCEEDED", "deadline")
         retry_after = None
         try:
-            read_timeout = min(12.0, remaining) if remaining is not None else 12.0
-            response = request_get(LASTFM_ROOT, params=params, timeout=(min(4.0, read_timeout), read_timeout),
+            # requests applies connect/read independently; split one deadline.
+            total_timeout = min(12.0, remaining) if remaining is not None else 12.0
+            connect_timeout = min(4.0, total_timeout / 2.0)
+            read_timeout = max(0.001, total_timeout - connect_timeout)
+            response = request_get(LASTFM_ROOT, params=params, timeout=(connect_timeout, read_timeout),
                                    headers={"User-Agent": "moode-vibe/chain-2.0"})
+            if _remaining_seconds(deadline, clock) is not None and _remaining_seconds(deadline, clock) <= 0:
+                raise VibeFailure("VIBE_DEADLINE_EXCEEDED", "deadline")
             status = int(getattr(response, "status_code", 0) or 0)
             if status == 429 or 500 <= status <= 599:
                 last_category = "rate_limited" if status == 429 else "transient_http"
@@ -265,7 +277,7 @@ def lastfm_get_similar(api_key: str, artist: str, title: str, limit: int, *, dea
                     else:
                         if error_code in (2, 3, 4, 6, 7, 10, 13, 14, 26):
                             raise VibeFailure("LASTFM_UPSTREAM_REJECTED", "permanent")
-                        if error_code == 8:
+                        if error_code in (8, 16, 29):
                             last_category = "lastfm_transient"
                         else:
                             raise VibeFailure("LASTFM_UPSTREAM_REJECTED", "permanent")
@@ -285,9 +297,9 @@ def lastfm_get_similar(api_key: str, artist: str, title: str, limit: int, *, dea
         if remaining is not None:
             wait = min(wait, max(0.0, remaining))
         _safe_lastfm_log(attempt=attempt, category=last_category, pass_number=pass_number)
-        if wait <= 0:  # no final pointless sleep and no deadline overrun
-            raise VibeFailure("VIBE_DEADLINE_EXCEEDED", "deadline")
-        sleeper(wait)
+        # Retry-After: 0 means immediate bounded retry, not deadline expiry.
+        if wait > 0:
+            sleeper(wait)
     _safe_lastfm_log(attempt=4, category=last_category, pass_number=pass_number)
     raise VibeFailure("LASTFM_UNAVAILABLE", last_category)
 
@@ -884,7 +896,6 @@ def main():
 
     hops = 0
     misses = 0
-    started = time.time()
 
     # IMPORTANT: in dry-run, we do NOT rely on live MPD queue_len() because we are not modifying it.
     # We instead build up out_tracks to args.target_queue.
@@ -902,6 +913,7 @@ def main():
         while not have_enough():
             if _remaining_seconds(deadline) is not None and _remaining_seconds(deadline) <= 0:
                 print(f"Time budget reached ({args.max_seconds}s), stopping.")
+                discovery_failure = "VIBE_DEADLINE_EXCEEDED"
                 break
             simple_pass += 1
             batch_added = 0
@@ -994,10 +1006,11 @@ def main():
                 break
 
     while not args.simple_seed_pass and not have_enough():
-        if args.max_seconds > 0 and (time.time() - started) >= args.max_seconds:
+        if _remaining_seconds(deadline) is not None and _remaining_seconds(deadline) <= 0:
             print(f"Time budget reached ({args.max_seconds}s), stopping.")
-            break
 
+            discovery_failure = "VIBE_DEADLINE_EXCEEDED"
+            break
         hops += 1
 
         print(f"[lastfm] pass={hops} category=query", flush=True)
