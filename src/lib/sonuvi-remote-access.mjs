@@ -58,6 +58,7 @@ export function permitsRemoteRequest(req) {
 export function createRemoteNativeListener(handler) {
   return http.createServer((req,res) => {
     if (!permitsRemoteRequest(req)) { res.writeHead(403, {'Content-Type':'application/json'}); res.end('{"ok":false,"error":"remote_route_rejected"}'); return; }
+    req.sonuviRemoteNative = true; // Informational capability projection only; route guard above remains authoritative.
     handler(req,res);
   });
 }

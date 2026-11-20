@@ -2588,7 +2588,7 @@ test('catalog stats exclude downloaded podcasts while retaining music track iden
 test('approved controllers see active native and browser devices without credentials or management authority', async t => {
   const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'sonuvi-device-inventory-'));
   t.after(() => fs.rmSync(root, {recursive:true,force:true}));
-  const registry = new DeviceSessionRegistry({directory:path.join(root,'devices')});
+  const registry = new DeviceSessionRegistry({directory:path.join(root,'devices'),now:()=>1000000});
   const secret = 'device-inventory-fixture';
   const sid = registry.authorize('iphone', {label:'iPhone'});
   registry.authorize('browser-moode', {label:'moOde Chromium'});
@@ -2602,10 +2602,10 @@ test('approved controllers see active native and browser devices without credent
   let res = createResponse();await handler(request(),res);assert.equal(res.statusCode,401);
   res=createResponse();await handler(request({headers}),res);
   assert.equal(res.statusCode,200);assert.equal(res.headers['Cache-Control'],'no-store');
-  assert.deepEqual(res.body,{ok:true,currentDeviceId:'iphone',devices:[
-    {deviceId:'iphone',label:'iPhone',isCurrent:true},
-    {deviceId:'browser-moode',label:'moOde Chromium',isCurrent:false},
-    {deviceId:'tv',label:'Apple TV',isCurrent:false},
+  assert.deepEqual(res.body,{ok:true,currentDeviceId:'iphone',managementAvailable:false,detailsAvailable:true,devices:[
+    {deviceId:'iphone',label:'iPhone',isCurrent:true,role:'controller',status:'active',createdAt:1000000,updatedAt:1000000},
+    {deviceId:'browser-moode',label:'moOde Chromium',isCurrent:false,role:'controller',status:'active',createdAt:1000000,updatedAt:1000000},
+    {deviceId:'tv',label:'Apple TV',isCurrent:false,role:'controller',status:'active',createdAt:1000000,updatedAt:1000000},
   ]});
   const rename=app.routes.get('POST /v1/mobile/devices/self');
   res=createResponse();await rename(request({headers,body:{label:'My iPhone',deviceId:'browser-moode'}}),res);assert.equal(res.statusCode,400);
@@ -2630,4 +2630,35 @@ test('browser pairing optionally includes public origin-bound native trust witho
   assert.deepEqual(res.body.nativeInvitation.localTrust,localTrust);
   assert.equal(JSON.stringify(res.body.nativeInvitation).includes(res.body.displayToken),false);
   assert.match(res.body.nativeQRDataUrl,/^data:image\/png;base64,/);
+});
+
+
+test('device inventory shows socket-observed metadata, ignores spoofed forwarding, and retains administrator revocation', async t => {
+  const root=fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()),'sonuvi-device-details-route-'));
+  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  const registry=new DeviceSessionRegistry({directory:path.join(root,'devices'),now:()=>1000000});
+  const secret='details-fixture';
+  const sid=registry.authorize('owner',{administratorId:'fixture-owner',label:'iPad'});
+  const target=registry.authorize('browser-old',{label:'Old browser'});
+  const token=createMobileSessionToken({secret,deviceId:'owner',sessionId:sid});
+  const app=createApp();
+  registerMobileRoutes(app,{enabled:true,apiSecret:secret,trackIdSecret:'separate-fixture-secret',sessionRegistry:registry,
+    administratorAuthority:{verifyAccessToken:async value=>value===token?{role:'administrator'}:null}});
+  const headers={authorization:'Bearer '+token,'x-forwarded-for':'203.0.113.99','user-agent':'Mozilla/5.0 (iPad) Safari/605.1'};
+  const get=app.routes.get('GET /v1/mobile/devices');
+  let res=createResponse();await get(request({headers,socket:{remoteAddress:'::ffff:192.0.2.7'}}),res);
+  assert.equal(res.statusCode,200);assert.equal(res.body.managementAvailable,true);
+  const current=res.body.devices.find(x=>x.isCurrent);
+  assert.equal(current.lastSeenAddress,'192.0.2.7');assert.equal(current.lastSeenAt,1000000);assert.equal(current.browser,'Safari');
+  assert.equal(JSON.stringify(res.body).includes(sid),false);assert.equal(JSON.stringify(res.body).includes(target),false);assert.equal(JSON.stringify(res.body).includes('fixture-owner'),false);
+  res=createResponse();await get(request({headers,sonuviRemoteNative:true,socket:{remoteAddress:'127.0.0.1'}}),res);
+  assert.equal(res.body.managementAvailable,false);
+  const rename=app.routes.get('POST /v1/mobile/devices/self');
+  res=createResponse();await rename(request({headers,body:{label:'My iPad',deviceType:'iPad',platform:'iPadOS',osVersion:'27.3',appVersion:'0.1.1 (457)'}}),res);assert.equal(res.statusCode,200);
+  assert.equal(registry.list().find(x=>x.deviceId==='owner').osVersion,'27.3');
+  res=createResponse();await rename(request({headers,body:{label:'Spoof',lastSeenAddress:'203.0.113.99'}}),res);assert.equal(res.statusCode,400);
+  const remove=app.routes.get('DELETE /v1/admin/devices/:deviceId');
+  res=createResponse();await remove(request({headers,params:{deviceId:'browser-old'}}),res);assert.equal(res.statusCode,200);
+  assert.equal(registry.accepts({deviceId:'browser-old',sid:target}),false);
+  res=createResponse();await get(request({headers}),res);assert.equal(res.body.devices.some(x=>x.deviceId==='browser-old'),false);
 });

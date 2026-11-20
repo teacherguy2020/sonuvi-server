@@ -75,6 +75,7 @@ import {
 import { registerMobileUpnpRoutes } from './mobile-upnp.routes.mjs';
 import { authorizeFirstController } from '../lib/sonuvi-first-controller-handoff.mjs';
 import { requireAdministratorAuthorization } from '../lib/sonuvi-admin-authority.mjs';
+import { reportedDeviceDetails } from '../lib/device-connection-details.mjs';
 
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const MEDIA_TICKET_TTL_MS = 60 * 60 * 1000;
@@ -2442,6 +2443,12 @@ export function registerMobileRoutes(app, deps = {}) {
       errorResponse(res, 401, 'mobile session is missing or expired');
       return null;
     }
+    // Peer socket only: never treat arbitrary forwarded headers as a device IP.
+    // Proxied connections retain an earlier direct address with its own time.
+    if (req.socket) {
+      try { sessionRegistry?.observe?.(claims, { address: req.socket.remoteAddress, userAgent: req.headers?.['user-agent'] }); }
+      catch { /* Display metadata is best effort, never approval authority. */ }
+    }
     return claims;
   };
 
@@ -2830,9 +2837,14 @@ export function registerMobileRoutes(app, deps = {}) {
     if (!session) return;
     if (!sessionRegistry) return errorResponse(res, 503, 'device inventory is unavailable');
     res.set('Cache-Control', 'no-store');
-    return res.json({ ok: true, currentDeviceId: session.deviceId, devices: sessionRegistry.list()
+    let managementAvailable = false;
+    if (!req.sonuviRemoteNative) {
+      try { managementAvailable = Boolean(await administratorAuthority?.verifyAccessToken(readBearerToken(req))); }
+      catch { /* Controller approval alone does not grant revocation. */ }
+    }
+    return res.json({ ok: true, currentDeviceId: session.deviceId, managementAvailable, detailsAvailable: true, devices: sessionRegistry.list()
       .filter(device => device.status === 'active')
-      .map(({ deviceId, label }) => ({ deviceId, label: label || '', isCurrent: deviceId === session.deviceId })) });
+      .map(({ deviceId, label, ...details }) => ({ deviceId, label: label || '', isCurrent: deviceId === session.deviceId, ...details })) });
   }));
 
   app.post('/v1/mobile/devices/self', asyncRoute(async (req, res) => {
@@ -2840,9 +2852,12 @@ export function registerMobileRoutes(app, deps = {}) {
     if (!session) return;
     if (!sessionRegistry) return errorResponse(res, 503, 'device inventory is unavailable');
     const body = req.body || {};
-    if (Object.keys(body).some(key => key !== 'label') || typeof body.label !== 'string'
+    if (Object.keys(body).some(key => !['label', 'deviceType', 'platform', 'osVersion', 'appVersion'].includes(key)) || typeof body.label !== 'string'
       || !body.label.trim() || body.label.length > 120 || /[\x00-\x1f\x7f]/.test(body.label)) return errorResponse(res, 400, 'invalid device name');
-    try { sessionRegistry.describe(session, body.label); }
+    let metadata;
+    try { metadata = reportedDeviceDetails(body); }
+    catch { return errorResponse(res, 400, 'invalid device metadata'); }
+    try { sessionRegistry.describe(session, body.label, metadata); }
     catch { return errorResponse(res, 401, 'device session is missing or revoked'); }
     return res.json({ ok: true });
   }));

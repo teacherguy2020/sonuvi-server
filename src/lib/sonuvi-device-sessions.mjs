@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { directDeviceAddress, observedDeviceDetails, reportedDeviceDetails, publicDeviceDetails } from './device-connection-details.mjs';
 
 const MAX_RECORDS = 10000;
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -24,6 +25,7 @@ export class DeviceSessionRegistry {
     this.lock = path.join(this.directory, 'devices.lock');
     this.now = now;
     this.allowLegacy = allowLegacy;
+    this.observationTimes = new Map();
     // Reject symlink components before creating anything beneath them.
     let ancestor = this.directory;
     while (!fs.existsSync(ancestor)) ancestor = path.dirname(ancestor);
@@ -151,18 +153,46 @@ export class DeviceSessionRegistry {
 
   // A verified device may supply its own display name, never another device's
   // identity, role, session or approval. Recheck under the same writer lock.
-  describe(claims, label) {
+  describe(claims, label, metadata = {}) {
+    const details = reportedDeviceDetails(metadata);
     if (typeof label !== 'string' || !label.trim() || label.length > 120 || /[\x00-\x1f\x7f]/.test(label)) throw new Error('device_session_label_invalid');
     return this.mutate(devices => {
       const record = devices.find(item => item.deviceId === claims?.deviceId);
       if (!record || record.status !== 'active' || !(record.sessionId === claims.sid || (claims.sid === undefined && this.allowLegacy && record.allowLegacy))) throw new Error('device_session_rejected');
       record.label = label.trim();
+      if (Object.keys(details).length) record.details = { ...publicDeviceDetails(record.details), ...details };
       return true;
     });
   }
 
+  // Called only after authentication. Recheck the same grant under the writer
+  // lock; observations cannot create approval or restore a revoked session.
+  observe(claims, { address, userAgent } = {}) {
+    const record = this.read().find(item => item.deviceId === claims?.deviceId);
+    if (!record || record.status !== 'active' || !(record.sessionId === claims.sid
+      || (claims.sid === undefined && this.allowLegacy && record.allowLegacy))) return false;
+    const at = this.now(), direct = directDeviceAddress(address);
+    const cached = this.observationTimes.get(record.deviceId);
+    if (cached && cached.address === direct && at >= cached.at && at - cached.at < 60000) return true;
+    const updated = this.mutate(devices => {
+      const current = devices.find(item => item.deviceId === claims.deviceId);
+      if (!current || current.status !== 'active' || !(current.sessionId === claims.sid
+        || (claims.sid === undefined && this.allowLegacy && current.allowLegacy))) return false;
+      current.details = { ...publicDeviceDetails(current.details), ...observedDeviceDetails(userAgent),
+        lastSeenAt: at, connectionKind: direct ? 'direct' : 'proxied',
+        ...(direct ? { lastSeenAddress: direct, lastAddressSeenAt: at } : {}) };
+      return true;
+    });
+    if (updated) {
+      if (this.observationTimes.size >= MAX_RECORDS) this.observationTimes.delete(this.observationTimes.keys().next().value);
+      this.observationTimes.set(record.deviceId, { at, address: direct });
+    }
+    return updated;
+  }
+
   list() {
-    return this.read().map(({ deviceId, label, role, status, createdAt, updatedAt }) => ({ deviceId, label, role, status, createdAt, updatedAt }));
+    return this.read().map(({ deviceId, label, role, status, createdAt, updatedAt, details }) => ({
+      deviceId, label, role, status, createdAt, updatedAt, ...publicDeviceDetails(details) }));
   }
 
   administratorFor(claims) {
