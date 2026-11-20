@@ -1,8 +1,15 @@
 # Public iOS-guided server installation
 
-## Current — 2026-11-15
+## Current — 2026-11-20
 
-The signed first-install package is available from the public [GitHub prerelease](https://github.com/teacherguy2020/sonuvi-server/releases/tag/server-installer-2026.11.15-no-deadline-2f5fe4d1). The updated iOS production installer retrieves it over normal public HTTPS, without GitHub credentials or access to the maintainer's LAN. Older LAN-bound app binaries must be updated; this is not an App Store or TestFlight release.
+The signed first-install package is available from the public [GitHub prerelease](https://github.com/teacherguy2020/sonuvi-server/releases/tag/server-installer-2026.11.20-no-deadline-e321c4aa). The updated iOS production installer retrieves it over normal public HTTPS, without GitHub credentials or access to the maintainer's LAN. Older LAN-bound app binaries must be updated; this is not an App Store or TestFlight release.
+
+The current immutable package includes the reviewed Devices connection-details
+contract and existing administrator-only approval removal, plus the accepted Vibe
+completion/deadline fixes. New iOS installer pins bind this exact source, manifest,
+archive, bootstrap kit and envelope. Devices must reconnect to populate optional
+metadata; unknown/proxy-only IPs are not fabricated. Older app binaries retain
+their previous fixed package pins and must be updated.
 
 ### Installation
 
@@ -15,7 +22,7 @@ This preview is not an AMD64, Docker, standalone terminal, or existing-server up
 
 ### Trust and lifecycle
 
-Release ID: `sonuvi-2f5fe4d12b5d6a28145ec7c037b07d5f87b9dfd1df7ae09f67308053bfb2374c`, source `c86ac078f1d2019d37c91d5bce513fd1328f6867`. The eight assets are newly built/signed for the explicit non-expiring policy; the prior publication is not overwritten. Historical `lab` names and handoff markers are retained provenance, not a requirement to reach a laboratory download server.
+Release ID: `sonuvi-e321c4aa2b620eb75b4a61d3b5d5aee2fb5b578c8000fb99f01d5e90fff54ec5`, source `9781e2a65b34f34a54fb1a7780a4dfed8581682a`. The eight assets are newly built/signed for the explicit non-expiring policy; the prior publication is not overwritten. Historical `lab` names and handoff markers are retained provenance, not a requirement to reach a laboratory download server.
 
 The app accepts only the fixed GitHub release path and HTTPS release-CDN redirects. GitHub transport uses system certificate trust; the independently compiled Ed25519 signer and release/manifest/archive/bootstrap/envelope pins still authenticate the installer. The target's SSH host-key and server pairing protections are unchanged. Existing-upgrade v2 distribution remains separate and LAN-bound; it is not represented as public-ready.
 
@@ -29,7 +36,7 @@ From this repository with Node 20 or newer:
 node scripts/verify-public-installer.mjs
 ```
 
-This downloads all eight files anonymously, checks the independently pinned signer, signature, explicit no-deadline policy (including future-date checks), checksums, and compiled package identities, then removes only its temporary downloads. It never connects to a Sonuvi installation target. The **Public installer downloads** GitHub Actions workflow runs the same proof on an external Ubuntu runner.
+This downloads all eight files anonymously, checks the independently pinned signer, signature, explicit no-deadline policy (including future-date checks), checksums, compiled package identities, exact Server source and the runtime files containing these fixes, then removes only its temporary downloads. It never connects to a Sonuvi installation target. The **Public installer downloads** GitHub Actions workflow runs the same proof on an external Ubuntu runner.
 
 The Apple repository has an opt-in production-path network test (`SONUVI_PUBLIC_INSTALLER_NETWORK_TEST=1`) and deterministic URL/redirect/factory regressions. Download verification is not a complete clean-machine installation. Exact-package clean-target installation, reboot and optional companion acceptance remain tracked in [server #9](https://github.com/teacherguy2020/sonuvi-server/issues/9) and [iOS #9](https://github.com/teacherguy2020/sonuvi-ios/issues/9).
 
